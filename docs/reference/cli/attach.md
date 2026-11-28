@@ -12,7 +12,7 @@ simstim attach [<host>/<session>|-]
 
 **Aliases:** `a`
 
-Shows the session in this terminal, as the agent draws it. The detach key, Ctrl+\\ unless config.toml names another, leaves it, and the session keeps running. The address - is the last session that you attached to. Without an address, you pick a session from a list.
+Shows the session in this terminal, as the agent draws it. The detach key, Ctrl+\\ unless config.toml names another, leaves it, and the session keeps running. A stopped session wakes on attach. The address - is the last session that you attached to. Without an address, you pick a session from a list.
 
 ## Examples
 

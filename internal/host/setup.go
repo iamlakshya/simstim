@@ -29,8 +29,7 @@ import (
 // repository has none or is not trusted.
 
 // sessionHooks are the hooks a new session runs, and the setup hash of the
-// repository's scripts when they are among them. stop is the repository's
-// .<name>/stop: the hash covers it, but no session runs it yet (spec 17.11).
+// repository's scripts when they are among them.
 type sessionHooks struct {
 	setup, resume, stop string
 	hash                string
@@ -60,6 +59,9 @@ func setupHooks(a NewArgs, cwd string, gi *GitInfo) (sessionHooks, error) {
 			}
 			if h.resume == "" {
 				h.resume = hostHook("resume")
+			}
+			if h.stop == "" {
+				h.stop = hostHook("stop")
 			}
 			return h, nil
 		}
@@ -376,15 +378,26 @@ func branchMissing(dir, branch string) (bool, error) {
 // worktree is new, the main repository of a worktree, and which hook runs.
 // resuming is true when the agent starts again, after a restore or a resume.
 func hookVars(m *Manifest, resuming bool) []string {
-	kind, fresh := "setup", "0"
+	kind := "setup"
 	if resuming {
 		kind = "resume"
 	}
-	if m.Git != nil && m.Git.CreatedBy && !resuming {
+	return hookVarsFor(m, kind, m.Git != nil && m.Git.CreatedBy && !resuming)
+}
+
+// stopHookVars tell a stop hook about its session before it stops.
+func stopHookVars(m *Manifest) []string {
+	return hookVarsFor(m, "stop", false)
+}
+
+func hookVarsFor(m *Manifest, kind string, freshWorktree bool) []string {
+	fresh := "0"
+	if freshWorktree {
 		fresh = "1"
 	}
 	vars := []string{
 		brand.Env("HOOK") + "=" + kind,
+		brand.Env("SESSION") + "=" + m.ID,
 		brand.Env("SESSION_NAME") + "=" + m.Name,
 		brand.Env("SESSION_DIR") + "=" + m.Cwd,
 		brand.Env("WORKTREE_NEW") + "=" + fresh,

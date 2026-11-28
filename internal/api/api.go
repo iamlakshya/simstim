@@ -15,7 +15,8 @@ const (
 	StateNeedsInput = "needs_input"
 	StateExited     = "exited"
 	StateErrored    = "errored"
-	StateLost       = "lost" // the holder is gone, for example after a reboot
+	StateLost       = "lost"    // the holder is gone, for example after a reboot
+	StateStopped    = "stopped" // stopped by request; kept state stays for resume or restore
 )
 
 // ReasonChildOOM is a session's reason after the memory cap stopped a
@@ -123,6 +124,20 @@ type ResumeResult struct {
 	// DebugStopped is true when `debug start` had the session's debug on.
 	// It stopped with the old holder: a new holder starts with debug off.
 	DebugStopped bool `json:"debug_stopped,omitempty"`
+}
+
+// StopArgs asks a host to stop a session and keep its state on disk for a
+// later resume or restore: the "stop" request. A helper that can do it
+// offers the feature "stop".
+type StopArgs struct {
+	ID string `json:"id"`
+}
+
+// StopResult is what a stop did: the session's updated row, and whether
+// the session was already stopped.
+type StopResult struct {
+	Session        SessionInfo `json:"session"`
+	AlreadyStopped bool        `json:"already_stopped,omitempty"`
 }
 
 // Check is one line of the host doctor.

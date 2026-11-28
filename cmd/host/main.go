@@ -24,10 +24,11 @@ Usage:
   %[1]s bridge              serve one client on stdin and stdout
   %[1]s ls [--json]         list sessions
   %[1]s new [--agent a] [--dir d [--mkdir]] [--name n] [--memory-max size] [--setup|--no-setup] [-- argv…]
+  %[1]s stop <id> [--json]  stop a session and keep its state for resume or restore
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
   %[1]s keytest             print every key the terminal sends
-  %[1]s restore [--all]     start again sessions a restart (or, with --all, a crash) stopped
+  %[1]s restore [--all]     start again sessions a restart (or, with --all, a stop or crash) stopped
   %[1]s idle setup <30m|never>   power this VM off when idle (a user timer runs "idle check")
   %[1]s prune               remove the helper versions nothing uses any more
   %[1]s version
@@ -47,6 +48,7 @@ var commands = map[string]func(args []string) error{
 	"holder":  runHolder,
 	"ls":      runLs,
 	"new":     runNew,
+	"stop":    runStop,
 	"rm":      runRm,
 	"doctor":  runDoctor,
 	"hook":    runHook,
@@ -163,6 +165,36 @@ func newArgs(args []string) (host.NewArgs, error) {
 		}
 	}
 	return a, nil
+}
+
+func runStop(args []string) error {
+	asJSON := hasFlag(args, "--json")
+	var id string
+	for _, a := range args {
+		if a == "--json" {
+			continue
+		}
+		if id != "" {
+			return fmt.Errorf("usage: %s stop <id> [--json]", brand.HostBinary)
+		}
+		id = a
+	}
+	if id == "" {
+		return fmt.Errorf("usage: %s stop <id> [--json]", brand.HostBinary)
+	}
+	res, err := host.Stop(api.StopArgs{ID: id})
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(res)
+	}
+	if res.AlreadyStopped {
+		fmt.Printf("%s (%s) is already stopped\n", res.Session.Name, res.Session.ID)
+		return nil
+	}
+	fmt.Printf("stopped %s (%s)\n", res.Session.Name, res.Session.ID)
+	return nil
 }
 
 func runRm(args []string) error {

@@ -30,12 +30,12 @@ func SessionEndHint(s Session, ref string) string {
 	return EndHint(&proto.Ended{OOM: CapStopped(s)}, ref)
 }
 
-// Ended reports whether a session's agent has ended: it exited, it failed,
-// or its holder was lost. Alive says only that the session's holder
-// answers, and a holder outlives its agent.
+// Ended reports whether a session's agent is not running: it exited, it
+// failed, it was stopped, or its holder was lost. Alive says only that the
+// session's holder answers, and a holder outlives its agent.
 func Ended(s Session) bool {
 	switch s.State {
-	case api.StateExited, api.StateErrored, api.StateLost:
+	case api.StateExited, api.StateErrored, api.StateLost, api.StateStopped:
 		return true
 	default:
 		return false

@@ -31,6 +31,8 @@ func ended(s client.Session) bool { return client.Ended(s) }
 func endLook(s client.Session) (glyph, label seg) {
 	fail := func(l string) (seg, seg) { return seg{glyphFail, sDanger}, seg{l, sDanger} }
 	switch {
+	case s.State == api.StateStopped:
+		return seg{glyphOffline, sFaint}, seg{"stopped", sFaint}
 	case s.State == api.StateLost:
 		return seg{glyphOffline, sFaint}, seg{"lost", sFaint}
 	case client.CapStopped(s):
@@ -78,6 +80,12 @@ func signalWord(sig string) string {
 // endWhy says why an ended session's agent ended, for the line under the
 // list: "stopped at its memory cap of 1.5 GiB".
 func endWhy(s client.Session) string {
+	if s.State == api.StateStopped {
+		if s.Reason != "" {
+			return s.Reason
+		}
+		return "stopped"
+	}
 	if s.State == api.StateLost {
 		if s.Reason != "" {
 			return s.Reason
@@ -209,6 +217,9 @@ func (m *Model) openEnded(h *hostConn, s client.Session) tea.Cmd {
 	if s.Alive {
 		return m.openPreview()
 	}
+	if s.State == api.StateStopped {
+		return m.toastNext(toastWarning, fmt.Sprintf("%s on %s is stopped.", s.Name, h.name()), "Press "+resumeKey+" to resume it, or d to delete it.")
+	}
 	text := fmt.Sprintf("%s on %s ended", s.Name, h.name())
 	if c := endCause(s); c != "" {
 		text += " (" + c + ")"
@@ -231,6 +242,8 @@ func (m *Model) openEnded(h *hostConn, s client.Session) tea.Cmd {
 // lost. It is "" when the session does not say.
 func endCause(s client.Session) string {
 	switch {
+	case s.State == api.StateStopped:
+		return ""
 	case s.State == api.StateLost:
 		return endWhy(s)
 	case client.CapStopped(s):

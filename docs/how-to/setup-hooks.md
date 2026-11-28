@@ -39,7 +39,7 @@ The script gets the session's environment, including any [secrets](secrets.md), 
 
 | Variable | Value |
 | --- | --- |
-| `SIMSTIM_HOOK` | `setup` for a new session, `resume` after a host restart or a `resume` |
+| `SIMSTIM_HOOK` | `setup` for a new session, `resume` after a host restart or a `resume`, `stop` when stopping a session |
 | `SIMSTIM_SESSION` | The session's ID |
 | `SIMSTIM_SESSION_NAME` | The session's name |
 | `SIMSTIM_SESSION_DIR` | The session's folder |
@@ -55,7 +55,7 @@ npm ERR! ...
 [simstim: /home/me/src/app/.simstim/setup exited with 1; the agent starts anyway]
 ```
 
-An executable `.simstim/resume` runs the same way before an agent comes back: after a host restart, or after a [`resume`](restore-after-reboot.md#bring-back-one-session).
+An executable `.simstim/resume` runs the same way before an agent comes back: after a host restart, or after a [`resume`](restore-after-reboot.md#bring-back-one-session). An executable `.simstim/stop` runs before `stop` tears the session's unit down, with a 10-second limit.
 
 ## Trust a repository first
 
@@ -87,7 +87,7 @@ Without a terminal to ask on, for example in a script, with its output in a pipe
 
 ### A changed script asks again
 
-A yes holds only for the content of the scripts that you said yes to. The host reads `.simstim/setup`, `.simstim/resume` and `.simstim/stop` at each start, and works out a SHA-256 hash of the three. This version does not run `.simstim/stop` yet, but a change to it asks again too. The client keeps that hash with your yes. After a commit or an edit that changes any of these scripts, the next start asks again, and says why:
+A yes holds only for the content of the scripts that you said yes to. The host reads `.simstim/setup`, `.simstim/resume` and `.simstim/stop` at each start, and works out a SHA-256 hash of the three. The client keeps that hash with your yes. After a commit or an edit that changes any of these scripts, the next start asks again, and says why:
 
 ```text
 The setup script of /home/me/src/app on my-server changed after you trusted it:
@@ -115,7 +115,7 @@ If the client cannot read the answers file, it leaves the file in place. It trus
 
 ## Your own setup on a host
 
-An executable `~/.config/simstim/hooks/setup` on the host runs for every session in a repository with no script of its own, or one whose script you did not trust. It is yours, so nothing asks first. `~/.config/simstim/hooks/resume` does the same after a restart or a resume.
+An executable `~/.config/simstim/hooks/setup` on the host runs for every session in a repository with no script of its own, or one whose script you did not trust. It is yours, so nothing asks first. `~/.config/simstim/hooks/resume` does the same after a restart or a resume, and `~/.config/simstim/hooks/stop` runs before `stop`.
 
 ## With .worktreeinclude
 

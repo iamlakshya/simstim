@@ -157,7 +157,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	m.Git = gi
 	m.Secrets = secrets
-	m.SetupHook, m.ResumeHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.hash
+	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
 	m.RunHook = m.SetupHook
 	if len(a.Argv) > 0 {
 		// A restore or a resume runs the user's own command again, unless
@@ -302,7 +302,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 
 func infoFrom(m *Manifest, alive bool) SessionInfo {
 	st := m.Status
-	if !alive && st.State != StateExited && st.State != StateErrored {
+	if !alive && st.State != StateExited && st.State != StateErrored && st.State != StateStopped {
 		st.State = StateLost
 		if m.Run.BootID != "" && m.Run.BootID != BootID() {
 			st.Reason = "the host restarted"

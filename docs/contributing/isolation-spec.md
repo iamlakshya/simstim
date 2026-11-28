@@ -827,41 +827,22 @@ A `stopped` session wakes on attach, as a stopped host does ([0013](decisions/00
 
 ### 6.6 Stop and resume
 
-1. `simstim stop devbox/auth-fix` sends the session op `stop`. The supervisor sends `stop` with `{"grace_ms":10000}` on the `ctl` stream (10.3). Every session of the sandbox stops with it.
-2. The guest holder sends `SIGTERM` to the agent's process group and waits. The guest init syncs, unmounts the session disk and calls `reboot(2)`. A microvm's VMM then exits. A process wall's guest init exits.
-3. After the grace, the supervisor kills the sandbox. It sets the state `stopped`, tells the egress process to drop its values, and exits. The unit ends.
-4. `/work/<repo>` and the agent's state folders stay. Everything else in the home, `/tmp` and the root's overlay goes.
-5. Resume is 6.2.
+1. Each session runs in one transient `systemd-run --user --collect` unit (`<prefix><id>.service` in `<name>.slice`). Stopping a session is stopping that unit.
+2. `simstim stop devbox/auth-fix` sends the bridge op `stop`. Under the session's lock, the host runs any verified `.<name>/stop` (or host `~/.config/<name>/hooks/stop`) hook with a 10 s timeout, asks the holder to stop its agent process group, and stops the session's systemd user unit through `coreos/go-systemd/v22/dbus` (`StopUnitContext`, awaiting systemd's job result, resetting a failed unit with `ResetFailedUnitContext` if needed, and waiting for `--collect` to unload it; falling back to `systemctl --user` when D-Bus is unavailable).
+3. The host removes the session's sockets, records `state = "stopped"` with cleared process and unit fields in `manifest.json`, and keeps the session folder, manifest, worktree and agent conversation state on disk. Stopping an already stopped session succeeds without error.
+4. Resume is 6.2: `simstim resume`, `simstim attach` (waking a stopped session on demand) or `simstim host restore <host> --all` starts a fresh systemd user unit from the kept state.
 
 ### 6.7 Destroy
 
-1. `simstim rm devbox/auth-fix` on a session that is not the first of its sandbox, such as a shell session, ends only that session (6.11). On the first session, `rm` lists the other sessions of the sandbox and asks first. Then the steps below run, before anything stops.
-2. When the sandbox runs, the supervisor sends `refs` with the commits that the client has pulled (`Manifest.Pulled`). The guest answers with each branch's tip, its count of commits that are not pulled, and whether the work tree has changes. When the sandbox is stopped, the supervisor uses the guest's last `refs` claim, and the message gives no count. A sandbox that never sent a claim counts as not pulled. When commits are not pulled, or the work tree has changes, `rm` refuses. Its message names what is left: "auth-fix has 3 commits that you have not pulled." Try: `simstim pull devbox/auth-fix`, or `simstim rm devbox/auth-fix --force`. The launcher's delete sheet says the same in its red rule. The host never runs git on the session's files to find out.
-3. Then `rm` stops the sandbox as in 6.6, with a 5 s grace. The driver's `Destroy` removes the session folder: the clone or the session disk, the state folders, the audit log and the logs. `os.RemoveAll` follows no symlink.
-
-The fixed purge reader uses an immutable current copy in a separate restricted
-guest. Its copied session disk is read-only, with journal replay disabled. A
-new private scratch disk holds transient writes; no normal mutable session
-disk, copied home or agents disk is prepared. Only the protected work-inspection
-operation is served. It starts no session, terminal, shell, network, DNS,
-SSH-agent, secret or package setup. Its fixed Git probes run without privileges,
-hooks, network sockets or child creation. Unsupported repository behaviour is
-unknown rather than clean.
-
-The original host operation supplies the exact repository, seed and pulled
-commit plan. The guest's bounded ABI result remains a claim. A dirty or
-untracked tree, work outside the protected repositories, or any reachable
-commit outside the protected seed/pulled history remains work to save. Missing,
-invalid, incomplete or mismatched observations remain unknown. A claim never
-proves native stop, disk cleanup or a durable pull. The original host boot,
-copy, scratch and native reader owners remain until their actual cleanup joins.
+1. `simstim kill devbox/auth-fix` (or `rm`) takes the session's lock and stops the session's holder and systemd user unit as in 6.6, waiting for systemd's job result and unit unload so no unit or background process remains.
+2. When the session owns a worktree that can be removed without losing changes, the host removes it; otherwise it reports where the worktree stays.
+3. The host removes the session's folder with `os.RemoveAll` (which follows no symlink), leaving no unit, process, socket or session folder behind. There is no purge-reader or custody layer.
 
 ### 6.8 Restore after a host reboot
 
 1. The restore unit runs `<helper> restore` at boot, as today.
-2. A sandbox in which any session's last claimed state was `working` starts again with all its sessions. At most 2 sandboxes start at a time, in the order of their last activity. Every other sandbox becomes `stopped`, with all its sessions, and wakes when a client attaches to any of them.
-3. A session that starts again is not armed: its egress process has no values, because nothing on the host keeps them. Its row shows "secrets not armed". A request to a bound host gets `401` with the body "<name>: secrets not armed after a host restart. Try: simstim attach <host>/<session>".
-4. The next attach sends `arm` with fresh values. This replaces today's "started without its secrets".
+2. Sessions stopped explicitly by `simstim stop` (`state = "stopped"`) stay stopped across a boot-time `restore`, and wake when the user runs `attach`, `resume` or `host restore <host> --all`.
+3. A session that starts again after a host reboot starts without secrets, because nothing on the host keeps them; `resume` or a walled `arm` supplies fresh values from the client.
 
 ### 6.9 Upgrade
 

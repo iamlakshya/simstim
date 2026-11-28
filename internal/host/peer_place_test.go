@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -467,6 +468,35 @@ func TestTheHelperNeedsTheManagersCgroupNamespace(t *testing.T) {
 		}
 		if _, err := Delete("abcd2345"); !errors.Is(err, tc.want) {
 			t.Errorf("%s: delete gave %v, want %v", tc.name, err, tc.want)
+		}
+	}
+}
+
+// When the user manager holds effective capabilities (such as on Debian 13
+// with systemd 257), /proc/<mgr>/ns/cgroup returns EACCES, so
+// managerCgroupInSameNS falls back to checking /proc/<mgr>/cgroup.
+func TestManagerCgroupInSameNS(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		pid    int
+		cgroup string
+		alive  func() bool
+		want   bool
+	}{
+		{"same namespace manager", 42, "0::" + userMgr + "init.scope\n", func() bool { return true }, true},
+		{"ancestor relative path", 42, "0::/../../init.scope\n", func() bool { return true }, false},
+		{"root only", 42, "0::/\n", func() bool { return true }, false},
+		{"inside sessions slice", 42, "0::" + userMgr + brand.Slice + "/s-a.service\n", func() bool { return true }, false},
+		{"exited pidfd", 42, "0::" + userMgr + "init.scope\n", func() bool { return false }, false},
+		{"invalid pid", 0, "0::" + userMgr + "init.scope\n", nil, false},
+	} {
+		files := map[string]string{}
+		if tc.pid > 0 {
+			files[strconv.Itoa(tc.pid)+"/cgroup"] = tc.cgroup
+		}
+		fakeProc(t, files)
+		if got := managerCgroupInSameNS(tc.pid, tc.alive); got != tc.want {
+			t.Errorf("%s: managerCgroupInSameNS = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

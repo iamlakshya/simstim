@@ -9,9 +9,10 @@ import (
 
 // moreFeatures are the features that set hosts and sessions up: the requests
 // in this file, a new session's secrets (secrets.go), its missing folder
-// (folders.go), trust in a repository's setup script (setup.go), and the
-// resume of a session whose agent ended (resume.go).
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume"}
+// (folders.go), trust in a repository's setup script (setup.go), the resume
+// of a session whose agent ended (resume.go), and stopping a session while
+// keeping its state (stop.go).
+var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop"}
 
 func init() { Features = append(Features, moreFeatures...) }
 
@@ -37,6 +38,14 @@ func (b *bridge) handleMore(req proto.Request) bool {
 			return true
 		}
 		v, err := Resume(a)
+		b.reply(req.ID, v, err)
+	case "stop":
+		var a api.StopArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the stop request is not valid JSON", "Update the client."))
+			return true
+		}
+		v, err := Stop(a)
 		b.reply(req.ID, v, err)
 	default:
 		return false

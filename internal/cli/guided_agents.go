@@ -243,7 +243,7 @@ func waitEnded(ctx context.Context, h client.Host, id string, limit time.Duratio
 			return false, err
 		}
 		for _, s := range list {
-			if s.ID == id && (!s.Alive || s.State == api.StateExited || s.State == api.StateErrored || s.State == api.StateLost) {
+			if s.ID == id && (!s.Alive || client.Ended(s)) {
 				return true, nil
 			}
 		}

@@ -24,6 +24,7 @@ func TestCapStopped(t *testing.T) {
 		{Session{State: api.StateErrored, Reason: api.ReasonChildOOM}, true, false, true},
 		{Session{State: api.StateErrored, Signal: "killed"}, true, false, false},
 		{Session{State: api.StateLost, OOM: true, Signal: "killed"}, true, true, false},
+		{Session{State: api.StateStopped, Reason: "stopped by request"}, true, false, false},
 		{Session{State: api.StateWorking, OOM: true, Signal: "killed", Alive: true}, false, false, true},
 		{Session{State: api.StateNeedsInput, OOM: true, Alive: true}, false, false, true},
 		{Session{State: api.StateIdle, Alive: false}, false, false, false},

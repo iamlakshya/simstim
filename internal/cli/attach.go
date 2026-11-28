@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
@@ -55,8 +56,9 @@ func attachCmd() *cobra.Command {
 		Aliases: []string{"a"},
 		Short:   "Attach to a session",
 		Long: "Shows the session in this terminal, as the agent draws it. The detach key, Ctrl+\\ unless\n" +
-			"config.toml names another, leaves it, and the session keeps running. The address - is the\n" +
-			"last session that you attached to. Without an address, you pick a session from a list.",
+			"config.toml names another, leaves it, and the session keeps running. A stopped session\n" +
+			"wakes on attach. The address - is the last session that you attached to. Without an\n" +
+			"address, you pick a session from a list.",
 		Example: "  " + brand.Name + " attach my-vps/auth-fix\n" +
 			"  " + brand.Name + " attach -   # the last session you attached to\n" +
 			"  " + brand.Name + " attach     # pick one from a list",
@@ -88,7 +90,16 @@ func attachCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if client.Ended(*s) {
+			if s.State == api.StateStopped {
+				if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
+					return &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal"}
+				}
+				r, err := resumeSession(cmd.Context(), h.Name+"/"+s.ID, client.ResumeArgs{}, nil, secretTerminal(cmd))
+				if err != nil {
+					return err
+				}
+				h, s = r.host, &r.res.Session
+			} else if client.Ended(*s) {
 				return endedError(h, *s)
 			}
 			return attach(cmd.Context(), h, s.ID, s.Name)

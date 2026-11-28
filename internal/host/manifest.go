@@ -20,6 +20,7 @@ const (
 	StateExited     = api.StateExited
 	StateErrored    = api.StateErrored
 	StateLost       = api.StateLost
+	StateStopped    = api.StateStopped
 )
 
 // Manifest is the record of one session, at ~/.local/state/<name>/sessions/<id>/manifest.json.
@@ -49,8 +50,10 @@ type Manifest struct {
 	// Git is set when the session has its own worktree.
 	Git *GitInfo `json:"git,omitempty"`
 	// SetupHook and ResumeHook run in the session's terminal before the agent starts.
+	// StopHook runs before a user-requested stop tears the session's unit down.
 	SetupHook  string `json:"setup_hook,omitempty"`
 	ResumeHook string `json:"resume_hook,omitempty"`
+	StopHook   string `json:"stop_hook,omitempty"`
 	// RunHook is the hook for the next start: the setup hook, or the resume hook after a restart.
 	RunHook string `json:"run_hook,omitempty"`
 	// SetupHash is the setup hash of the repository's scripts at the start,
@@ -161,7 +164,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 	known := map[string]bool{"schema": true, "id": true, "name": true, "created_at": true, "updated_at": true,
 		"last_activity_at": true, "last_attached_at": true, "host_version": true, "holder_binary": true,
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
-		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "run_hook": true,
+		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true}
 	for k := range all {
 		if known[k] {

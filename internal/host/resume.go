@@ -188,18 +188,32 @@ func waitGone(pid int, timeout time.Duration) bool {
 	}
 }
 
-// stopUnit stops a session's unit, with every process in it. It then waits
-// a moment until systemd has unloaded the unit, which --collect asks for,
-// so that a new holder can take its name.
+// stopUnit stops a session's unit, with every process in it. On Linux it uses
+// the systemd user D-Bus manager to wait for the stop job's result and clear a
+// failed state if needed; otherwise it falls back to systemctl --user. It waits
+// a moment until systemd has unloaded the unit, which --collect asks for, so
+// that a new holder can take its name and nothing is left behind.
 func stopUnit(unit string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
+	if !systemctlReplaced() && stopUnitViaDBus(ctx, unit) {
+		return
+	}
+	stopUnitCLI(ctx, unit)
+}
+
+func stopUnitCLI(ctx context.Context, unit string) {
 	_, _ = systemctl(ctx, "stop", unit)
 	deadline := time.Now().Add(3 * time.Second)
+	resetTried := false
 	for time.Now().Before(deadline) {
 		out, err := systemctl(ctx, "show", unit, "-p", "LoadState", "--value")
 		if err != nil || strings.TrimSpace(string(out)) != "loaded" {
 			return
+		}
+		if !resetTried {
+			resetTried = true
+			_, _ = systemctl(ctx, "reset-failed", unit)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

@@ -55,6 +55,8 @@ func endCause(s client.Session) string {
 	}
 	var why string
 	switch {
+	case s.State == api.StateStopped:
+		why = ""
 	case s.State == api.StateLost:
 		why = s.Reason
 	case client.CapStopped(s):
@@ -82,7 +84,9 @@ func endedError(h client.Host, row client.Session) error {
 		why = fmt.Sprintf("exit code %d", *s.ExitCode)
 	}
 	msg := fmt.Sprintf("the session %s on %s ended", s.Name, h.Name)
-	if why != "" {
+	if s.State == api.StateStopped {
+		msg = fmt.Sprintf("the session %s on %s is stopped", s.Name, h.Name)
+	} else if why != "" {
 		msg += " (" + why + ")"
 	}
 	ref := client.CommandTarget(h.Name, row.ID)
@@ -90,6 +94,8 @@ func endedError(h client.Host, row client.Session) error {
 	hint := client.SessionEndHint(s, ref)
 	switch {
 	case hint != "":
+	case s.State == api.StateStopped:
+		hint = fmt.Sprintf("%s, or %s kill %s (removes it)", resume, brand.Name, ref)
 	case s.State == api.StateLost:
 		hint = fmt.Sprintf("%s, or %s host restore %s --all (brings back every lost session)", resume, brand.Name, h.Name)
 	case client.CleanExit(s):

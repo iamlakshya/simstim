@@ -29,9 +29,20 @@ The host checks the command before it runs. When the agent table gives the form 
 
 The agent table lists each agent's resume command. An older helper did not keep a session's own command. So a session that it started with `new <host> -- <command>` and no `--agent` still comes back as a login shell. Start such a session again with `new` to keep its command.
 
+## Stop a session and keep its state
+
+`stop` stops a session's agent and its systemd user unit on the host while keeping its folder, manifest, worktree and conversation. Nothing keeps running in the background.
+
+<!-- test: help (stops a session) -->
+```sh
+simstim stop my-server/app
+```
+
+A stopped session appears as `stopped` in `ls` and stays stopped after a host restart. Bring it back whenever you need it with `attach` (which wakes a stopped session on demand), `resume`, or `host restore <host> --all`. Use `kill` when you want to stop a session and remove its files.
+
 ## Bring back one session
 
-`resume` starts the agent of one session again, whenever its agent has ended. That can be after the [memory cap](memory.md#when-the-cap-stops-an-agent) stopped it, after a crash or a quit, or after its holder was lost. In the launcher, select the session and press `u`.
+`resume` starts the agent of one session again, whenever its agent is not running. That can be after `stop`, after the [memory cap](memory.md#when-the-cap-stops-an-agent) stopped it, after a crash or a quit, or after its holder was lost. In the launcher, select the session and press `u`.
 
 <!-- test: help (resumes a session) -->
 ```sh
@@ -42,7 +53,7 @@ Both start the agent again as [what comes back](#what-comes-back) says, in the s
 
 | | `host restore` | `resume` |
 | --- | --- | --- |
-| Sessions | Every session that a host restart stopped, or with `--all`, a crash | The one you name, however its agent ended |
+| Sessions | Every session that a host restart stopped, or with `--all`, stopped or crashed sessions | The one you name, however its agent ended or stopped |
 | When | At boot, or when you run it | When you run it |
 | Tries | Three for each session, then it skips the session | As many as you like. A resume also gives restore its three tries again. |
 | Secrets | None: nothing can fetch them from your laptop | Fetched again on your laptop: those that `hosts.toml` gives the host, and those you pass with `--secret` ([secrets](secrets.md#after-a-resume)) |

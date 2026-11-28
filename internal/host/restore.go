@@ -66,6 +66,8 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 		return r, false
 	case m.Status.State == StateExited || m.Status.State == StateErrored:
 		r.Action, r.Why = "skipped", "the agent had ended"
+	case m.Status.State == StateStopped && !all:
+		r.Action, r.Why = "skipped", "the session was stopped (use --all or resume)"
 	case m.Restart.Policy != "resume":
 		r.Action, r.Why = "skipped", "restart policy is "+m.Restart.Policy
 	case !all && m.Run.BootID == boot:
@@ -73,8 +75,12 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
 		r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
 	default:
+		reason := "restored after a host restart"
+		if m.Status.State == StateStopped {
+			reason = "restored from stopped state"
+		}
 		m.Run.RespawnCount++
-		argv, why, err := startAgain(m, again{label: restoredLabel, reason: "restored after a host restart"})
+		argv, why, err := startAgain(m, again{label: restoredLabel, reason: reason})
 		r.Argv = argv
 		if err != nil {
 			r.Action, r.Why = "failed", err.Error()
@@ -139,8 +145,14 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	}
 	// The holder answers on its socket before it starts the agent, as New
 	// knows too: wait for the start before saying it worked.
-	if mm := waitStarted(m.ID, 5*time.Second); mm != nil && mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
-		return argv, why, errors.New(mm.Status.Reason)
+	if mm := waitStarted(m.ID, 5*time.Second); mm != nil {
+		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
+			return argv, why, errors.New(mm.Status.Reason)
+		}
+		if mm.Run.Unit == "" && m.Run.Unit != "" {
+			mm.Run.Unit = m.Run.Unit
+			_ = mm.Save()
+		}
 	}
 	return argv, why, nil
 }

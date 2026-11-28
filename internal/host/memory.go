@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -119,13 +120,20 @@ func checkMemoryMax(asked int64) error {
 	return nil
 }
 
-// systemctl runs `systemctl --user` with args. Tests replace it.
-var systemctl = func(ctx context.Context, args ...string) ([]byte, error) {
-	out, err := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...).CombinedOutput()
+func runSystemctl(ctx context.Context, args ...string) ([]byte, error) {
+	out, err := exec.CommandContext(ctx, "systemctl", append([]string{"--user"}, args...)...).CombinedOutput() //nolint:gosec // G702: args are fixed systemctl flags and validated unit names
 	if err != nil {
 		return out, fmt.Errorf("systemctl --user %s: %w", strings.Join(args, " "), err)
 	}
 	return out, nil
+}
+
+// systemctl runs `systemctl --user` with args. Tests replace it.
+var systemctl = runSystemctl
+
+// systemctlReplaced reports whether a test replaced systemctl.
+func systemctlReplaced() bool {
+	return reflect.ValueOf(systemctl).Pointer() != reflect.ValueOf(runSystemctl).Pointer()
 }
 
 // userManagerCgroup is the user's systemd manager in the cgroup tree.

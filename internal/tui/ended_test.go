@@ -88,6 +88,7 @@ func TestLookSaysHowTheAgentEnded(t *testing.T) {
 		{"done", client.Session{State: api.StateExited, ExitCode: code(0)}, glyphOK, "exited 0", "exited with code 0"},
 		{"no code", client.Session{State: api.StateErrored}, glyphFail, "failed", "ended"},
 		{"stopped by request", client.Session{State: api.StateExited, Reason: "killed by request"}, glyphOK, "exited", "killed by request"},
+		{"stopped session", client.Session{State: api.StateStopped, Reason: "stopped by request"}, glyphOffline, "stopped", "stopped by request"},
 		{"lost", client.Session{State: api.StateLost, Reason: "the host restarted", OOM: true}, glyphOffline, "lost", "the host restarted"},
 	}
 	for _, c := range cases {
@@ -121,7 +122,7 @@ func TestLookSaysHowTheAgentEnded(t *testing.T) {
 func TestTraceIsFaintUnlessWorkingOrWaiting(t *testing.T) {
 	cases := map[string]lipgloss.Style{
 		api.StateWorking: sKey, api.StateNeedsInput: sWarning, api.StateStarting: sFaint,
-		api.StateIdle: sFaint, api.StateExited: sFaint, api.StateErrored: sFaint, api.StateLost: sFaint,
+		api.StateIdle: sFaint, api.StateExited: sFaint, api.StateErrored: sFaint, api.StateLost: sFaint, api.StateStopped: sFaint,
 	}
 	for state, want := range cases {
 		got := traceStyle(client.Session{State: state, OOM: true})

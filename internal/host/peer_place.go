@@ -147,9 +147,42 @@ var CgroupNamespaces = func() (self, manager string, err error) {
 	}
 	manager, err = os.Readlink(filepath.Join(procRoot, strconv.Itoa(p.pid), "ns", "cgroup"))
 	if err != nil {
+		if errors.Is(err, os.ErrPermission) && managerCgroupInSameNS(p.pid, p.alive) {
+			return self, self, nil
+		}
 		return self, "", fmt.Errorf("read the user manager's cgroup namespace: %w", err)
 	}
 	return self, manager, nil
+}
+
+// managerCgroupInSameNS reports whether the user manager at pid is visible at a
+// real cgroup path outside the sessions' slice in this process's cgroup
+// namespace. On hosts where the user manager has non-empty effective
+// capabilities (such as CAP_WAKE_ALARM on Debian 13 with systemd 257),
+// /proc/<pid>/ns/cgroup refuses readlink with EACCES while /proc/<pid>/cgroup
+// stays world-readable. A process in a child cgroup namespace sees "/" or a
+// "/.." ancestor path there, never a real path outside the sessions' slice.
+func managerCgroupInSameNS(pid int, alive func() bool) bool {
+	if pid <= 0 {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(procRoot, strconv.Itoa(pid), "cgroup"))
+	if err != nil {
+		return false
+	}
+	if alive != nil && !alive() {
+		return false
+	}
+	paths, belowRoot := cgroupPaths(b)
+	if len(paths) == 0 || !belowRoot || placeAmong(paths, "") != placeOutside {
+		return false
+	}
+	for _, dirs := range paths {
+		if slices.Contains(dirs, "..") {
+			return false
+		}
+	}
+	return true
 }
 
 // The helper's refusals to act on a session, each with the code forbidden.

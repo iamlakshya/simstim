@@ -36,6 +36,7 @@ func TestStateLabelSaysWhyTheAgentEnded(t *testing.T) {
 		{client.Session{State: api.StateErrored, ExitCode: code(3)}, "errored (exit code 3)"},
 		{client.Session{State: api.StateExited, ExitCode: code(0)}, "exited"},
 		{client.Session{State: api.StateLost, Reason: "the host restarted"}, "lost (the host restarted)"},
+		{client.Session{State: api.StateStopped, Reason: "stopped by request"}, "stopped"},
 		// The memory cap stopped another process: the agent runs on.
 		{client.Session{State: api.StateWorking, OOM: true, Alive: true}, "working"},
 		{client.Session{State: api.StateNeedsInput, Reason: "Run the tests?", Alive: true}, "needs input"},
@@ -114,6 +115,11 @@ func TestEndedErrorSaysWhatToTry(t *testing.T) {
 	lost := client.Session{ID: "c3", Name: "pair", State: api.StateLost, Reason: "the host restarted"}
 	if err := endedError(h, lost); !errors.As(err, &ue) || ue.Msg != "the session pair on box ended (the host restarted)" ||
 		!strings.Contains(ue.Hint, " resume box/c3, or ") || !strings.Contains(ue.Hint, "host restore box --all") {
+		t.Fatalf("endedError = %+v", err)
+	}
+	stopped := client.Session{ID: "d4", Name: "nap", State: api.StateStopped, Reason: "stopped by request"}
+	if err := endedError(h, stopped); !errors.As(err, &ue) || ue.Msg != "the session nap on box is stopped" ||
+		!strings.Contains(ue.Hint, "resume box/d4") || !strings.Contains(ue.Hint, "kill box/d4") {
 		t.Fatalf("endedError = %+v", err)
 	}
 }
