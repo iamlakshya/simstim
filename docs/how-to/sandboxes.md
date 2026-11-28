@@ -266,6 +266,43 @@ simstim new my-vps --agent claude --seed ../api --seed ../web
 simstim pull my-vps/api --repo web
 ```
 
+## Use the microvm wall (`--wall microvm`)
+
+The microvm wall boots each session in its own Cloud Hypervisor microVM on KVM with a pinned guest kernel and a `dm-verity`-verified tools image.
+
+1. On a Linux host with `/dev/kvm`, add your user to the `kvm` group (once, as root):
+
+```sh
+sudo usermod -aG kvm "$USER"
+```
+
+Log out and start a fresh SSH login session (and restart your user systemd manager, `sudo systemctl restart "user@$(id -u)"`, if systemd is running) so the new group takes effect.
+
+2. Download and verify the pinned Cloud Hypervisor VMM, `ch-remote` and Kata guest kernel, and build the verified tools image on the host:
+
+```sh
+simstim-host wall install microvm
+```
+
+(`chv` works as an alias for `microvm`.) This downloads the pinned artefacts from `guest/supply.lock`, checks every SHA-256 digest before installing into `~/.local/share/simstim/artefacts/runtime/chv-v55.0-k6.18.62/`, and builds the `dm-verity`-verified tools image from your host helper (using `mkfs.erofs` when installed, or an automatic ext4 fallback otherwise).
+
+3. Confirm from your laptop that the host reaches the `microvm` level:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim host doctor my-vps
+```
+
+Under `Sandboxes on my-vps:`, expect `Level now: microvm.`.
+
+4. Pull the default root image (see [manage session images](images.md)), then start a session with `--wall microvm`:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim image pull default my-vps
+simstim new my-vps --wall microvm --dir /path/to/repo
+```
+
 ## Inside a microvm sandbox
 
 Inside a Cloud Hypervisor microvm, `wall-init` boots as PID 1 from the `dm-verity`-verified tools image and prepares the guest before accepting `internal/link` over `virtio-vsock`:

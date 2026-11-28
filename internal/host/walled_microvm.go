@@ -89,7 +89,7 @@ func newMicroVMWalled(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	bundle, err := chv.ResolveRuntimeBundle("")
 	if err != nil {
-		return nil, UserError("runtime_missing", err.Error(), brand.Name+" host prepare <host>")
+		return nil, UserError("runtime_missing", err.Error(), brand.HostBinary+" wall install microvm")
 	}
 
 	id := NewID()

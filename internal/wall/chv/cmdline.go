@@ -3,6 +3,7 @@ package chv
 import (
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -27,7 +28,8 @@ type DiskVerity struct {
 	RootHash      string
 	Salt          string // defaults to ZeroSaltHex
 	DataBlocks    uint64
-	HasSuperblock bool // false for tools (tree at DataBlocks), true for hcsshim user image (tree at DataBlocks+1)
+	HasSuperblock bool   // false for tools (tree at DataBlocks), true for hcsshim user image (tree at DataBlocks+1)
+	FSType        string // optional: "erofs" (default) or "ext4"; auto-detected from ext4 magic when empty
 }
 
 // VMConfig holds every parameter needed to construct the Cloud Hypervisor
@@ -101,7 +103,7 @@ func BuildKernelCmdline(cfg VMConfig) (string, error) {
 	}
 	parts = append(parts,
 		"root=/dev/dm-0",
-		"rootfstype=erofs",
+		"rootfstype="+toolsFSType(cfg.Tools),
 		"init=/init",
 		"dm-mod.waitfor="+strings.Join(waitfor, ","),
 		fmt.Sprintf("dm-mod.create=%q", strings.Join(tables, ";")),
@@ -109,6 +111,31 @@ func BuildKernelCmdline(cfg VMConfig) (string, error) {
 	)
 	parts = append(parts, initArgs...)
 	return strings.Join(parts, " "), nil
+}
+
+func toolsFSType(d DiskVerity) string {
+	switch d.FSType {
+	case "erofs", "ext4":
+		return d.FSType
+	}
+	if d.Path != "" && hasExt4Magic(d.Path) {
+		return "ext4"
+	}
+	return "erofs"
+}
+
+func hasExt4Magic(path string) bool {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	var magic [2]byte
+	const ext4MagicOffset = 1024 + 56
+	if _, err := f.ReadAt(magic[:], ext4MagicOffset); err != nil {
+		return false
+	}
+	return magic[0] == 0x53 && magic[1] == 0xEF
 }
 
 func formatVerityTable(name string, minor int, dev string, dataBlocks, hashStart uint64, rootHash, salt string) string {

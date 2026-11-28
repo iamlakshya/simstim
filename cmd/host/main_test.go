@@ -53,3 +53,16 @@ func TestNewArgsMemoryMax(t *testing.T) {
 		}
 	}
 }
+
+func TestRunWallInstallRejectsBadArgs(t *testing.T) {
+	for _, args := range [][]string{
+		{"install"},
+		{"install", "bogus"},
+		{"install", "microvm", "extra"},
+	} {
+		err := runWall(args)
+		if err == nil || !strings.Contains(err.Error(), "Try:") || !strings.Contains(err.Error(), "microvm") {
+			t.Errorf("runWall(%v) = %v, want error with Try hint naming microvm", args, err)
+		}
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"sort"
@@ -22,6 +23,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/wall"
+	"github.com/iamlakshya/simstim/internal/wall/chv"
 	"github.com/iamlakshya/simstim/internal/wall/gvisor"
 )
 
@@ -34,8 +36,8 @@ Usage:
   %[1]s stop <id> [--json]  stop a session and keep its state for resume or restore
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
-  %[1]s wall probe [--json] probe which sandbox walls this host supports
-  %[1]s wall install gvisor download and verify the pinned upstream runsc runtime
+  %[1]s wall probe [--json]              probe which sandbox walls this host supports
+  %[1]s wall install <gvisor|microvm>    download and verify a pinned sandbox runtime
   %[1]s keytest             print every key the terminal sends
   %[1]s restore [--all]     start again sessions a restart (or, with --all, a stop or crash) stopped
   %[1]s idle setup <30m|never>   power this VM off when idle (a user timer runs "idle check")
@@ -342,21 +344,13 @@ func runDoctor(args []string) error {
 
 func runWall(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: %s wall <probe [--json] | install gvisor>", brand.HostBinary)
+		return fmt.Errorf("usage: %s wall <probe [--json] | install <gvisor|microvm>>. Try: run %s wall probe or %s wall install microvm", brand.HostBinary, brand.HostBinary, brand.HostBinary)
 	}
 	if args[0] == "install" {
-		if len(args) != 2 || args[1] != "gvisor" {
-			return fmt.Errorf("usage: %s wall install gvisor", brand.HostBinary)
-		}
-		p, err := gvisor.EnsureRuntime(context.Background(), runtime.GOARCH)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("installed gVisor %s at %s\n", gvisor.PinnedRelease, p)
-		return nil
+		return runWallInstall(args[1:])
 	}
 	if args[0] != "probe" {
-		return fmt.Errorf("usage: %s wall <probe [--json] | install gvisor>", brand.HostBinary)
+		return fmt.Errorf("usage: %s wall <probe [--json] | install <gvisor|microvm>>. Try: run %s wall probe or %s wall install microvm", brand.HostBinary, brand.HostBinary, brand.HostBinary)
 	}
 	probes := wall.ProbeAll(context.Background())
 	if hasFlag(args[1:], "--json") {
@@ -378,6 +372,49 @@ func runWall(args []string) error {
 		}
 	}
 	return nil
+}
+
+func runWallInstall(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: %s wall install <gvisor|microvm>. Try: run %s wall install microvm (or gvisor)", brand.HostBinary, brand.HostBinary)
+	}
+	switch args[0] {
+	case "gvisor":
+		p, err := gvisor.EnsureRuntime(context.Background(), runtime.GOARCH)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("installed gVisor %s at %s\n", gvisor.PinnedRelease, p)
+		return nil
+	case "microvm", chv.DriverName:
+		exe, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("locate host helper binary: %w. Try: reinstall the host helper", err)
+		}
+		vtPath, vtName := "", ""
+		cand := filepath.Join(filepath.Dir(exe), brand.VTBinary)
+		if fi, serr := os.Stat(cand); serr == nil && !fi.IsDir() {
+			vtPath, vtName = cand, brand.VTBinary
+		}
+		res, err := chv.InstallRuntime(context.Background(), chv.InstallOptions{
+			Arch:      runtime.GOARCH,
+			HelperBin: exe,
+			ShadowVT:  vtPath,
+			VTName:    vtName,
+		})
+		if err != nil {
+			return err
+		}
+		toolsFS := "erofs"
+		if res.Tools != nil && res.Tools.FSType != "" {
+			toolsFS = res.Tools.FSType
+		}
+		fmt.Printf("installed microvm runtime %s (cloud-hypervisor v%s, kernel %s, tools %s) at %s\n",
+			chv.RuntimeLabel, res.VMMVersion, res.KernelVersion, toolsFS, res.Dir)
+		return nil
+	default:
+		return fmt.Errorf("unknown wall %q. Try: run %s wall install microvm (or gvisor)", args[0], brand.HostBinary)
+	}
 }
 
 func runHook(args []string) error {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
@@ -173,8 +174,8 @@ func ResolveRuntimeBundle(preferredLabel string) (RuntimeBundle, error) {
 	}
 	rp := DefaultRuntimePaths()
 	return RuntimeBundle{}, fmt.Errorf(
-		"microvm runtime files (cloud-hypervisor, ch-remote, vmlinux, tools.erofs) are not installed in %s. Try: run host prepare or install the pinned %s runtime",
-		rp.Dir, RuntimeLabel,
+		"microvm runtime files (cloud-hypervisor, ch-remote, vmlinux, tools.erofs) are not installed in %s. Try: run %s wall install microvm",
+		rp.Dir, brand.HostBinary,
 	)
 }
 
@@ -219,6 +220,7 @@ func readToolsSidecar(toolsPath string) (DiskVerity, bool) {
 		RootHash:      rec.RootHash,
 		DataBlocks:    rec.DataBlocks,
 		HasSuperblock: false,
+		FSType:        rec.FSType,
 	}, true
 }
 

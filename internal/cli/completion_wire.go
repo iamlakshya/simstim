@@ -16,6 +16,7 @@ var (
 		{api.LevelNone, "No sandbox wall"},
 		{api.LevelProcess, "Bubblewrap process wall"},
 		{api.LevelGVisor, "gVisor runsc wall"},
+		{api.LevelMicroVM, "Hardware-virtualised microVM wall"},
 	}
 	floorItems = []compItem{
 		{api.LevelNone, "No sandbox wall"},

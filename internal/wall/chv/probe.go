@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
@@ -177,6 +178,7 @@ func probeRuntimeFiles(p *wall.Probe, d ProbeDeps, pins ArchPins) (RuntimePaths,
 	if d.RuntimePaths != nil {
 		rp = d.RuntimePaths()
 	}
+	installCmd := brand.HostBinary + " wall install microvm"
 	resolved := rp
 	for _, item := range []struct {
 		key, label, path, sha string
@@ -197,20 +199,34 @@ func probeRuntimeFiles(p *wall.Probe, d ProbeDeps, pins ArchPins) (RuntimePaths,
 		if found == "" {
 			p.Facts[item.key] = "missing"
 			p.Reason = fmt.Sprintf("%s is not installed in %s", item.label, rp.Dir)
-			p.Fix = fmt.Sprintf("install the pinned Cloud Hypervisor v%s and Kata %s kernel runtime into %s", PinnedVMMVersion, PinnedKernelVersion, rp.Dir)
+			p.Fix = installCmd
 			return resolved, false
 		}
 		if item.key == "vmm" && d.VerifySHA256 != nil && item.sha != "" {
 			if err := d.VerifySHA256(found, item.sha); err != nil {
 				p.Facts[item.key] = "digest_mismatch"
 				p.Reason = "pinned cloud-hypervisor in the artefact store failed SHA-256 verification"
-				p.Fix = fmt.Sprintf("reinstall the pinned Cloud Hypervisor v%s runtime into %s", PinnedVMMVersion, rp.Dir)
+				p.Fix = installCmd
 				return resolved, false
 			}
 			p.Facts["vmm_sha256"] = item.sha
 		}
 		p.Facts[item.key] = found
 		*item.dst = found
+	}
+	if rp.Tools != "" && resolved.VMM == rp.VMM {
+		for _, item := range []struct{ key, label, path string }{
+			{"tools", "tools image (tools.erofs)", rp.Tools},
+			{"tools_meta", "tools image metadata (tools.erofs.json)", rp.Tools + ".json"},
+		} {
+			if !pathExists(d.Stat, item.path) {
+				p.Facts[item.key] = "missing"
+				p.Reason = fmt.Sprintf("%s is not installed in %s", item.label, rp.Dir)
+				p.Fix = installCmd
+				return resolved, false
+			}
+			p.Facts[item.key] = item.path
+		}
 	}
 	return resolved, true
 }

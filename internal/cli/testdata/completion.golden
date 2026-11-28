@@ -236,6 +236,7 @@ atlas
 none	No sandbox wall
 process	Bubblewrap process wall
 gvisor	gVisor runsc wall
+microvm	Hardware-virtualised microVM wall
 :4
 
 === floor flag (host add --floor) ===

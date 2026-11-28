@@ -25,6 +25,17 @@ func TestNewMicroVMFlagsAndConfigCheck(t *testing.T) {
 			t.Errorf("new command missing --%s flag", flagName)
 		}
 	}
+	if got, err := parseWallFlag("microvm"); err != nil || got != "microvm" {
+		t.Fatalf("parseWallFlag(microvm) = %q, %v; want microvm, nil", got, err)
+	}
+	if _, err := parseWallFlag("bogus"); err == nil {
+		t.Fatal("parseWallFlag(bogus) = nil, want error")
+	} else {
+		var ue *client.UserError
+		if !errors.As(err, &ue) || !strings.Contains(ue.Hint, "microvm") {
+			t.Fatalf("parseWallFlag(bogus) = %#v, want UserError hint naming microvm", err)
+		}
+	}
 
 	// config check accepts valid sandbox.system/sudo/docker/image and flags bad sandbox.system.
 	h := hosttest.New(t)

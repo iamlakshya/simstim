@@ -56,7 +56,7 @@ simstim new my-vps --agent claude --detach --json
 | `--seed-dirty` | with `--seed`, include uncommitted changes and non-ignored untracked files as one commit |
 | `--setup-script` | run the repository's setup script this time, whatever your answer for it |
 | `--task <string>` | a short note describing the task for this session |
-| `--wall <string>` | sandbox wall level: none, process or gvisor |
+| `--wall <string>` | sandbox wall level: none, process, gvisor or microvm |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command

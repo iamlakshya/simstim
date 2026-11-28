@@ -3,6 +3,7 @@
 package chv
 
 import (
+	"archive/tar"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -11,11 +12,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 
 	"github.com/iamlakshya/simstim/internal/paths"
 )
@@ -130,6 +132,7 @@ type RuntimePaths struct {
 	VMM      string
 	CHRemote string
 	Kernel   string
+	Tools    string
 }
 
 // DefaultRuntimePaths returns the default runtime paths under paths.RuntimeArtefactsDir().
@@ -144,6 +147,7 @@ func RuntimePathsIn(dir string) RuntimePaths {
 		VMM:      filepath.Join(dir, "cloud-hypervisor"),
 		CHRemote: filepath.Join(dir, "ch-remote"),
 		Kernel:   filepath.Join(dir, "vmlinux"),
+		Tools:    filepath.Join(dir, "tools.erofs"),
 	}
 }
 
@@ -250,28 +254,98 @@ func ensurePinnedKernel(ctx context.Context, hc *http.Client, dst string, pin Ke
 	}
 	defer os.Remove(archiveTmp)
 
-	extractDir, err := os.MkdirTemp(dir, ".kernel-extract-*")
-	if err != nil {
-		return fmt.Errorf("create kernel extract dir: %w", err)
-	}
-	defer os.RemoveAll(extractDir)
+	return extractPinnedKernelFromZstdTar(ctx, archiveTmp, dst, pin)
+}
 
-	out, err := exec.CommandContext(ctx, "tar", "--zstd", "-xf", archiveTmp, "-C", extractDir, pin.ArchiveMember).CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("extract kernel from Kata substrate (%s): %w. Try: ensure tar and zstd are installed", strings.TrimSpace(string(out)), err)
+func extractPinnedKernelFromZstdTar(ctx context.Context, archivePath, dst string, pin KernelPin) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("extract kernel cancelled: %w", err)
 	}
-	extracted := filepath.Join(extractDir, filepath.FromSlash(strings.TrimPrefix(pin.ArchiveMember, "./")))
-	if err := VerifyFileSHA256(extracted, pin.KernelSHA256); err != nil {
-		return err
+	f, err := os.Open(filepath.Clean(archivePath))
+	if err != nil {
+		return fmt.Errorf("open kernel archive: %w", err)
+	}
+	defer f.Close()
+
+	zr, err := zstd.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("open zstd kernel archive: %w", err)
+	}
+	defer zr.Close()
+
+	wantMember := cleanTarMember(pin.ArchiveMember)
+	tr := tar.NewReader(zr)
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("extract kernel cancelled: %w", err)
+		}
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return fmt.Errorf("kernel archive did not contain %s. Try: verify guest/supply.lock", pin.ArchiveMember)
+		}
+		if err != nil {
+			return fmt.Errorf("read kernel archive: %w. Try: retry the download", err)
+		}
+		if cleanTarMember(hdr.Name) != wantMember {
+			continue
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			return fmt.Errorf("kernel archive member %s is not a regular file", pin.ArchiveMember)
+		}
+		return writeVerifiedKernel(tr, dst, pin)
+	}
+}
+
+func writeVerifiedKernel(r io.Reader, dst string, pin KernelPin) error {
+	const maxKernelBytes = 128 << 20 // 128 MiB safety cap
+	limit := pin.KernelSize
+	if limit <= 0 {
+		limit = maxKernelBytes
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dst), ".vmlinux-*")
+	if err != nil {
+		return fmt.Errorf("create temp kernel file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	h := sha256.New()
+	n, copyErr := io.Copy(io.MultiWriter(tmp, h), io.LimitReader(r, limit+1))
+	closeErr := tmp.Close()
+	if copyErr != nil {
+		return fmt.Errorf("extract guest kernel: %w", copyErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close extracted guest kernel: %w", closeErr)
+	}
+	if pin.KernelSize > 0 && n != pin.KernelSize {
+		return fmt.Errorf("extracted guest kernel size %d differs from pinned %d. Try: retry the download", n, pin.KernelSize)
+	}
+	if n > maxKernelBytes {
+		return errors.New("extracted guest kernel exceeds 128 MiB cap. Try: check guest/supply.lock")
+	}
+	got := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(got, pin.KernelSHA256) {
+		return fmt.Errorf("extracted guest kernel SHA-256 %s differs from pinned %s. Try: retry or check guest/supply.lock", got, pin.KernelSHA256)
 	}
 	//nolint:gosec // G302: read-only guest kernel image, mode 0444
-	if err := os.Chmod(extracted, 0o444); err != nil {
+	if err := os.Chmod(tmpPath, 0o444); err != nil {
 		return fmt.Errorf("chmod kernel: %w", err)
 	}
-	if err := os.Rename(extracted, dst); err != nil {
+	if err := os.Rename(tmpPath, dst); err != nil {
 		return fmt.Errorf("install kernel: %w", err)
 	}
+	cleanup = false
 	return nil
+}
+
+func cleanTarMember(name string) string {
+	return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(name)), "./")
 }
 
 func downloadVerified(ctx context.Context, hc *http.Client, dir string, pin FilePin) (string, error) {
