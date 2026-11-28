@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 43 |
-| To do | 56 |
+| Done | 45 |
+| To do | 54 |
 | **All** | **99** |
 
 ## Current focus
@@ -55,7 +55,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.12 | 1 | Day 1 | To do | Layers, profiles and locks |
 | P1.13 | 1 | Day 1 | To do | Shells and commands in a sandbox |
 | P1.14 | 1 | Day 1 | To do | Sizes, variables, files and seeds from the laptop |
-| P1.15 | 1 | Day 1 | To do | Kept caches |
+| P1.15 | 1 | Day 1 | Done | Kept caches |
 | P1.9 | 1 | Day 1 | Done | Paste and ports through the supervisor |
 | P1.10 | 1 | Day 1 | To do | Pull through a bundle, with a review |
 | P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
@@ -84,7 +84,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | C8 | cli | Day 1 | Done | Agents: install and log in |
 | C9 | cli | Day 1 | Done | `config check` |
 | C10 | cli | Day 1 | Done | Completion |
-| C11 | cli | Day 1 | To do | The launcher and the CLI agree |
+| C11 | cli | Day 1 | Done | The launcher and the CLI agree |
 | C12 | cli | Day 1 | Done | Docs for agents |
 | T1 | test reliability | Day 1 | Done | The fake envd hang and the input and kill fixes |
 | P2.2 | 2 | Later | To do | Interception, and method and path rules |
