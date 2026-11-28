@@ -94,6 +94,9 @@ func Doctor() HostInfo {
 	info.Checks = append(info.Checks, Check{Name: "runtime folder", OK: true, Detail: paths.RuntimeDir()})
 	info.Checks = append(info.Checks, AgentsDiskCheck()...)
 	info.Checks = append(info.Checks, IdleDoctor()...)
+	kbChecks, kbResults := KernelBugChecks()
+	info.Checks = append(info.Checks, kbChecks...)
+	info.KernelBugs = kbResults
 	info.Walls = wall.ToAPIProbes(wall.ProbeAll(context.Background()))
 	return info
 }

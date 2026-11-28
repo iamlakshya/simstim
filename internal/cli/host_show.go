@@ -116,6 +116,7 @@ func printHostSandboxSection(rows, hints io.Writer, h client.Host, hasSandbox bo
 			fmt.Fprintf(rows, "\nWall drivers on %s:\n", h.Name)
 			printWallDrivers(rows, hints, sandbox.Walls)
 		}
+		printMissingHostPackages(rows, hints, *sandbox)
 		return
 	}
 	if !hasSandbox {
@@ -134,6 +135,24 @@ func printHostSandboxSection(rows, hints io.Writer, h client.Host, hasSandbox bo
 		try = brand.Name + " host doctor " + client.ShellQuote(h.Name)
 	}
 	fmt.Fprintf(hints, "    Try: %s\n", try)
+}
+
+func printMissingHostPackages(rows, hints io.Writer, p api.CapProbe) {
+	if p.OS != "linux" || !p.KVM.Present {
+		return
+	}
+	var pkgs []string
+	if !p.HasSetfacl && !p.KVM.Usable {
+		pkgs = append(pkgs, "acl")
+	}
+	if !p.HasNewuidmap {
+		pkgs = append(pkgs, "uidmap")
+	}
+	if len(pkgs) == 0 {
+		return
+	}
+	fmt.Fprintf(rows, "\nOptional host packages missing: %s\n", strings.Join(pkgs, ", "))
+	fmt.Fprintf(hints, "  Try: sudo apt install %s\n", strings.Join(pkgs, " "))
 }
 
 func showHostJSON(h client.Host, reachable bool, dialErr error, info *client.HostInfo, sandbox *api.CapProbe, sandboxErr error, sessionCount int) error {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
 
@@ -25,6 +26,9 @@ type ProbeDeps struct {
 	CheckKVMRW    func(string) error
 	LookPath      func(string) (string, error)
 	RuntimePaths  func() RuntimePaths
+	ArtefactFile  func(sha256Hex string) string
+	VerifySHA256  func(path, wantHex string) error
+	DetectVirt    func(ctx context.Context) string
 	CurrentUser   func() string
 	RunCmd        func(ctx context.Context, name string, args ...string) ([]byte, error)
 }
@@ -38,6 +42,9 @@ func defaultProbeDeps() ProbeDeps {
 		CheckKVMRW:    checkKVMRW,
 		LookPath:      exec.LookPath,
 		RuntimePaths:  DefaultRuntimePaths,
+		ArtefactFile:  paths.ArtefactFile,
+		VerifySHA256:  VerifyFileSHA256,
+		DetectVirt:    detectVirt,
 		CurrentUser: func() string {
 			if u, err := user.Current(); err == nil && u != nil && u.Username != "" {
 				return u.Username
@@ -56,8 +63,23 @@ func defaultProbeDeps() ProbeDeps {
 	}
 }
 
+func detectVirt(ctx context.Context) string {
+	p, err := exec.LookPath("systemd-detect-virt")
+	if err != nil {
+		return ""
+	}
+	tctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(tctx, p).Output()
+	v := strings.TrimSpace(string(out))
+	if v == "" || v == "none" || (err != nil && v == "") {
+		return ""
+	}
+	return v
+}
+
 // ProbeWith checks whether this host can boot Cloud Hypervisor microvms
-// (isolation spec 20.3, 20.11).
+// (isolation spec 5.1, 20.3, 20.11).
 func ProbeWith(ctx context.Context, d ProbeDeps) wall.Probe {
 	facts := map[string]string{}
 	p := wall.Probe{
@@ -70,10 +92,17 @@ func ProbeWith(ctx context.Context, d ProbeDeps) wall.Probe {
 		p.Fix = "use a Linux host with /dev/kvm, or a Lima VM with nested virtualisation on macOS"
 		return p
 	}
-	if _, err := PinsForArch(d.GOARCH); err != nil {
+	pins, err := PinsForArch(d.GOARCH)
+	if err != nil {
 		p.Reason = fmt.Sprintf("architecture %s is not supported by Cloud Hypervisor", d.GOARCH)
 		p.Fix = "use an amd64 or arm64 Linux host"
 		return p
+	}
+
+	if d.DetectVirt != nil {
+		if v := strings.TrimSpace(d.DetectVirt(ctx)); v != "" && v != "none" {
+			facts["virt"] = v
+		}
 	}
 
 	release := ""
@@ -105,7 +134,7 @@ func ProbeWith(ctx context.Context, d ProbeDeps) wall.Probe {
 	}
 	facts["mkfs_ext4"] = mkfsPath
 
-	rp, ok := probeRuntimeFiles(&p, d)
+	rp, ok := probeRuntimeFiles(&p, d, pins)
 	if !ok {
 		return p
 	}
@@ -139,28 +168,51 @@ func probeKVM(p *wall.Probe, d ProbeDeps) bool {
 		}
 	}
 	p.Facts["kvm_usable"] = "true"
+	p.Facts["kvm_api"] = "12"
 	return true
 }
 
-func probeRuntimeFiles(p *wall.Probe, d ProbeDeps) (RuntimePaths, bool) {
+func probeRuntimeFiles(p *wall.Probe, d ProbeDeps, pins ArchPins) (RuntimePaths, bool) {
 	rp := RuntimePaths{}
 	if d.RuntimePaths != nil {
 		rp = d.RuntimePaths()
 	}
-	for _, item := range []struct{ key, label, path string }{
-		{"vmm", "cloud-hypervisor", rp.VMM},
-		{"ch_remote", "ch-remote", rp.CHRemote},
-		{"kernel", "guest kernel (vmlinux)", rp.Kernel},
+	resolved := rp
+	for _, item := range []struct {
+		key, label, path, sha string
+		dst                   *string
+	}{
+		{"vmm", "cloud-hypervisor", rp.VMM, pins.VMM.SHA256, &resolved.VMM},
+		{"ch_remote", "ch-remote", rp.CHRemote, pins.CHRemote.SHA256, &resolved.CHRemote},
+		{"kernel", "guest kernel (vmlinux)", rp.Kernel, pins.Kernel.KernelSHA256, &resolved.Kernel},
 	} {
-		if item.path == "" || !pathExists(d.Stat, item.path) {
+		found := ""
+		if item.path != "" && pathExists(d.Stat, item.path) {
+			found = item.path
+		} else if d.ArtefactFile != nil && item.sha != "" {
+			if cand := d.ArtefactFile(item.sha); cand != "" && pathExists(d.Stat, cand) {
+				found = cand
+			}
+		}
+		if found == "" {
 			p.Facts[item.key] = "missing"
 			p.Reason = fmt.Sprintf("%s is not installed in %s", item.label, rp.Dir)
 			p.Fix = fmt.Sprintf("install the pinned Cloud Hypervisor v%s and Kata %s kernel runtime into %s", PinnedVMMVersion, PinnedKernelVersion, rp.Dir)
-			return rp, false
+			return resolved, false
 		}
-		p.Facts[item.key] = item.path
+		if item.key == "vmm" && d.VerifySHA256 != nil && item.sha != "" {
+			if err := d.VerifySHA256(found, item.sha); err != nil {
+				p.Facts[item.key] = "digest_mismatch"
+				p.Reason = "pinned cloud-hypervisor in the artefact store failed SHA-256 verification"
+				p.Fix = fmt.Sprintf("reinstall the pinned Cloud Hypervisor v%s runtime into %s", PinnedVMMVersion, rp.Dir)
+				return resolved, false
+			}
+			p.Facts["vmm_sha256"] = item.sha
+		}
+		p.Facts[item.key] = found
+		*item.dst = found
 	}
-	return rp, true
+	return resolved, true
 }
 
 func probeVMMVersion(ctx context.Context, d ProbeDeps, vmmPath string, facts map[string]string) string {

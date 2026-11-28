@@ -313,6 +313,9 @@ type HostInfo struct {
 	// Sandbox holds the full sandbox probe, added by `host doctor --json`
 	// (isolation spec 14.3).
 	Sandbox *CapProbe `json:"sandbox,omitempty"`
+	// KernelBugs holds host kernel advisory check results from the embedded
+	// list of known local root bugs (isolation spec 20.11).
+	KernelBugs []KernelBugResult `json:"kernel_bugs,omitempty"`
 }
 
 // SetupArgs asks the host to prepare itself.

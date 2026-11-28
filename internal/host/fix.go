@@ -69,6 +69,7 @@ func findFixes(a api.FixArgs) []fixItem {
 	out = append(out, oldHelpersFix()...)
 	out = append(out, oldRuntimeFix()...)
 	out = append(out, bwrapFix()...)
+	out = append(out, kvmFix()...)
 	return out
 }
 

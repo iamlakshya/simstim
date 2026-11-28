@@ -103,7 +103,7 @@ func TestFixesFindAndApply(t *testing.T) {
 
 	done := Fixes(api.FixArgs{Apply: true, IDs: []string{"current-link", "sockets", "old-helpers"}})
 	for _, f := range done {
-		if f.ID != "terminfo" && f.ID != bwrapFixID && (!f.Done || f.Error != "") {
+		if f.ID != "terminfo" && f.ID != bwrapFixID && f.ID != kvmFixID && (!f.Done || f.Error != "") {
 			t.Errorf("%s: %+v", f.ID, f)
 		}
 	}
@@ -122,7 +122,7 @@ func TestFixesFindAndApply(t *testing.T) {
 		}
 	}
 	for _, f := range Fixes(api.FixArgs{}) {
-		if f.ID != "terminfo" && f.ID != "linger" && f.ID != "restore-unit" {
+		if f.ID != "terminfo" && f.ID != "linger" && f.ID != "restore-unit" && f.ID != bwrapFixID && f.ID != kvmFixID {
 			t.Errorf("still to fix after the fixes: %+v", f)
 		}
 	}

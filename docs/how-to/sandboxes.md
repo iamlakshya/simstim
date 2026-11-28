@@ -23,9 +23,11 @@ simstim host show my-vps
 simstim host doctor my-vps
 ```
 
-The probe checks `bwrap` by running it in new user, mount, PID, network, IPC, UTS and cgroup namespaces, checks Landlock and seccomp in the kernel, and checks `/dev/kvm`, systemd and cgroup v2. When anything is missing, the output names what is missing with a `Try:` hint.
+The probe checks `bwrap` by running it in new user, mount, PID, network, IPC, UTS and cgroup namespaces, checks Landlock and seccomp in the kernel, and checks `/dev/kvm`, systemd and cgroup v2. For the Cloud Hypervisor `microvm` driver (`chv`), the probe checks Linux 6.8 or later, opens `/dev/kvm` read/write and verifies `KVM_GET_API_VERSION` returns `12`, records `systemd-detect-virt`, checks `mkfs.ext4`, and checks that the pinned `cloud-hypervisor`, `ch-remote` and guest kernel files are in the host's artefact store with a valid SHA-256 digest. When `/dev/kvm` is present but not open to your user, `host doctor` and `host doctor --fix` show the one-time `sudo` command to add your user to the `kvm` group (with `setfacl` as well when the `acl` package is installed), and `host show` names missing optional `acl` and `uidmap` packages. When anything is missing, the output names what is missing with a `Try:` hint.
 
-For scripts, `--json` includes the full probe under `sandbox`:
+`host doctor` also checks the host's Linux kernel against an embedded list of known local root vulnerabilities (starting with VsockDrop, `CVE-2026-53365`, and Vghost, `CVE-2026-74580`). On Debian and Ubuntu it compares the running kernel package version against the distribution's fixed package version using Debian version order; on other distributions it checks the upstream kernel version range and reports `maybe` so you can check your distribution's tracker. When an advisory names a mitigation (such as `vhost_vsock` not loaded for VsockDrop), `host doctor` reports the bug as mitigated. Kernel bug warnings never lower a host's wall floor or refuse a session start.
+
+For scripts, `--json` includes the full probe under `sandbox` and each kernel bug check result (with its `id` and `status`) under `kernel_bugs`:
 
 <!-- test: help (needs a reachable host) -->
 ```sh

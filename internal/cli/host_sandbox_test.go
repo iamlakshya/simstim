@@ -397,6 +397,40 @@ func TestPrintSandboxesBlockEdgeCases(t *testing.T) {
 			t.Errorf("expected no output when runsc is absent; rows=%q hints=%q", rows.String(), hints.String())
 		}
 	})
+
+	t.Run("microvm OK prints Cloud Hypervisor version", func(t *testing.T) {
+		var rows bytes.Buffer
+		p := api.CapProbe{
+			OS: "linux",
+			Walls: []api.WallProbe{{
+				Driver:  "chv",
+				Level:   api.LevelMicroVM,
+				Version: "55.0",
+				OK:      true,
+			}},
+		}
+		printMicroVMLine(&rows, p)
+		if !strings.Contains(rows.String(), "✓ Cloud Hypervisor 55.0") {
+			t.Errorf("rows = %q", rows.String())
+		}
+	})
+
+	t.Run("host show names missing optional acl and uidmap packages on KVM host", func(t *testing.T) {
+		var rows, hints bytes.Buffer
+		p := api.CapProbe{
+			OS:           "linux",
+			KVM:          api.KVM{Present: true, Usable: false},
+			HasSetfacl:   false,
+			HasNewuidmap: false,
+		}
+		printMissingHostPackages(&rows, &hints, p)
+		if !strings.Contains(rows.String(), "Optional host packages missing: acl, uidmap") {
+			t.Errorf("rows = %q", rows.String())
+		}
+		if !strings.Contains(hints.String(), "Try: sudo apt install acl uidmap") {
+			t.Errorf("hints = %q", hints.String())
+		}
+	})
 }
 
 func TestPrintHostSandboxSectionErrors(t *testing.T) {

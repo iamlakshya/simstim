@@ -63,6 +63,7 @@ func printSandboxesBlock(rows, hints io.Writer, hostName string, p api.CapProbe,
 	fmt.Fprintf(rows, "Sandboxes on %s:\n", hostName)
 	printSystemSummaryLine(rows, p)
 	printKVMLines(rows, hints, p)
+	printMicroVMLine(rows, p)
 	printGVisorLine(rows, hints, p)
 	printProcessWallLines(rows, hints, p)
 	printDiskLine(rows, p)
@@ -145,6 +146,23 @@ func printKVMLines(rows, hints io.Writer, p api.CapProbe) {
 		} else {
 			fmt.Fprintf(hints, "    Try: sudo usermod -aG %s %s (then reboot or restart your login session)\n", qGroup, qUser)
 		}
+	}
+}
+
+func printMicroVMLine(rows io.Writer, p api.CapProbe) {
+	for _, w := range p.Walls {
+		if w.Level != api.LevelMicroVM || !w.OK {
+			continue
+		}
+		detail := "Cloud Hypervisor"
+		if w.Driver != "" && w.Driver != "chv" {
+			detail = w.Driver
+		}
+		if w.Version != "" {
+			detail += " " + w.Version
+		}
+		fmt.Fprintf(rows, "  ✓ %s\n", detail)
+		return
 	}
 }
 

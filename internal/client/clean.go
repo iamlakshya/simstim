@@ -279,6 +279,27 @@ func CleanCapProbe(p api.CapProbe) api.CapProbe {
 	return p
 }
 
+// CleanKernelBugs cleans kernel bug check results from a host, to draw.
+func CleanKernelBugs(list []api.KernelBugResult) []api.KernelBugResult {
+	if list == nil {
+		return nil
+	}
+	out := make([]api.KernelBugResult, len(list))
+	for i, kb := range list {
+		out[i] = api.KernelBugResult{
+			ID:           CleanLine(kb.ID),
+			Name:         CleanLine(kb.Name),
+			Status:       CleanLine(kb.Status),
+			Severity:     CleanLine(kb.Severity),
+			Detail:       CleanLine(kb.Detail),
+			Fix:          CleanLine(kb.Fix),
+			URL:          CleanLine(kb.URL),
+			FixedVersion: CleanLine(kb.FixedVersion),
+		}
+	}
+	return out
+}
+
 // CleanHostInfo cleans every string of a host's doctor report, to draw.
 func CleanHostInfo(i HostInfo) HostInfo {
 	i.Hostname, i.OS, i.Arch = CleanLine(i.Hostname), CleanLine(i.OS), CleanLine(i.Arch)
@@ -288,6 +309,7 @@ func CleanHostInfo(i HostInfo) HostInfo {
 	i.Checks = CleanChecks(i.Checks)
 	i.AgentChecks = CleanAgentChecks(i.AgentChecks)
 	i.Walls = CleanWallProbes(i.Walls)
+	i.KernelBugs = CleanKernelBugs(i.KernelBugs)
 	if i.Sandbox != nil {
 		clean := CleanCapProbe(*i.Sandbox)
 		i.Sandbox = &clean

@@ -1,0 +1,179 @@
+# Host kernel bugs that give an unprivileged user root. Each entry cites its advisory.
+# Format and matching rules are defined in isolation spec 20.11.
+schema = 1
+
+[[bug]]
+id = "CVE-2026-53365"
+name = "VsockDrop"
+what = "an unprivileged local user becomes root through vsock and io_uring"
+url = "https://access.redhat.com/security/cve/cve-2026-53365"
+checked = "2026-11-28"
+mitigated_by = ["module:vhost_vsock=absent"]
+root_step = "vsock-modules"
+
+# Upstream: affects Linux 6.7 through 7.0.10; fixed in 6.12.97, 6.18.34 and 7.0.11.
+[[bug.upstream]]
+from = "6.7.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.8.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.9.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.10.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.11.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.12.0"
+fixed = "6.12.97"
+
+[[bug.upstream]]
+from = "6.13.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.14.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.15.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.16.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.17.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.18.0"
+fixed = "6.18.34"
+
+[[bug.upstream]]
+from = "7.0.0"
+fixed = "7.0.11"
+
+[[bug.distro]]
+id = "debian"
+version_id = "13"
+series = "6.12"
+fixed = "6.12.100-1"
+
+[[bug.distro]]
+id = "debian"
+version_id = "12"
+series = "6.12"
+fixed = "6.12.100-1~deb12u1"
+
+[[bug.distro]]
+id = "ubuntu"
+version_id = "24.04"
+series = "7.0"
+fixed = "7.0.0-28.28~24.04.1"
+
+[[bug]]
+id = "CVE-2026-74580"
+name = "Vghost"
+what = "a user who can open a /dev/vhost-* node becomes root, and in some setups a guest can write host memory"
+url = "https://matrix.tencent.com/en/2026/10/12/vghost-cve-2026-74580"
+checked = "2026-11-28"
+
+# Upstream: fixed in 5.10.265, 5.15.216, 6.1.183, 6.6.152, 6.12.104 and 6.18.45.
+[[bug.upstream]]
+from = "5.10.0"
+fixed = "5.10.265"
+
+[[bug.upstream]]
+from = "5.15.0"
+fixed = "5.15.216"
+
+[[bug.upstream]]
+from = "6.1.0"
+fixed = "6.1.183"
+
+[[bug.upstream]]
+from = "6.6.0"
+fixed = "6.6.152"
+
+[[bug.upstream]]
+from = "6.7.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.8.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.9.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.10.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.11.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.12.0"
+fixed = "6.12.104"
+
+[[bug.upstream]]
+from = "6.13.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.14.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.15.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.16.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.17.0"
+fixed = ""
+
+[[bug.upstream]]
+from = "6.18.0"
+fixed = "6.18.45"
+
+[[bug.distro]]
+id = "debian"
+version_id = "13"
+series = "6.12"
+fixed = "6.12.105-1"
+
+[[bug.distro]]
+id = "debian"
+version_id = "12"
+series = "6.1"
+fixed = "6.1.190-1"
+
+[[bug.distro]]
+id = "debian"
+version_id = "12"
+series = "6.12"
+fixed = "6.12.113-1~deb12u1"
+
+[[bug.distro]]
+id = "ubuntu"
+version_id = "24.04"
+series = "6.8"
+fixed = "6.8.0-149.149"
