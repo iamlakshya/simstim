@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 40 |
-| To do | 59 |
+| Done | 41 |
+| To do | 58 |
 | **All** | **99** |
 
 ## Current focus
@@ -83,7 +83,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | C7 | cli | Day 1 | Done | Host commands |
 | C8 | cli | Day 1 | Done | Agents: install and log in |
 | C9 | cli | Day 1 | Done | `config check` |
-| C10 | cli | Day 1 | To do | Completion |
+| C10 | cli | Day 1 | Done | Completion |
 | C11 | cli | Day 1 | To do | The launcher and the CLI agree |
 | C12 | cli | Day 1 | Done | Docs for agents |
 | T1 | test reliability | Day 1 | Done | The fake envd hang and the input and kill fixes |
