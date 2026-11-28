@@ -10,7 +10,7 @@ Bring a session's branch into the git repository you are in.
 simstim pull <host>/<session> [flags]
 ```
 
-Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch of the repository in the current folder: the same name, or `--into`. It changes neither working tree.
+Fetches the branch that the session's folder has checked out, as a git bundle verified into a quarantine ref, reviews flagged files, and updates a branch of the current repository: the same name, or `--into`. It changes neither working tree and works over any host transport.
 
 ## Examples
 
@@ -23,6 +23,7 @@ simstim pull my-vps/auth-fix --into review/auth-fix
 
 | Flag | What it does |
 | --- | --- |
+| `--allow-flagged` | update the branch even when the diff touches flagged files |
 | `--force` | move the local branch even when the fetch is not a fast-forward |
 | `--into <string>` | the local branch to fetch into (default: the session's branch name) |
 

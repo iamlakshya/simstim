@@ -10,9 +10,9 @@ import (
 // moreFeatures are the features that set hosts and sessions up: the requests
 // in this file, a new session's secrets (secrets.go), its missing folder
 // (folders.go), trust in a repository's setup script (setup.go), the resume
-// of a session whose agent ended (resume.go), and stopping a session while
-// keeping its state (stop.go).
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop"}
+// of a session whose agent ended (resume.go), stopping a session while
+// keeping its state (stop.go), and SFTP/SSH-exec/bundle-pull file transfers.
+var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle}
 
 func init() { Features = append(Features, moreFeatures...) }
 

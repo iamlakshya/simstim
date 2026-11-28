@@ -26,7 +26,9 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | --- | --- |
 | [Worktrees](worktrees.md) | Give each task its own git worktree and branch |
 | [Setup hooks](setup-hooks.md) | Prepare each new session or worktree with the repository's own script |
-| [Bring work to your laptop](pull.md) | Fetch a session's branch into your own clone |
+| [Bring work to your laptop](pull.md) | Fetch a session's branch as a verified git bundle into your own clone |
+| [Copy files in and out](copy-files.md) | Copy files and folders between your laptop and a session over SFTP |
+| [Open a session in an editor](editors.md) | Connect VS Code, Cursor, Zed, `scp`, `sftp`, `rsync` and `ssh` to a session |
 | [Ports](ports.md) | Open a web server that runs in a session |
 | [Network policy](policy.md) | Control which hosts and DNS names a walled session may reach |
 | [Paste images](image-paste.md) | Paste a screenshot into a remote agent |

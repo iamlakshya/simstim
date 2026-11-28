@@ -20,6 +20,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/klauspost/compress v1.19.2
 	github.com/muesli/cancelreader v0.2.2
+	github.com/pkg/sftp v1.13.13
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	go.yaml.in/yaml/v3 v3.0.5
@@ -44,6 +45,7 @@ require (
 	github.com/docker/docker-credential-helpers v0.9.3 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/kr/fs v0.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect

@@ -246,7 +246,7 @@ Its kind is `KindFailed`, and its code is `internal`.
 
 - `TestEveryUserErrorHasHint` parses every Go file under `internal/` with `go/ast`, except tests, which build bare errors on purpose. It fails, with the file and line, on a `client.UserError` literal, under any name of the import, without a `Code` or with an empty `Hint`, also one made of constants, such as `"" + ""`. It also fails on `new(client.UserError)`, on a zero `UserError`, and on an empty constant set into a field named `Code` or `Hint`. A value that is empty only at run time cannot be read from the source: `TestDescribeAlwaysHasATry` checks that every error still gets a `Try:` line.
 - Golden tests of `printError` for each kind, with colour and without.
-- A table test of suggestions, with the whole list and the `Try:` line: `list` gives `ls`, `run` gives `new`, `at` gives `attach`, `ssh box` gives none, `kil` gives `rm`, `LS` gives `ls`, `Attach` gives `attach`, and `x` and `d` give none. A test that the `Try:` line fixes the word where the parser found it, as in `--debug-file atach atach box/abcd2345`, and only the word of the unknown name, as in `new --dir bo/s bo` and `agents install --host cluade cluade`. Round-trip tests of the suggestions for `rn box/A -y`, `rm box/A --yse`, `kil`, `flip … --restrt` and an unknown host, with two sessions whose names clean to the same text: each `Try:` line names the session by `host/ID`, or lists the sessions.
+- A table test of suggestions, with the whole list and the `Try:` line: `list` gives `ls`, `run` gives `new`, `at` gives `attach`, `ssh box` gives `ssh-config`, `foo box` gives none, `kil` gives `rm`, `LS` gives `ls`, `Attach` gives `attach`, and `x` and `d` give none. A test that the `Try:` line fixes the word where the parser found it, as in `--debug-file atach atach box/abcd2345`, and only the word of the unknown name, as in `new --dir bo/s bo` and `agents install --host cluade cluade`. Round-trip tests of the suggestions for `rn box/A -y`, `rm box/A --yse`, `kil`, `flip … --restrt` and an unknown host, with two sessions whose names clean to the same text: each `Try:` line names the session by `host/ID`, or lists the sessions.
 - A test that every synonym target exists in `Root()`.
 - A test that `host ad` fails with exit code 2, and `host` alone prints help and exits with 0.
 - A test that `doctor termnal` fails with exit code 2 and suggests `terminal`, and that `doctor` alone runs its checks.
@@ -395,12 +395,13 @@ Try: simstim rm box/abcd2345 -y
 | Command | Question | Default | Flag | Input off |
 | --- | --- | --- | --- | --- |
 | `cp` | Copy the listed files that can run code or expose session data? | No | `--allow-flagged` | Fail with `cp_flagged` |
+| `pull` | Update the local branch with these flagged changes? | No | `--allow-flagged` | Fail with `pull_flagged` |
 | `image save` | Save the image with these reviewed changes? | No | `--allow-flagged` | Fail with `image_flagged` |
 | `rewind` | Restore the selected disk checkpoint, after showing its time and changed branches? | No | `-y` | Fail; a missing checkpoint number also needs an answer |
 | `rewind` with a secret or SSH key that `[secret_tiers]` marks `shared`, for a `shared` host | Send the selected value to this host for this exact rewind? | No | None | Refuse, with exit code 5 |
 | `rm` | `Delete auth-fix on box?` with what stops and what stays | No | `-y` | Fail, after the end of section 3 |
 | `attach` on an ended agent | `Start claude again in auth-fix on box? [Y/n]` | Yes | `--restart` | Fail |
-| `ssh-config` after preparing its generated files | `Add this Include to the top of your SSH config? [y/N]` | No | None | Keep: leave the generated files ready without changing the user's config |
+| `ssh-config` after preparing its generated files | `Add this Include to the top of your SSH config? [y/N]` | No | `--yes` | Keep: leave the generated files ready without changing the user's config |
 | `new`, missing folder | `Make it? [y/N]` | No | `--mkdir` | Fail |
 | `new`, a repository's setup script | `Run it? [y/N]` | No | `--setup-script`, `--no-setup-script` | Keep: skip it, with today's note |
 | `host add` | Install the helper | No | `--yes` | Fail |

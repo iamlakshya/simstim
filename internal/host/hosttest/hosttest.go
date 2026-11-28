@@ -39,54 +39,7 @@ import (
 // "keytest". Call it from TestMain. The tests run in a home of their own
 // (testhome), so no test reads or writes the user's real folders.
 func Main(m *testing.M) {
-	if len(os.Args) >= 3 {
-		switch os.Args[1] {
-		case "holder":
-			if err := host.RunHolder(os.Args[2]); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			os.Exit(0)
-		case "supervise":
-			if err := supervisor.Run(os.Args[2]); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			os.Exit(0)
-		case "hook":
-			host.RunHook(os.Args[2], os.Args[3:])
-			os.Exit(0)
-		case "rm-as-caller":
-			rmAsCaller(os.Args[2:])
-		case "git-op":
-			if err := host.RunGitOp(os.Args[2:], os.Stdin, os.Stdout); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			os.Exit(0)
-		}
-	}
-	// A helper that this binary stands in for, reached through a fake
-	// ssh, serves the bridge.
-	if len(os.Args) >= 2 && os.Args[1] == "bridge" {
-		if err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-	if len(os.Args) == 2 && os.Args[1] == "wall-init" {
-		if err := guest.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
-		os.Exit(0)
-	}
-	if len(os.Args) == 2 && os.Args[1] == "keytest" {
-		if err := host.KeyTest(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
+	if handled := runHelperSubcommand(os.Args[1:]); handled {
 		os.Exit(0)
 	}
 	done, err := testhome.Isolate()
@@ -103,6 +56,62 @@ func Main(m *testing.M) {
 	code := m.Run()
 	done()
 	os.Exit(ExitCode(code))
+}
+
+func runHelperSubcommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "bridge":
+		mustRun(host.RunBridge(host.BridgeInput(os.Stdin, args[1:]), os.Stdout))
+		return true
+	case "wall-init":
+		if len(args) == 1 {
+			mustRun(guest.Run())
+			return true
+		}
+		return false
+	case "keytest":
+		if len(args) == 1 {
+			mustRun(host.KeyTest())
+			return true
+		}
+		return false
+	}
+	if len(args) < 2 {
+		return false
+	}
+	switch args[0] {
+	case "holder":
+		mustRun(host.RunHolder(args[1]))
+	case "supervise":
+		mustRun(supervisor.Run(args[1]))
+	case "hook":
+		host.RunHook(args[1], args[2:])
+	case "rm-as-caller":
+		rmAsCaller(args[1:])
+	case "git-op":
+		mustRun(host.RunGitOp(args[1:], os.Stdin, os.Stdout))
+	case "sftp":
+		mustRun(host.RunSFTP(args[1], os.Stdin, os.Stdout))
+	case "ssh-exec":
+		mustRun(host.RunSSHExec(args[1], os.Stdin, os.Stdout))
+	case "dial-port":
+		mustRun(host.RunDialPort(args[1:], os.Stdin, os.Stdout))
+	case "pull-bundle":
+		mustRun(host.RunPullBundle(args[1], os.Stdin, os.Stdout))
+	default:
+		return false
+	}
+	return true
+}
+
+func mustRun(err error) {
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }
 
 // ExitCode is the test binary's exit code for the code of its tests' run.

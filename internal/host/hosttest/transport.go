@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 
 	"github.com/iamlakshya/simstim/internal/client"
@@ -96,8 +97,11 @@ func (t *Transport) Start(ctx context.Context, remote string) (client.Proc, erro
 	}
 	t.open[p] = true
 	stop := context.AfterFunc(ctx, p.Kill)
-	go func() { //nolint:contextcheck // RunBridge has no context: like the real bridge, it runs until its input closes, and ctx closes it through Kill
-		p.err = host.RunBridge(inR, outW)
+	go func() { //nolint:contextcheck // RunBridge and friends have no context: like the real helper, they run until their input closes, and ctx closes them through Kill
+		p.err = runHelperInProcess(remote, inR, outW)
+		if p.err != nil {
+			p.stderr = p.err.Error()
+		}
 		stop()
 		_ = outW.Close()
 		_ = inR.Close()
@@ -109,18 +113,80 @@ func (t *Transport) Start(ctx context.Context, remote string) (client.Proc, erro
 	return p, nil
 }
 
+// runHelperInProcess dispatches the helper's streaming subcommands in this
+// process over pipes, matching what the real host helper does over SSH.
+func runHelperInProcess(remote string, in io.Reader, out io.Writer) error {
+	args := splitRemoteArgs(remote)
+	if len(args) >= 3 {
+		switch args[1] {
+		case "sftp":
+			return host.RunSFTP(args[2], in, out)
+		case "ssh-exec":
+			return host.RunSSHExec(args[2], in, out)
+		case "dial-port":
+			return host.RunDialPort(args[2:], in, out)
+		case "pull-bundle":
+			return host.RunPullBundle(args[2], in, out)
+		}
+	}
+	return host.RunBridge(in, out)
+}
+
+// splitRemoteArgs parses whitespace-separated tokens from a POSIX shell
+// command line with optional single-quoted words (as shellWord produces).
+func splitRemoteArgs(s string) []string {
+	var out []string
+	var cur strings.Builder
+	inToken, inSingle := false, false
+	for i := range len(s) {
+		c := s[i]
+		switch {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			} else {
+				cur.WriteByte(c)
+			}
+		case c == '\'':
+			inSingle = true
+			inToken = true
+		case c == ' ' || c == '\t' || c == '\n':
+			if inToken {
+				out = append(out, cur.String())
+				cur.Reset()
+				inToken = false
+			}
+		default:
+			cur.WriteByte(c)
+			inToken = true
+		}
+	}
+	if inToken {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
 type bridgeProc struct {
-	in   *io.PipeWriter
-	out  *io.PipeReader
-	done chan struct{}
-	err  error
+	in     *io.PipeWriter
+	out    *io.PipeReader
+	done   chan struct{}
+	err    error
+	stderr string
 }
 
 var errKilled = errors.New("killed")
 
 func (p *bridgeProc) Stdin() io.WriteCloser { return p.in }
 func (p *bridgeProc) Stdout() io.Reader     { return p.out }
-func (p *bridgeProc) Stderr() string        { return "" }
+func (p *bridgeProc) Stderr() string {
+	select {
+	case <-p.done:
+		return p.stderr
+	default:
+		return ""
+	}
+}
 
 func (p *bridgeProc) Wait() error {
 	<-p.done

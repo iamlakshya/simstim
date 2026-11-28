@@ -301,6 +301,40 @@ type privateFolder struct {
 	info os.FileInfo
 }
 
+// CheckSensitiveLocalPath reports why a laptop file or folder path is private
+// and must not be uploaded into a session (the paste guard's rules, spec 7.6
+// and 21.1), or "" when it is allowed.
+func CheckSensitiveLocalPath(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "could not be checked (" + err.Error() + ")"
+	}
+	resolved, err = filepath.Abs(resolved)
+	if err != nil {
+		return "could not be checked (" + err.Error() + ")"
+	}
+	folders := privateFolderInfos()
+	for _, p := range []string{path, resolved} {
+		if why := inPrivateFolder(p, folders); why != "" {
+			return why
+		}
+		// Also refuse copying a private folder itself (for example ~/.ssh).
+		if st, err := os.Stat(p); err == nil {
+			for _, f := range folders {
+				if os.SameFile(st, f.info) {
+					return "is ~/" + f.name + ", a private folder"
+				}
+			}
+		}
+	}
+	for _, p := range []string{path, resolved} {
+		if why := privateName(filepath.Base(p)); why != "" {
+			return why
+		}
+	}
+	return ""
+}
+
 // privateFolderInfos finds the private folders that exist. os.Stat follows
 // a folder that is a link, so the identity is that of its target.
 func privateFolderInfos() []privateFolder {

@@ -71,6 +71,12 @@ var commands = map[string]func(args []string) error{
 	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
 	// The egress process for one walled session, attached to fd 3.
 	"egress": runEgress,
+	// SFTP, exec/shell, loopback port dial and bundle pull for the client's
+	// files and editors path (spec 6.10, 17.7, 21.1). Not for people.
+	"sftp":        runSFTP,
+	"ssh-exec":    runSSHExec,
+	"dial-port":   func(args []string) error { return host.RunDialPort(args, os.Stdin, os.Stdout) },
+	"pull-bundle": runPullBundle,
 	// The phone path: experimental, and left out of the usage on purpose
 	// until it is launched (docs/contributing/phone-path.md).
 	"pick":      func([]string) error { return host.RunPick(os.Stdin, os.Stdout) },
@@ -133,6 +139,27 @@ func runEgress(args []string) error {
 		return fmt.Errorf("usage: %s egress <id>. Try: start egress from the session supervisor with fd 3 connected", brand.HostBinary)
 	}
 	return egress.Run(args[0])
+}
+
+func runSFTP(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: %s sftp <id>", brand.HostBinary)
+	}
+	return host.RunSFTP(args[0], os.Stdin, os.Stdout)
+}
+
+func runSSHExec(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: %s ssh-exec <id>", brand.HostBinary)
+	}
+	return host.RunSSHExec(args[0], os.Stdin, os.Stdout)
+}
+
+func runPullBundle(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: %s pull-bundle <id>", brand.HostBinary)
+	}
+	return host.RunPullBundle(args[0], os.Stdin, os.Stdout)
 }
 
 func runLs(args []string) error {

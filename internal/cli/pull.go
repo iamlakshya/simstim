@@ -10,32 +10,76 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/client/review"
 )
 
 func pullCmd() *cobra.Command {
 	var into string
-	var force bool
+	var force, allowFlagged bool
 	cmd := &cobra.Command{
 		Use:   "pull <host>/<session>",
 		Short: "Bring a session's branch into the git repository you are in",
-		Long: "Fetches the branch that the session's folder has checked out, over your SSH connection, into a branch\n" +
-			"of the repository in the current folder: the same name, or --into. It changes neither working tree.",
+		Long: "Fetches the branch that the session's folder has checked out, as a git bundle verified into a quarantine ref,\n" +
+			"reviews flagged files, and updates a branch of the current repository: the same name, or --into.\n" +
+			"It changes neither working tree and works over any host transport.",
 		Example: "  " + brand.Name + " pull my-vps/auth-fix\n  " + brand.Name + " pull my-vps/auth-fix --into review/auth-fix",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := gitHere(cmd.Context(), "rev-parse", "--show-toplevel"); err != nil {
 				return &client.UserError{Msg: "this folder is not in a git repository", Hint: "Run pull again in your clone of the repository.", Code: "not_a_repo"}
 			}
-			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, _ *client.Conn, s *client.Session) error {
+			return withSession(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
+				if conn.HasFeature(api.FeaturePullBundle) {
+					return pullBundle(cmd, ctx, h, s, into, force, allowFlagged)
+				}
 				return pull(ctx, h, s, into, force)
 			})
 		},
 	}
 	cmd.Flags().StringVar(&into, "into", "", "the local branch to fetch into (default: the session's branch name)")
 	cmd.Flags().BoolVar(&force, "force", false, "move the local branch even when the fetch is not a fast-forward")
+	cmd.Flags().BoolVar(&allowFlagged, "allow-flagged", false, "update the branch even when the diff touches flagged files")
 	return cmd
+}
+
+func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *client.Session, into string, force, allowFlagged bool) error {
+	p := prompts(cmd)
+	confirm := func(res review.Result) (bool, error) {
+		if !p.on {
+			return false, nil
+		}
+		fmt.Fprintf(os.Stderr, "Flagged changes: %s\n", client.CleanLine(res.Summary()))
+		return p.yesNo("Update the local branch with these flagged changes?", false)
+	}
+	res, err := client.PullBundle(ctx, h, s, client.PullBundleOptions{
+		LocalRepo:      ".",
+		Into:           into,
+		Force:          force,
+		AllowFlagged:   allowFlagged,
+		ConfirmFlagged: confirm,
+	})
+	if err != nil {
+		return err
+	}
+	if res.NothingNew {
+		fmt.Fprintf(os.Stderr, "Nothing new on %s from %s on %s.\n", client.CleanLine(res.Branch), client.CleanLine(s.Name), h.Name)
+		if res.Dirty > 0 {
+			fmt.Fprintf(os.Stderr, "The session has %d files with uncommitted changes; they stay on the host until they are committed there.\n", res.Dirty)
+		}
+		return nil
+	}
+	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", client.CleanLine(res.Branch), client.CleanLine(s.Name), h.Name, client.CleanLine(res.Into))
+	if res.Ahead != "" && res.Ahead != "0" {
+		fmt.Fprintf(os.Stderr, ": %s commits that your current branch does not have", res.Ahead)
+	}
+	fmt.Fprintln(os.Stderr, ".")
+	if res.Dirty > 0 {
+		fmt.Fprintf(os.Stderr, "The session has %d files with uncommitted changes; they stay on the host until they are committed there.\n", res.Dirty)
+	}
+	return nil
 }
 
 func pull(ctx context.Context, h client.Host, s *client.Session, into string, force bool) error {

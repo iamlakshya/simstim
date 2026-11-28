@@ -5504,40 +5504,35 @@ Each warning's hint names the root step that removes the path when one exists, s
 
 This section specifies the tasks of phases 5 to 8 that the sections above only name. Each subsection gives the behaviour, the inputs, the errors and the tests of one task. Paths use today's name, as section 14 does. This section calls a choice that no source supports a project choice. It marks a fact that nobody could check UNVERIFIED, and names the task step that checks it first.
 
-### 21.1 Copy files in and out (P5.2)
+### 21.1 Copy files in and out (P5.2, rebuilt on SFTP per decision 0053)
 
-`cp` copies files between the laptop and a running sandbox. It is a second file channel beside `pull`, so it gets the same care. Docker Sandboxes' `cp` followed symlinks that a sandbox planted (CVE-2026-103916), and its tar extraction wrote outside its target (CVE-2026-17106) ([research](../research/isolation.md#13-supply-chain-incidents-aimed-at-developers)).
+`cp` copies files and folders between the laptop and a session over `github.com/pkg/sftp`, sharing the host helper's SFTP path with `ssh-proxy` (17.7) rather than custom `get`/`put` stream kinds or `cp.list`/`cp.read` ops. Docker Sandboxes' `cp` followed symlinks that a sandbox planted (CVE-2026-103916), and its tar extraction wrote outside its target (CVE-2026-17106) ([research](../research/isolation.md#13-supply-chain-incidents-aimed-at-developers)).
 
 **Inputs.**
 
-- `simstim cp <host>/<session>:<path> <laptop path> [-f] [--allow-flagged]` copies out of the sandbox.
-- `simstim cp <laptop path> <host>/<session>:<path> [-f]` copies into the sandbox.
-- A path in the sandbox lies under `/work`, the agent's home folder `/home/agent` (7.1), `/tmp` or `/mnt`. It is absolute, or starts with `~/`, which the client turns into `/home/agent/` before it sends the path. The guest never expands a path.
+- `simstim cp <host>/<session>:<path> <laptop path> [-f] [--allow-flagged]` copies out of the session.
+- `simstim cp <laptop path> <host>/<session>:<path> [-f]` copies into the session.
+- A relative remote path starts in the session's workspace (`m.Cwd`, set via `sftp.WithServerWorkingDirectory`). On walled sessions (once the process wall lands), the guest init serves the same SFTP protocol as the user `agent`.
 - The source is a file or a folder. A folder copies with its files and folders, at most 10,000 entries.
-- The sandbox must run. A stopped one fails with `sandbox_stopped` (9.3), whose hint wakes it.
-- `sandbox.cp_max` (256 MiB) caps the bytes of one command, in both directions. The value is a project choice, between `copy_max` (17.3) and `pull_max` (6.10).
-- The session ops `cp.list` and `cp.read` (10.4), the `ctl` op `cp.list` (10.3), the stream kinds `get` and `put` (10.2), and the feature `cp` (10.5).
+- `sandbox.cp_max` (256 MiB by default) caps the bytes of one command, in both directions.
+- The bridge advertises the `sftp`, `ssh-exec` and `pull.bundle` features (10.5). No `cp.list`, `cp.read` or `get` stream kind is needed.
 
 **Out.**
 
-1. The client sends `cp.list` with the path. The supervisor passes it to the guest init on the `ctl` stream. The guest init answers with the entries: a relative path, a type and a size.
-2. The supervisor caps the answer at 10,000 entries and 1 MiB. It cleans each path with `api.CleanText`, and drops a path that the cleaning changes.
-3. The client adds up the sizes. A total above `sandbox.cp_max` stops the copy with `cp_too_big`. The client skips symlinks and special files, and lists them.
-4. The client checks each destination path, as it will land on the laptop, against the path rules of 7.1 (`internal/client/review/flags.toml`). A rule about a change inside a file, such as `scripts` in `package.json`, flags the file by its name. Flagged files stop the copy with `cp_flagged`, unless the user answers yes at a terminal or passed `--allow-flagged`.
-5. The client opens the destination's parent folder with `os.Root`. `os.Root` follows a symlink that stays inside the folder, so the client also checks each folder on the way to each destination with `Root.Lstat`. It refuses a symlink there with `cp_path`. It refuses a name that is empty, `.` or `..`, or that holds `/`, NUL or a control character, with `cp_path`. It refuses a destination with a `.git` part, with `cp_git`. It refuses two entries whose names differ only in case, with `cp_path`, because the laptop's file system may not tell them apart.
-6. An existing destination stops the copy with `cp_exists`, unless the command has `-f`. The client checks every destination before it writes one, so a refusal changes nothing.
-7. For each file, the client sends `cp.read` with the path and an offset, as `pull.read` does (6.10). The supervisor opens a `get` stream for the file, and passes its bytes in chunks of 1 MiB. A file that sends more bytes than its listed size stops the copy with `cp_too_big`.
-8. The client writes each file under a temporary name in its folder. When every file has arrived, it checks their bytes against the content rules of 7.1: hidden text and the session's secrets. Each line counts as added. A flagged file stops the copy as in step 4, and the client removes the temporary files. Then the client moves each file into place. Without `-f`, it makes a hard link that fails when the name exists, then removes the temporary name. So it never replaces a file that appeared after step 6. With `-f`, it renames, which replaces a symlink and never follows it.
-9. Files arrive with mode 0644, and folders with 0755. The guest's modes, owners and times do not cross. This is a project choice: a file from a sandbox becomes a program on the laptop only after the user's own `chmod`.
+1. The client opens a `pkg/sftp` client over the host's transport (`<helper> sftp <id>`, or the `sftp` link stream on a walled session) and walks the source with `Lstat` and `ReadDir`, skipping symlinks and special files and listing them.
+2. The client validates every relative path: it refuses names that are empty, `.` or `..`, hold NUL or control characters, change under `api.CleanText`, contain a `.git` segment (`cp_git`), or collide in case with another entry (`cp_path`).
+3. A total size above the cap stops the copy with `cp_too_big`.
+4. The client checks each destination path against the path rules of 7.1 (`internal/client/review/flags.toml`). Flagged files stop the copy with `cp_flagged`, unless the user answers yes at a terminal or passed `--allow-flagged`.
+5. The client opens the destination root with `os.OpenRoot`, checks every ancestor directory with `Root.Lstat` to refuse symbolic links (`cp_path`), and checks pre-existing destinations before writing anything (`cp_exists` without `-f`).
+6. Each file streams from SFTP into a temporary file inside `os.Root` under both per-file and cumulative byte caps. Files are checked against the content rules of 7.1 (hidden Unicode text and `.gitmodules` carriage returns, CVE-2025-48384). Without `-f`, finalisation uses `Root.Link` followed by `Root.Remove` so a concurrent file is never overwritten. With `-f`, it uses `Root.Rename`, which replaces a symlink without following it.
+7. Files arrive with mode `0644` and folders with `0755`. The remote modes, owners and times do not cross.
 
 **In.**
 
-1. The client reads each laptop file through `os.Root`. It refuses the paths that the paste guard refuses (7.6), with `copy_sensitive`, as `copy_in` does (17.3).
-2. The client sends each file with the upload frames that paste uses (7.6). `proto.UploadBegin` gains two fields: `path`, the guest path, and `replace`.
-3. The supervisor writes each file into the guest on a `put` stream. The guest init writes it as the user `agent`, through `os.Root` opened at the top folder of the path. It makes missing folders.
-4. An existing file in the guest stops the copy with `cp_exists`, unless the command has `-f`.
+1. The client checks each local path against the paste guard's private folder and private name rules (7.6), refusing matches with `copy_sensitive`.
+2. The client reads local files and folders strictly through `os.Root`, skipping symlinks and special files, checks remote destinations when `-f` is not set (`cp_exists`), and writes files over SFTP (atomically via temporary file and `PosixRename` when `-f` is set).
 
-**Both ways.** The guest init reads and writes as the user `agent`. So a symlink in the sandbox reaches only what the agent can already read. No side extracts a tar. Each file writes an audit line `cp_in` or `cp_out`, with its path and size.
+**Both ways.** No side extracts or imports `archive/tar`. For editors, `scp`, `sftp`, `rsync` and plain `ssh`, `ssh-config` and `ssh-proxy` (17.7) reuse the same SFTP and exec helper paths.
 
 **Errors.**
 

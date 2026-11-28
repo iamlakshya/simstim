@@ -22,6 +22,7 @@ Sessions:
   ports       List the TCP ports a session's processes listen on
   forward     Forward a session's ports to localhost: all, or those you name
   pull        Bring a session's branch into the git repository you are in
+  cp          Copy files or folders into or out of a session over SFTP
   flip        Switch sessions: pick from the sessions of every host, and attach
 
 Hosts:
@@ -38,6 +39,7 @@ Setup and help:
   doctor      Check this machine and its terminal
   debug       Record why a session goes wrong: debug files, profiles and traces
   config      Show the configuration
+  ssh-config  Set up SSH for editors, scp, sftp and rsync into sessions
   demo        Try the launcher with sample data (nothing connects anywhere)
   version     Print the version
   completion  Generate the autocompletion script for the specified shell

@@ -36,6 +36,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`ports`](ports.md) | List the TCP ports a session's processes listen on |
 | [`forward`](forward.md) | Forward a session's ports to localhost: all, or those you name |
 | [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
+| [`cp`](cp.md) | Copy files or folders into or out of a session over SFTP |
 | [`flip`](flip.md) | Switch sessions: pick from the sessions of every host, and attach |
 
 ## Hosts
@@ -98,6 +99,7 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`config`](config.md) | Show the configuration |
 | [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
 | [`config path`](config_path.md) | Print where the configuration lives |
+| [`ssh-config`](ssh-config.md) | Set up SSH for editors, scp, sftp and rsync into sessions |
 | [`demo`](demo.md) | Try the launcher with sample data (nothing connects anywhere) |
 | [`version`](version.md) | Print the version |
 | [`help`](help.md) | Show the help of a command or a topic |

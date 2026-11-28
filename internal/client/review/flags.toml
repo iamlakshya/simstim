@@ -1,0 +1,60 @@
+# Paths that can run code on the laptop or in CI (spec 7.1).
+# The tool's own configuration folder is added from internal/brand at runtime.
+
+[[rule]]
+category = "git"
+patterns = [
+  ".githooks/**",
+  ".husky/**",
+  ".gitmodules",
+  ".gitattributes",
+]
+
+[[rule]]
+category = "CI"
+patterns = [
+  ".github/workflows/**",
+  ".gitlab-ci.yml",
+  ".circleci/**",
+  "azure-pipelines.yml",
+  "Jenkinsfile",
+]
+
+[[rule]]
+category = "build and install"
+patterns = [
+  "package.json",
+  "binding.gyp",
+  "Makefile",
+  "setup.py",
+  "build.rs",
+  "pyproject.toml",
+]
+
+[[rule]]
+category = "agent project files"
+patterns = [
+  ".claude/**",
+  "CLAUDE.md",
+  ".mcp.json",
+  "AGENTS.md",
+  ".codex/**",
+]
+
+[[rule]]
+category = "editor and shell"
+patterns = [
+  ".vscode/tasks.json",
+  ".vscode/settings.json",
+  ".idea/**",
+  ".envrc",
+]
+
+[[rule]]
+category = "registry config"
+patterns = [
+  ".npmrc",
+  ".yarnrc.yml",
+  "pip.conf",
+  ".cargo/config.toml",
+]

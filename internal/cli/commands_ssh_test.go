@@ -127,20 +127,9 @@ func TestPull(t *testing.T) {
 	gitc(local, "checkout", "-q", "feature")
 	fails(t, "is the branch you have checked out here", "pull", "box/repo")
 	fails(t, "is not in a git repository", "pull", "box/feat")
-	// Each ssh that pull runs, its own and the fetch's, forwards nothing.
-	lines := sshLines(t, th)
-	if !slices.ContainsFunc(lines, func(l string) bool { return strings.Contains(l, "upload-pack") }) {
-		t.Errorf("the fetch did not use the client's ssh: %q", lines)
-	}
-	for _, line := range lines {
-		if !strings.Contains(line, noForwarding+" ") || !strings.Contains(line, noPorts+" ") {
-			t.Errorf("pull ran ssh with %q, want %q and %q", line, noForwarding, noPorts)
-		}
-	}
-	// The host's git ran in the helper's git-op, over the client's SSH.
-	log, _ := os.ReadFile(filepath.Join(th.h.Home, "ssh.log"))
-	if !strings.Contains(string(log), "git-op repo.info") {
-		t.Errorf("pull did not run git-op repo.info on the host: %s", log)
+	// pull transfers the branch via pull-bundle over the host transport.
+	if !slices.ContainsFunc(th.tr.Remotes(), func(l string) bool { return strings.Contains(l, "pull-bundle") }) {
+		t.Errorf("pull did not run pull-bundle over the host transport: %q", th.tr.Remotes())
 	}
 }
 
