@@ -101,13 +101,9 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
-	pkgLevel, err := api.ParsePackageManagers(a.PackageManagers)
+	ws, err := checkWalledSettings(a)
 	if err != nil {
-		return nil, UserError("package_level_invalid", api.PackageLevelMessage(a.PackageManagers), api.PackageLevelHint)
-	}
-	_, minAge, err := api.ParseMinReleaseAge(a.MinReleaseAge)
-	if err != nil {
-		return nil, UserError("release_age_invalid", api.ReleaseAgeMessage(a.MinReleaseAge), api.ReleaseAgeHint)
+		return nil, err
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -188,10 +184,15 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 			Driver:          "plain",
 			Version:         version.Version,
 			At:              now,
-			PackageManagers: pkgLevel,
-			MinReleaseAge:   minAge,
+			PackageManagers: ws.pkgLevel,
+			MinReleaseAge:   ws.minAge,
+			ModelBudget:     ws.modelBudget,
+			UploadBudget:    ws.uploadBudget,
 			SandboxEnv:      maps.Clone(a.SandboxEnv),
 		},
+	}
+	if ws.modelBudget > 0 {
+		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}
 	m.Git = gi
 	m.Secrets = secrets

@@ -82,6 +82,16 @@ func (e *Engine) Preset() Preset {
 	return e.snap.Load().preset
 }
 
+// ModelBudget returns the configured model token cap (0 for no limit).
+func (e *Engine) ModelBudget() int64 {
+	return e.snap.Load().modelBudget
+}
+
+// UploadBudget returns the configured per-host hourly upload byte cap (0 for no limit).
+func (e *Engine) UploadBudget() int64 {
+	return e.snap.Load().uploadBudget
+}
+
 // DecideGateway checks whether a model gateway route is permitted to dial its
 // upstream host. Locks and explicit deny rules still beat the gateway (deny
 // wins); otherwise the configured gateway route is allowed.

@@ -110,6 +110,8 @@ func sessionDetails(s client.Session) []detail {
 	}
 	add("Missing secrets", strings.Join(s.MissingSecrets, ", "))
 	add("Secrets", strings.Join(s.Secrets, ", "))
+	add("Usage", showUsage(s.Usage))
+	add("Models", showUsageModels(s.Usage))
 	if s.DebugUntil != nil {
 		add("Debug until", showTime(*s.DebugUntil))
 	}

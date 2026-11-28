@@ -37,7 +37,7 @@ network.deny = ["evil.example"]
 - **Any deny beats any allow.** A deny rule overrides `network.allow`, live session grants, agent hosts and presets.
 - **Locks stay fixed.** A host in `[lock]` cannot be opened by a live grant or a policy reload.
 - **Ports.** An `allow` entry without a port allows port 443. Write `host:port` to allow another port. A `deny` entry without a port denies every port on that host.
-- **Wildcards.** `*.example.com` matches subdomains such as `api.example.com`, never the apex `example.com`. Broad wildcards on a public suffix (such as `*.com`) are refused in allow rules.
+- **Wildcards.** `*.example.com` matches subdomains such as `api.example.com`, never the apex `example.com`. Broad wildcards on a public or shared suffix (such as `*.com`, `*.co.uk`, `*.vercel.app` or `*.github.io`) are refused in allow rules; name a specific host such as `app.vercel.app` instead.
 - **Unknown hosts.** With `unknown = "deny"` (the default), any unmatched host gets an HTTP 403 whose body names the grant command. With `unknown = "allow"`, unmatched public hosts pass and are logged as `allow-unknown`.
 
 Live commands (`policy allow`, `policy deny` and `policy ls`) are wired on top of this engine in task P1.8.
@@ -93,6 +93,37 @@ For each gateway request, the egress process:
 4. Counts token usage from streamed SSE and plain JSON responses (estimating `(request + response) / 4` when a stream ends without usage) and attaches the count to the audit event and the `usage` control query.
 
 To grant a refused model capability for a session, add `[network.model_tools]` in the session policy (valid names: `web_fetch`, `web_search`, `code_execution`, `mcp`, `url_content`, `files`) or allow it live through the `policy.allow_tools` control operation.
+
+## Model usage and budgets
+
+The egress process counts tokens per session and per model from the responses that cross its model gateway routes:
+
+- **Anthropic Messages:** reads `usage` from plain JSON or SSE streams (`message_start`, then cumulative replacement from the last `message_delta`, never summing deltas), counting `input_tokens + cache_creation_input_tokens + cache_read_input_tokens + output_tokens` plus `server_tool_use.web_search_requests`. `/v1/messages/count_tokens` counts nothing.
+- **OpenAI Responses:** reads `usage` from plain JSON or `response.completed`, `response.incomplete` and `response.failed` stream events (`input_tokens`, `cached_tokens`, `cache_write_tokens`, `output_tokens`, `reasoning_tokens` and `total_tokens`).
+- **OpenAI Chat Completions:** reads `usage` from plain JSON or from the final stream chunk when the client sets `stream_options.include_usage`.
+- **Estimates:** when a stream ends without usage (such as a cut connection or a Chat Completions stream without `include_usage`), the egress process estimates `(request_bytes + response_bytes) / 4` rounded up and marks the audit line `"usage": "estimate"`.
+- **WebSockets:** because the model gateway runs Codex over HTTPS streaming (`supports_websockets = false`, [decision 0057](../contributing/decisions/0057-model-gateway-route.md)) and refuses WebSocket upgrades, no WebSocket frame reader or bounded 128-response WebSocket tracker is needed on this route.
+
+`simstim show`, `simstim show --json` and `simstim ls --json` include the session's cumulative `usage` (tokens, request counts, estimated request counts, per-model breakdown and active budget). Prices are never shown because provider rates change.
+
+Set `network.model_budget` in `config.toml` or the session policy TOML to cap a session's model tokens (`0` means no limit):
+
+```toml
+[network]
+model_budget = 2000000
+upload_budget = "16M"
+```
+
+Before each billable model request, the egress process compares the session's cumulative tokens with `network.model_budget`. Any request already in flight finishes normally. Once the budget is reached, every later model request is refused before dialling upstream:
+
+- **Anthropic:** HTTP `429` with `x-should-retry: false`, no `Retry-After` header, and `{"type":"error","error":{"type":"billing_error","message":"…"}}`.
+- **OpenAI:** HTTP `429` with `x-should-retry: false`, no `Retry-After` header, and `{"error":{"type":"insufficient_quota","code":"insufficient_quota","param":null,"message":"…"}}`.
+- Each refusal message includes a `Try:` hint showing how to raise `network.model_budget`, and the supervisor sends the `model_budget` alert once for that cap.
+- Reloading the policy with a higher `network.model_budget` lets the next model request through immediately without restarting the session.
+
+## Upload budgets
+
+For every non-model host, a walled session may upload up to `network.upload_budget` per host in each rolling hour (`16M` by default; set `"0"` to disable). If an upload over `CONNECT` or plain HTTP reaches the cap, the egress process stops forwarding further upload bytes, logs an `upload_budget` audit event, and refuses later flows to that host with HTTP `403` and a `Try:` hint until the hour rolls over or `network.upload_budget` is raised.
 
 ## Process hardening
 

@@ -43,6 +43,7 @@ type StartArgs struct {
 	ExposedSecrets map[string]string    `json:"exposed_secrets,omitempty"`
 	GatewayRoutes  []GatewayRouteConfig `json:"gateway_routes,omitempty"`
 	BoundSecrets   []BoundCredential    `json:"bound_secrets,omitempty"`
+	InitialUsage   *UsageSummary        `json:"initial_usage,omitempty"`
 }
 
 // TargetArgs is the payload of live "policy.allow" and "policy.deny" requests.
@@ -192,10 +193,16 @@ func handleInit(r *bufio.Reader, w *proto.Writer, id string, baseOpts *ServerOpt
 	redactor := NewRedactor(args.ExposedSecrets)
 	redactor.Merge(secrets.RedactMap())
 
+	usage := NewUsageTracker()
+	if args.InitialUsage != nil {
+		usage.Seed(*args.InitialUsage)
+	}
+
 	opts := ServerOptions{
 		Engine:        eng,
 		Redactor:      redactor,
 		Secrets:       secrets,
+		Usage:         usage,
 		GatewayRoutes: args.GatewayRoutes,
 		DNSMode:       args.DNSMode,
 		Audit: func(ev AuditEvent) {
@@ -205,6 +212,7 @@ func handleInit(r *bufio.Reader, w *proto.Writer, id string, baseOpts *ServerOpt
 	if baseOpts != nil {
 		opts.Addrs = baseOpts.Addrs
 		opts.Dialer = baseOpts.Dialer
+		opts.UploadBudget = baseOpts.UploadBudget
 		opts.SNITimeout = baseOpts.SNITimeout
 		opts.NonproxyHandler = baseOpts.NonproxyHandler
 		opts.GatewayTLS = baseOpts.GatewayTLS
@@ -361,6 +369,7 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 		if err := srv.Engine.Reload(cfg); err != nil {
 			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_policy", Message: err.Error(), Hint: "fix the policy fields"}}
 		}
+		srv.UploadBudget.SetLimit(srv.Engine.UploadBudget())
 		return proto.Response{ID: req.ID, OK: true}
 	case "policy.allow_tools":
 		var a AllowToolsArgs
@@ -382,7 +391,7 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 		srv.Redactor.Merge(srv.Secrets.RedactMap())
 		return proto.Response{ID: req.ID, OK: true}
 	case "usage":
-		res, _ := json.Marshal(srv.Usage.Snapshot())
+		res, _ := json.Marshal(srv.Usage.SnapshotWithBudget(srv.Engine.ModelBudget()))
 		return proto.Response{ID: req.ID, OK: true, Result: res}
 	case "status":
 		d, _ := processDumpable()

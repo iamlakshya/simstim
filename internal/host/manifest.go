@@ -80,6 +80,9 @@ type Manifest struct {
 	// GrantedPorts records guest ports currently granted on a walled session's
 	// supervisor (spec 7.4).
 	GrantedPorts []int `json:"granted_ports,omitempty"`
+	// Usage records cumulative model token usage and budget for the session
+	// (isolation spec 17.8).
+	Usage *api.SessionUsage `json:"usage,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -110,6 +113,8 @@ type WallRecord struct {
 	PolicyTOML      string            `json:"policy_toml,omitempty"`
 	PackageManagers string            `json:"package_managers,omitempty"`
 	MinReleaseAge   string            `json:"min_release_age,omitempty"`
+	ModelBudget     int64             `json:"model_budget,omitempty"`
+	UploadBudget    string            `json:"upload_budget,omitempty"`
 	SandboxEnv      map[string]string `json:"sandbox_env,omitempty"`
 	// BoundSecrets records destination-binding metadata for secrets held only
 	// on the trusted egress gateway. Values are never stored here.
@@ -235,7 +240,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
-		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true}
+		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true, "usage": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

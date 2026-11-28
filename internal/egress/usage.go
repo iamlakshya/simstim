@@ -9,88 +9,16 @@ import (
 	"io"
 	"strings"
 	"sync"
+
+	"github.com/iamlakshya/simstim/internal/api"
 )
 
 // TokenUsage holds model token counts reported by a provider response or
 // accumulated across a session (spec 17.8).
-type TokenUsage struct {
-	Model               string `json:"model,omitempty"`
-	InputTokens         int64  `json:"input_tokens,omitempty"`
-	CacheCreationTokens int64  `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadTokens     int64  `json:"cache_read_input_tokens,omitempty"`
-	OutputTokens        int64  `json:"output_tokens,omitempty"`
-	ReasoningTokens     int64  `json:"reasoning_tokens,omitempty"`
-	TotalTokens         int64  `json:"total_tokens,omitempty"`
-	WebSearchRequests   int64  `json:"web_search_requests,omitempty"`
-	Estimated           bool   `json:"estimated,omitempty"`
-	Requests            int64  `json:"requests,omitempty"`
-	EstimatedRequests   int64  `json:"estimated_requests,omitempty"`
-}
+type TokenUsage = api.TokenUsage
 
 // UsageSummary is the session-wide token count returned by the "usage" ctl op.
-type UsageSummary struct {
-	Total   TokenUsage            `json:"total"`
-	ByModel map[string]TokenUsage `json:"by_model,omitempty"`
-}
-
-// UsageTracker accumulates model token usage safely across concurrent gateway
-// requests.
-type UsageTracker struct {
-	mu      sync.Mutex
-	total   TokenUsage
-	byModel map[string]TokenUsage
-}
-
-// NewUsageTracker creates an empty UsageTracker.
-func NewUsageTracker() *UsageTracker {
-	return &UsageTracker{byModel: map[string]TokenUsage{}}
-}
-
-// Add records one completed model request's usage into the session totals.
-func (u *UsageTracker) Add(rec TokenUsage) {
-	if u == nil {
-		return
-	}
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	addUsage(&u.total, rec)
-	model := rec.Model
-	if model == "" {
-		model = "unknown"
-	}
-	cur := u.byModel[model]
-	cur.Model = model
-	addUsage(&cur, rec)
-	u.byModel[model] = cur
-}
-
-// Snapshot returns a copy of the session's cumulative usage totals.
-func (u *UsageTracker) Snapshot() UsageSummary {
-	if u == nil {
-		return UsageSummary{}
-	}
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	byModel := make(map[string]TokenUsage, len(u.byModel))
-	for k, v := range u.byModel {
-		byModel[k] = v
-	}
-	return UsageSummary{Total: u.total, ByModel: byModel}
-}
-
-func addUsage(dst *TokenUsage, src TokenUsage) {
-	dst.InputTokens += src.InputTokens
-	dst.CacheCreationTokens += src.CacheCreationTokens
-	dst.CacheReadTokens += src.CacheReadTokens
-	dst.OutputTokens += src.OutputTokens
-	dst.ReasoningTokens += src.ReasoningTokens
-	dst.TotalTokens += src.TotalTokens
-	dst.WebSearchRequests += src.WebSearchRequests
-	dst.Requests++
-	if src.Estimated {
-		dst.EstimatedRequests++
-	}
-}
+type UsageSummary = api.SessionUsage
 
 // shouldCountUsage reports whether a 2xx response on wire+path carries model
 // generation usage (spec 17.8: count_tokens and GET /v1/models count nothing).
@@ -111,19 +39,20 @@ func shouldCountUsage(wire, method, cleanPath string, status int) bool {
 // usageObserver incrementally parses SSE or plain JSON responses as bytes pass
 // through to the client, without buffering full streams in memory.
 type usageObserver struct {
-	wire          string
-	reqBytes      int64
-	isSSE         bool
-	respBytes     int64
-	lineBuf       bytes.Buffer
-	sseEvent      string
-	sseData       []string
-	sseDataBytes  int
-	sseDataTooBig bool
-	plainBuf      bytes.Buffer
-	plainTooBig   bool
-	usage         TokenUsage
-	hasUsage      bool
+	wire              string
+	reqBytes          int64
+	isSSE             bool
+	respBytes         int64
+	lineBuf           bytes.Buffer
+	sseEvent          string
+	sseData           []string
+	sseDataBytes      int
+	sseDataTooBig     bool
+	plainBuf          bytes.Buffer
+	plainTooBig       bool
+	usage             TokenUsage
+	hasUsage          bool
+	sawAnthropicStart bool
 }
 
 const maxPlainUsageBytes = 8 << 20
@@ -240,13 +169,18 @@ func (o *usageObserver) parseAnthropicSSE(eventName string, data []byte) {
 			o.usage.Model = env.Message.Model
 		}
 		if env.Message.Usage != nil {
-			o.applyAnthropicUsage(env.Message.Usage)
+			o.sawAnthropicStart = true
+			o.applyAnthropicUsage(env.Message.Usage, false)
 		}
 	case "message_delta":
 		// Spec 17.8: message_delta usage counts are cumulative; replace present
 		// fields rather than adding them.
 		if env.Usage != nil {
-			o.applyAnthropicUsage(env.Usage)
+			o.applyAnthropicUsage(env.Usage, true)
+		}
+	case "message_stop":
+		if o.sawAnthropicStart {
+			o.hasUsage = true
 		}
 	}
 }
@@ -261,8 +195,10 @@ type anthropicUsage struct {
 	} `json:"server_tool_use"`
 }
 
-func (o *usageObserver) applyAnthropicUsage(u *anthropicUsage) {
-	o.hasUsage = true
+func (o *usageObserver) applyAnthropicUsage(u *anthropicUsage, final bool) {
+	if final {
+		o.hasUsage = true
+	}
 	if u.InputTokens != nil {
 		o.usage.InputTokens = *u.InputTokens
 	}
@@ -287,6 +223,7 @@ type openAIUsage struct {
 	OutputTokens       *int64 `json:"output_tokens"`
 	PromptTokens       *int64 `json:"prompt_tokens"`
 	CompletionTokens   *int64 `json:"completion_tokens"`
+	CacheWriteTokens   *int64 `json:"cache_write_tokens"`
 	TotalTokens        *int64 `json:"total_tokens"`
 	InputTokensDetails *struct {
 		CachedTokens *int64 `json:"cached_tokens"`
@@ -348,6 +285,9 @@ func (o *usageObserver) applyOpenAIUsage(u *openAIUsage) {
 	} else if u.CompletionTokens != nil {
 		o.usage.OutputTokens = *u.CompletionTokens
 	}
+	if u.CacheWriteTokens != nil {
+		o.usage.CacheCreationTokens = *u.CacheWriteTokens
+	}
 	if u.InputTokensDetails != nil && u.InputTokensDetails.CachedTokens != nil {
 		o.usage.CacheReadTokens = *u.InputTokensDetails.CachedTokens
 	} else if u.PromptTokensDetails != nil && u.PromptTokensDetails.CachedTokens != nil {
@@ -399,7 +339,7 @@ func (o *usageObserver) parsePlainJSON(raw []byte) {
 				o.usage.Model = body.Model
 			}
 			if body.Usage != nil {
-				o.applyAnthropicUsage(body.Usage)
+				o.applyAnthropicUsage(body.Usage, true)
 			}
 		}
 		return

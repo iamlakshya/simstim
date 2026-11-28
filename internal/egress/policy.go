@@ -107,13 +107,15 @@ type SandboxConfig struct {
 	PackageManagers string `toml:"package_managers"`
 }
 
-// NetworkConfig holds the session's allowlist, denylist and unknown action.
+// NetworkConfig holds the session's allowlist, denylist, budgets and unknown action.
 type NetworkConfig struct {
 	Allow         []string            `toml:"allow"`
 	Deny          []string            `toml:"deny"`
 	Unknown       UnknownAction       `toml:"unknown"`
 	ModelTools    map[string][]string `toml:"model_tools"`
 	MinReleaseAge string              `toml:"min_release_age"`
+	ModelBudget   int64               `toml:"model_budget"`
+	UploadBudget  string              `toml:"upload_budget"`
 }
 
 // LockConfig holds denies that no live session grant can override.
@@ -158,6 +160,8 @@ type policySnapshot struct {
 	presetList   []rule
 	gatewayHosts map[string]struct{}
 	modelTools   map[string]map[string]bool
+	modelBudget  int64
+	uploadBudget int64
 }
 
 // Engine evaluates network flows and DNS queries against a flat deny-wins
@@ -202,6 +206,13 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 		return nil, fmt.Errorf("egress: %w", err)
 	}
 	if _, _, err := api.ParseMinReleaseAge(cfg.Network.MinReleaseAge); err != nil {
+		return nil, fmt.Errorf("egress: %w", err)
+	}
+	if err := api.CheckModelBudget(cfg.Network.ModelBudget); err != nil {
+		return nil, fmt.Errorf("egress: %w", err)
+	}
+	uploadBudgetBytes, _, err := api.ParseUploadBudget(cfg.Network.UploadBudget)
+	if err != nil {
 		return nil, fmt.Errorf("egress: %w", err)
 	}
 
@@ -249,6 +260,8 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 		presetList:   presets[preset],
 		gatewayHosts: gwHosts,
 		modelTools:   modelTools,
+		modelBudget:  cfg.Network.ModelBudget,
+		uploadBudget: uploadBudgetBytes,
 	}, nil
 }
 

@@ -305,6 +305,7 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
 		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
 		DebugUntil: debugUntil(m, alive),
+		Usage:      m.Usage.Clone(),
 	}
 	fillWallInfo(&info, m)
 	return info

@@ -36,5 +36,29 @@ func validatePackageSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			})
 		}
 	}
+	if s.Network.ModelBudget < 0 {
+		pos := ins.Pos("network", "model_budget")
+		out = append(out, configFinding{
+			Path:     abbrev,
+			Line:     pos.Line,
+			Column:   pos.Column,
+			Severity: "error",
+			Code:     "model_budget_invalid",
+			Message:  strings.TrimSuffix(api.ModelBudgetMessage(s.Network.ModelBudget), "."),
+		})
+	}
+	if v := s.Network.UploadBudget; v != "" {
+		if _, _, err := api.ParseUploadBudget(v); err != nil {
+			pos := ins.Pos("network", "upload_budget")
+			out = append(out, configFinding{
+				Path:     abbrev,
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Severity: "error",
+				Code:     "upload_budget_invalid",
+				Message:  strings.TrimSuffix(api.UploadBudgetMessage(v), "."),
+			})
+		}
+	}
 	return out
 }

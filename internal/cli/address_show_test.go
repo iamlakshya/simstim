@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
@@ -124,5 +126,37 @@ func TestDescribeSession(t *testing.T) {
 	lost := client.Session{ID: "f6", Name: "gone", State: "lost", Reason: "the host restarted"}
 	if got = describeSession("box", lost); strings.Contains(got, "Reason") {
 		t.Errorf("a lost agent repeats its reason:\n%s", got)
+	}
+
+	withUsage := client.Session{
+		ID: "u7", Name: "budgeted", Agent: "claude", State: "working",
+		Usage: &api.SessionUsage{
+			Total: api.TokenUsage{
+				InputTokens: 100, CacheCreationTokens: 20, CacheReadTokens: 30,
+				OutputTokens: 40, TotalTokens: 190, Requests: 3, EstimatedRequests: 1,
+			},
+			ByModel: map[string]api.TokenUsage{
+				"claude-sonnet-4-6": {Model: "claude-sonnet-4-6", TotalTokens: 190, Requests: 3},
+			},
+			Budget: 2000000,
+		},
+	}
+	got = describeSession("box", withUsage)
+	if !strings.Contains(got, "Usage           190 of 2000000 tokens (100 in, 40 out, 30 cached, 20 cache write; 3 requests, 1 estimated)\n") {
+		t.Errorf("show usage line wrong:\n%s", got)
+	}
+	if !strings.Contains(got, "Models          claude-sonnet-4-6: 190\n") {
+		t.Errorf("show models line wrong:\n%s", got)
+	}
+	if strings.Contains(got, "$") {
+		t.Errorf("show must not display prices (spec 17.8):\n%s", got)
+	}
+	obj := sessionObject("box", withUsage)
+	raw, err := json.Marshal(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"usage"`) || !strings.Contains(string(raw), `"total_tokens":190`) || !strings.Contains(string(raw), `"budget":2000000`) {
+		t.Errorf("sessionObject JSON missing usage: %s", raw)
 	}
 }

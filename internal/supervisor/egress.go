@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/link"
 )
@@ -21,18 +22,40 @@ func (s *Supervisor) initEgress() error {
 		s.egress = s.opt.Egress
 		return nil
 	}
-	if s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor") || s.m.Wall.ShareNet {
+	if s.opt.EgressStarter == nil && (s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor") || s.m.Wall.ShareNet) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	args := egress.StartArgs{
-		Session:       s.id,
-		Agent:         s.m.Agent.Kind,
-		PolicyTOML:    s.m.Wall.PolicyTOML,
-		GatewayRoutes: s.gatewayRoutes(),
+	s.mu.Lock()
+	if s.m.Wall != nil && s.m.Wall.ModelBudget > 0 && s.m.Usage == nil {
+		s.m.Usage = &api.SessionUsage{Budget: s.m.Wall.ModelBudget}
 	}
-	client, stopFn, err := startEgressProcess(ctx, s.id, s.opt.EgressExe, args, s.recordEgressAudit)
+	initUsage := s.m.Usage.Clone()
+	sessionLabel := s.id
+	if s.m.Name != "" {
+		sessionLabel = s.m.Name
+	}
+	agentKind := s.m.Agent.Kind
+	policyTOML := ""
+	if s.m.Wall != nil {
+		policyTOML = s.m.Wall.PolicyTOML
+	}
+	s.mu.Unlock()
+	args := egress.StartArgs{
+		Session:       sessionLabel,
+		Agent:         agentKind,
+		PolicyTOML:    policyTOML,
+		GatewayRoutes: s.gatewayRoutes(),
+		InitialUsage:  initUsage,
+	}
+	starter := s.opt.EgressStarter
+	if starter == nil {
+		starter = func(ctx context.Context, id string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error) {
+			return startEgressProcess(ctx, id, s.opt.EgressExe, args, sink)
+		}
+	}
+	client, stopFn, err := starter(ctx, s.id, args, s.recordEgressAudit)
 	if err != nil {
 		return err
 	}
@@ -58,6 +81,7 @@ func (s *Supervisor) recordEgressAudit(ev egress.AuditEvent) {
 		Session: s.id,
 		Detail:  string(detail),
 	})
+	s.handleEgressUsageAndBudget(ev)
 }
 
 func startEgressProcess(ctx context.Context, id, exe string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error) {

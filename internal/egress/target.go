@@ -144,7 +144,7 @@ func parseRule(raw string, isDeny bool) (rule, error) {
 			return rule{}, fmt.Errorf("wildcard %q cannot match an IP address. Try: use a CIDR prefix instead", raw)
 		}
 		if !isDeny && isPublicSuffix(suffix) {
-			return rule{}, fmt.Errorf("wildcard %q is too broad (public suffix). Try: name a more specific domain", raw)
+			return rule{}, fmt.Errorf("wildcard %q is too broad (public or shared suffix). Try: name a more specific domain", raw)
 		}
 		return rule{raw: s, kind: ruleWildcardHost, host: suffix, port: port}, nil
 	}

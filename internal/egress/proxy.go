@@ -22,6 +22,7 @@ type ServerOptions struct {
 	Redactor        *Redactor
 	Secrets         *SecretStore
 	Usage           *UsageTracker
+	UploadBudget    *UploadBudget
 	GatewayRoutes   []GatewayRouteConfig
 	GatewayTLS      *tls.Config // optional test override; production uses verified system roots
 	Audit           AuditSink
@@ -34,14 +35,15 @@ type ServerOptions struct {
 // gateway, transparent flow handler and DNS policy responder for one walled
 // session.
 type Server struct {
-	Engine   *Engine
-	Addrs    *AddressPolicy
-	Dialer   *SafeDialer
-	Redactor *Redactor
-	Secrets  *SecretStore
-	Usage    *UsageTracker
-	Gateway  *Gateway
-	DNS      *DNSHandler
+	Engine       *Engine
+	Addrs        *AddressPolicy
+	Dialer       *SafeDialer
+	Redactor     *Redactor
+	Secrets      *SecretStore
+	Usage        *UsageTracker
+	UploadBudget *UploadBudget
+	Gateway      *Gateway
+	DNS          *DNSHandler
 
 	audit      AuditSink
 	sniTimeout time.Duration
@@ -82,20 +84,25 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if usage == nil {
 		usage = NewUsageTracker()
 	}
+	uploadBudget := opts.UploadBudget
+	if uploadBudget == nil {
+		uploadBudget = NewUploadBudget(opts.Engine.UploadBudget())
+	}
 	sniTimeout := opts.SNITimeout
 	if sniTimeout <= 0 {
 		sniTimeout = defaultSNITimeout
 	}
 
 	s := &Server{
-		Engine:     opts.Engine,
-		Addrs:      addrs,
-		Dialer:     dialer,
-		Redactor:   redactor,
-		Secrets:    secrets,
-		Usage:      usage,
-		audit:      opts.Audit,
-		sniTimeout: sniTimeout,
+		Engine:       opts.Engine,
+		Addrs:        addrs,
+		Dialer:       dialer,
+		Redactor:     redactor,
+		Secrets:      secrets,
+		Usage:        usage,
+		UploadBudget: uploadBudget,
+		audit:        opts.Audit,
+		sniTimeout:   sniTimeout,
 	}
 	s.DNS = NewDNSHandler(DNSOptions{
 		Engine: opts.Engine,
@@ -220,6 +227,13 @@ func (s *Server) handleConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.Con
 		return goproxy.RejectConnect, host
 	}
 
+	if used, limit, ok := s.checkUploadBudget(normHost); !ok {
+		body := uploadBudgetMessage(s.Engine.Session(), normHost, used, limit)
+		s.auditUploadBudget(normHost, port, string(ModeSplice), http.MethodConnect, "", 0, 0, used, limit)
+		ctx.Resp = textResponse(ctx.Req, http.StatusForbidden, body+"\n") //nolint:bodyclose // goproxy writes and closes ctx.Resp.Body
+		return goproxy.RejectConnect, host
+	}
+
 	addrs, err := s.Dialer.ResolveAndCheck(ctx.Req.Context(), normHost, port)
 	if err != nil {
 		status, decision := errHTTPStatus(err)
@@ -266,6 +280,10 @@ func (s *Server) hijackConnect(ctx context.Context, clientConn net.Conn, host st
 			return
 		}
 		defer func() { _ = upstream.Close() }()
+		if _, exceeded, used, limit := s.UploadBudget.Consume(host, int64(len(replay))); exceeded {
+			s.auditUploadBudget(host, port, string(ModeSplice), http.MethodConnect, "", 0, 0, used, limit)
+			return
+		}
 		if _, err := upstream.Write(replay); err != nil {
 			s.emitAudit(AuditEvent{
 				Kind: "net", Host: host, Port: port, Mode: string(ModeSplice), Method: http.MethodConnect,
@@ -273,10 +291,16 @@ func (s *Server) hijackConnect(ctx context.Context, clientConn net.Conn, host st
 			})
 			return
 		}
-		up, down := spliceConns(ctx, clientConn, upstream)
+		up, down, budgetHit := spliceConnsWithBudget(ctx, clientConn, upstream, host, s.UploadBudget)
+		totalUp := int64(len(replay)) + up
+		if budgetHit {
+			_, used, limit, _ := s.UploadBudget.Remaining(host)
+			s.auditUploadBudget(host, port, string(ModeSplice), http.MethodConnect, "", totalUp, down, used, limit)
+			return
+		}
 		s.emitAudit(AuditEvent{
 			Kind: "net", Host: host, Port: port, Mode: string(ModeSplice), Method: http.MethodConnect,
-			Status: http.StatusOK, Up: int64(len(replay)) + up, Down: down,
+			Status: http.StatusOK, Up: totalUp, Down: down,
 			Rule: dec.Rule, Decision: auditDecision(dec),
 		})
 		return
@@ -295,7 +319,12 @@ func (s *Server) hijackConnect(ctx context.Context, clientConn net.Conn, host st
 	if _, err := io.WriteString(clientConn, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
 		return
 	}
-	up, down := spliceConns(ctx, clientConn, upstream)
+	up, down, budgetHit := spliceConnsWithBudget(ctx, clientConn, upstream, host, s.UploadBudget)
+	if budgetHit {
+		_, used, limit, _ := s.UploadBudget.Remaining(host)
+		s.auditUploadBudget(host, port, string(ModeSplice), http.MethodConnect, "", up, down, used, limit)
+		return
+	}
 	s.emitAudit(AuditEvent{
 		Kind: "net", Host: host, Port: port, Mode: string(ModeSplice), Method: http.MethodConnect,
 		Status: http.StatusOK, Up: up, Down: down,
@@ -310,6 +339,7 @@ type httpAuditMeta struct {
 	path     string
 	rule     string
 	decision string
+	upReader *uploadBudgetReader
 }
 
 func (s *Server) handleHTTPRequest(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
@@ -354,6 +384,12 @@ func (s *Server) handleHTTPRequest(r *http.Request, ctx *goproxy.ProxyCtx) (*htt
 		return r, textResponse(r, http.StatusForbidden, body+"\n")
 	}
 
+	if used, limit, ok := s.checkUploadBudget(normHost); !ok {
+		body := uploadBudgetMessage(s.Engine.Session(), normHost, used, limit)
+		s.auditUploadBudget(normHost, port, string(ModeHTTP), r.Method, redactedPath, 0, 0, used, limit)
+		return r, textResponse(r, http.StatusForbidden, body+"\n")
+	}
+
 	addrs, err := s.Dialer.ResolveAndCheck(r.Context(), normHost, port)
 	if err != nil {
 		status, decision := errHTTPStatus(err)
@@ -364,10 +400,15 @@ func (s *Server) handleHTTPRequest(r *http.Request, ctx *goproxy.ProxyCtx) (*htt
 		return r, textResponse(r, status, err.Error()+"\n")
 	}
 
+	var upReader *uploadBudgetReader
+	if r.Body != nil && s.UploadBudget != nil && s.UploadBudget.Limit() > 0 {
+		upReader = &uploadBudgetReader{rc: r.Body, budget: s.UploadBudget, host: normHost}
+		r.Body = upReader
+	}
 	r = r.WithContext(withCheckedAddrs(r.Context(), addrs))
 	ctx.UserData = httpAuditMeta{
 		host: normHost, port: port, method: r.Method, path: redactedPath,
-		rule: dec.Rule, decision: auditDecision(dec),
+		rule: dec.Rule, decision: auditDecision(dec), upReader: upReader,
 	}
 	return r, nil
 }
@@ -378,6 +419,11 @@ func (s *Server) handleHTTPResponse(resp *http.Response, ctx *goproxy.ProxyCtx) 
 		return resp
 	}
 	if resp == nil {
+		if meta.upReader != nil && (meta.upReader.exceeded || errors.Is(ctx.Error, errUploadBudgetExceeded)) {
+			body := uploadBudgetMessage(s.Engine.Session(), meta.host, meta.upReader.used, meta.upReader.limit)
+			s.auditUploadBudget(meta.host, meta.port, string(ModeHTTP), meta.method, meta.path, meta.upReader.uploaded, 0, meta.upReader.used, meta.upReader.limit)
+			return textResponse(ctx.Req, http.StatusForbidden, body+"\n")
+		}
 		why := "upstream error"
 		if ctx.Error != nil {
 			why = ctx.Error.Error()
@@ -394,7 +440,9 @@ func (s *Server) handleHTTPResponse(resp *http.Response, ctx *goproxy.ProxyCtx) 
 		return textResponse(ctx.Req, status, why+"\n")
 	}
 	var upBytes int64
-	if ctx.Req != nil && ctx.Req.ContentLength > 0 {
+	if meta.upReader != nil && meta.upReader.uploaded > 0 {
+		upBytes = meta.upReader.uploaded
+	} else if ctx.Req != nil && ctx.Req.ContentLength > 0 {
 		upBytes = ctx.Req.ContentLength
 	}
 	if resp.Body == nil {

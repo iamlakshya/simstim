@@ -152,7 +152,25 @@ func CleanSession(s Session) Session {
 	s.Signal, s.Unit, s.HostVersion = CleanLine(s.Signal), CleanLine(s.Unit), CleanLine(s.HostVersion)
 	s.MissingSecrets = cleanLines(s.MissingSecrets, CleanLine)
 	s.Secrets = cleanLines(s.Secrets, CleanLine)
+	if s.Usage != nil {
+		s.Usage = cleanSessionUsage(s.Usage)
+	}
 	return s
+}
+
+func cleanSessionUsage(u *api.SessionUsage) *api.SessionUsage {
+	cp := u.Clone()
+	cp.Total.Model = CleanLine(cp.Total.Model)
+	if len(cp.ByModel) > 0 {
+		cleaned := make(map[string]api.TokenUsage, len(cp.ByModel))
+		for k, v := range cp.ByModel {
+			ck := CleanLine(k)
+			v.Model = CleanLine(v.Model)
+			cleaned[ck] = v
+		}
+		cp.ByModel = cleaned
+	}
+	return cp
 }
 
 // CleanSessions is CleanSession for each row of a list, in a new list.

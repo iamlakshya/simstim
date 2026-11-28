@@ -80,6 +80,12 @@ type NewArgs struct {
 	// MinReleaseAge sets the minimum package release age ("0d" to "365d") for
 	// walled sessions (isolation spec 7.10).
 	MinReleaseAge string `json:"min_release_age,omitempty"`
+	// ModelBudget caps total model tokens for a walled session (0 = no limit,
+	// isolation spec 17.8).
+	ModelBudget int64 `json:"model_budget,omitempty"`
+	// UploadBudget caps bytes uploaded per host per hour from a walled session
+	// (empty = 16M, "0" = no limit, isolation spec 7.2).
+	UploadBudget string `json:"upload_budget,omitempty"`
 	// SandboxEnv sets extra environment variables for walled sessions; any
 	// name here overrides values written by guest init.
 	SandboxEnv map[string]string `json:"sandbox_env,omitempty"`
@@ -147,6 +153,9 @@ type SessionInfo struct {
 	// Ports lists the guest ports currently granted for forwarding on a walled
 	// session (spec 7.4).
 	Ports []int `json:"ports,omitempty"`
+	// Usage holds the session's cumulative model token usage and configured
+	// budget (isolation spec 17.8).
+	Usage *SessionUsage `json:"usage,omitempty"`
 }
 
 // ResumeArgs asks a host to start the agent of a session again, in the same

@@ -235,6 +235,22 @@ func (g *Gateway) prepareRequest(
 		g.rejectRequest(w, r, route, redactedPath, http.StatusForbidden, "model_guard", ref.why, providerForbiddenType(wire), ref.message(g.engine.Session(), route.upstreamHost))
 		return nil, nil, false
 	}
+	if shouldCountUsage(wire, r.Method, upstreamPath, http.StatusOK) {
+		if budget := g.engine.ModelBudget(); budget > 0 {
+			if used := g.usage.TotalTokens(); used >= budget {
+				msg := modelBudgetMessage(g.engine.Session(), used, budget)
+				g.emitAudit(AuditEvent{
+					Kind: "net", Host: route.upstreamHost, Port: route.upstreamPort,
+					Mode: string(ModeGateway), Method: r.Method, Path: redactedPath,
+					Status: http.StatusTooManyRequests, Rule: "model_budget",
+					Decision: string(ActionDeny), Why: fmt.Sprintf("model budget reached (%d/%d tokens)", used, budget),
+					BudgetUsed: used, BudgetLimit: budget,
+				})
+				writeModelBudgetError(w, wire, msg)
+				return nil, nil, false
+			}
+		}
+	}
 	bodyBytes, err := decodeRequestBody(r.Body, r.Header.Get("Content-Encoding"))
 	if err != nil {
 		msg := fmt.Sprintf("%s: cannot read model request body for %s: %s. Try: send an uncompressed or valid gzip/deflate JSON body under 64 MiB", brand.Name, route.upstreamHost, err.Error())
@@ -311,8 +327,10 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 			return
 		}
 		usageKind := ""
+		var budgetLimit int64
 		if u != nil {
 			g.usage.Add(*u)
+			budgetLimit = g.engine.ModelBudget()
 			if u.Estimated {
 				usageKind = "estimate"
 			} else {
@@ -324,7 +342,7 @@ func (g *Gateway) modifyResponse(resp *http.Response) error {
 			Mode: string(ModeGateway), Method: state.method, Path: state.redactedPath,
 			Status: resp.StatusCode, Up: state.reqBytes, Down: down,
 			Rule: state.decRule, Secret: state.credName, Decision: string(ActionAllow),
-			Usage: u, UsageKind: usageKind,
+			Usage: u, UsageKind: usageKind, BudgetLimit: budgetLimit,
 		})
 	}
 	if resp.Body == nil {

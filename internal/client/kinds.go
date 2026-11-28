@@ -178,6 +178,8 @@ var hostKinds = map[string]Kind{
 	"image_too_large":       KindRefused,
 	"release_age_invalid":   KindUsage,
 	"package_level_invalid": KindUsage,
+	"model_budget_invalid":  KindUsage,
+	"upload_budget_invalid": KindUsage,
 	"feed_unavailable":      KindFailed,
 	"env_is_secret":         KindRefused,
 	"copy_sensitive":        KindRefused,

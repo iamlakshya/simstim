@@ -15,23 +15,25 @@ const maxAuditPathBytes = 256
 // flow, HTTP request or DNS query (spec 7.2). It never carries query strings,
 // header values or bodies.
 type AuditEvent struct {
-	V         int         `json:"v"`
-	T         time.Time   `json:"t"`
-	Kind      string      `json:"kind"` // "net" or "dns"
-	Host      string      `json:"host"`
-	Port      int         `json:"port,omitempty"`
-	Mode      string      `json:"mode,omitempty"` // "splice", "http", "gateway", "dns"
-	Method    string      `json:"method,omitempty"`
-	Path      string      `json:"path,omitempty"`
-	Status    int         `json:"status,omitempty"`
-	Up        int64       `json:"up,omitempty"`
-	Down      int64       `json:"down,omitempty"`
-	Rule      string      `json:"rule,omitempty"`
-	Secret    string      `json:"secret,omitempty"`
-	Decision  string      `json:"decision"` // "allow", "allow-unknown", "deny", "error"
-	Why       string      `json:"why,omitempty"`
-	Usage     *TokenUsage `json:"tokens,omitempty"`
-	UsageKind string      `json:"usage,omitempty"` // "reported" or "estimate"
+	V           int         `json:"v"`
+	T           time.Time   `json:"t"`
+	Kind        string      `json:"kind"` // "net" or "dns"
+	Host        string      `json:"host"`
+	Port        int         `json:"port,omitempty"`
+	Mode        string      `json:"mode,omitempty"` // "splice", "http", "gateway", "dns"
+	Method      string      `json:"method,omitempty"`
+	Path        string      `json:"path,omitempty"`
+	Status      int         `json:"status,omitempty"`
+	Up          int64       `json:"up,omitempty"`
+	Down        int64       `json:"down,omitempty"`
+	Rule        string      `json:"rule,omitempty"`
+	Secret      string      `json:"secret,omitempty"`
+	Decision    string      `json:"decision"` // "allow", "allow-unknown", "deny", "error"
+	Why         string      `json:"why,omitempty"`
+	Usage       *TokenUsage `json:"tokens,omitempty"`
+	UsageKind   string      `json:"usage,omitempty"` // "reported" or "estimate"
+	BudgetUsed  int64       `json:"budget_used,omitempty"`
+	BudgetLimit int64       `json:"budget_limit,omitempty"`
 }
 
 // AuditSink receives audit events produced by the egress server.

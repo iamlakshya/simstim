@@ -43,13 +43,9 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
-	pkgLevel, err := api.ParsePackageManagers(a.PackageManagers)
+	ws, err := checkWalledSettings(a)
 	if err != nil {
-		return nil, UserError("package_level_invalid", api.PackageLevelMessage(a.PackageManagers), api.PackageLevelHint)
-	}
-	_, minAge, err := api.ParseMinReleaseAge(a.MinReleaseAge)
-	if err != nil {
-		return nil, UserError("release_age_invalid", api.ReleaseAgeMessage(a.MinReleaseAge), api.ReleaseAgeHint)
+		return nil, err
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -115,12 +111,18 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			StateDirs:       slices.Clone(agent.StateDirs),
 			ExtraRO:         extraRO,
 			At:              now,
-			PackageManagers: pkgLevel,
-			MinReleaseAge:   minAge,
+			PolicyTOML:      buildSessionPolicyTOML(string(egress.PresetBalanced), ws),
+			PackageManagers: ws.pkgLevel,
+			MinReleaseAge:   ws.minAge,
+			ModelBudget:     ws.modelBudget,
+			UploadBudget:    ws.uploadBudget,
 			SandboxEnv:      maps.Clone(a.SandboxEnv),
 			BoundSecrets:    boundSecrets,
 			ExposedSecrets:  exposedSecrets,
 		},
+	}
+	if ws.modelBudget > 0 {
+		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}
 	m.Git = gi
 	m.Secrets = secrets

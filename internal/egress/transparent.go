@@ -46,6 +46,11 @@ func (s *Server) HandleTransparent(ctx context.Context, clientConn net.Conn, raw
 		return
 	}
 
+	if used, limit, ok := s.checkUploadBudget(normHost); !ok {
+		s.auditUploadBudget(normHost, port, string(ModeSplice), "", "", 0, 0, used, limit)
+		return
+	}
+
 	addrs, err := s.Dialer.ResolveAndCheck(ctx, normHost, port)
 	if err != nil {
 		status, decision := errHTTPStatus(err)
@@ -82,14 +87,24 @@ func (s *Server) HandleTransparent(ctx context.Context, clientConn net.Conn, raw
 	}
 	defer func() { _ = upstream.Close() }()
 	if len(replay) > 0 {
+		if _, exceeded, used, limit := s.UploadBudget.Consume(normHost, int64(len(replay))); exceeded {
+			s.auditUploadBudget(normHost, port, string(ModeSplice), "", "", 0, 0, used, limit)
+			return
+		}
 		if _, err := upstream.Write(replay); err != nil {
 			return
 		}
 	}
-	up, down := spliceConns(ctx, clientConn, upstream)
+	up, down, budgetHit := spliceConnsWithBudget(ctx, clientConn, upstream, normHost, s.UploadBudget)
+	totalUp := int64(len(replay)) + up
+	if budgetHit {
+		_, used, limit, _ := s.UploadBudget.Remaining(normHost)
+		s.auditUploadBudget(normHost, port, string(ModeSplice), "", "", totalUp, down, used, limit)
+		return
+	}
 	s.emitAudit(AuditEvent{
 		Kind: "net", Host: normHost, Port: port, Mode: string(ModeSplice),
-		Status: http.StatusOK, Up: int64(len(replay)) + up, Down: down,
+		Status: http.StatusOK, Up: totalUp, Down: down,
 		Rule: dec.Rule, Decision: auditDecision(dec),
 	})
 }

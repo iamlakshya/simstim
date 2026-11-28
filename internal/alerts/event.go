@@ -20,23 +20,24 @@ import (
 
 // Event kinds.
 const (
-	NeedsInput = "needs_input" // the agent waits for the user
-	TurnDone   = "turn_done"   // the agent finished a long turn
-	Exited     = "exited"      // the program ended with code 0
-	Failed     = "failed"      // the program ended with another code or a signal
-	OOM        = "oom"         // the memory cap stopped a process
-	Memory     = "memory"      // the session is close to its memory cap
-	Started    = "started"     // the session started
-	Restored   = "restored"    // the session started again after a host restart
-	LinkSilent = "link_silent" // the guest init stopped sending heartbeats
-	Test       = "test"        // sent by the test command only
+	NeedsInput  = "needs_input"  // the agent waits for the user
+	TurnDone    = "turn_done"    // the agent finished a long turn
+	Exited      = "exited"       // the program ended with code 0
+	Failed      = "failed"       // the program ended with another code or a signal
+	OOM         = "oom"          // the memory cap stopped a process
+	Memory      = "memory"       // the session is close to its memory cap
+	Started     = "started"      // the session started
+	Restored    = "restored"     // the session started again after a host restart
+	LinkSilent  = "link_silent"  // the guest init stopped sending heartbeats
+	ModelBudget = "model_budget" // the session reached its model token budget
+	Test        = "test"         // sent by the test command only
 )
 
 // Kinds lists the events a config may name.
-var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored, LinkSilent}
+var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored, LinkSilent, ModelBudget}
 
 // DefaultEvents are sent when a config names none.
-var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory, LinkSilent}
+var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory, LinkSilent, ModelBudget}
 
 // Version is the version of the event's JSON. It changes only when a field
 // changes meaning or goes away; new fields may appear at any time.
@@ -127,6 +128,11 @@ func summary(ev Event) string {
 		s = name + " was restored on " + ev.Host + " after a restart"
 	case LinkSilent:
 		s = on + " stopped answering on its link"
+	case ModelBudget:
+		s = on + " reached its model token budget"
+		if ev.Usage != "" {
+			s += " (" + ev.Usage + ")"
+		}
 	case Test:
 		return "Test alert from " + ev.Host
 	default:
@@ -219,6 +225,8 @@ func TestEvent(kind, dir string) (Event, error) {
 		ev.Detail = "Do you want to proceed? (a test question)"
 	case Memory:
 		ev.Usage = "2.7 of 2.9 GiB"
+	case ModelBudget:
+		ev.Usage = "2000412 of 2000000 tokens"
 	}
 	return ev, nil
 }

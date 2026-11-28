@@ -115,6 +115,12 @@ type Settings struct {
 		// inside a sandbox, as a whole number of days from "0d" to "365d".
 		// "0d" turns the age check off.
 		MinReleaseAge string `toml:"min_release_age"`
+		// ModelBudget caps the total model tokens a walled session may use
+		// across gateway requests. 0 turns the cap off.
+		ModelBudget int64 `toml:"model_budget"`
+		// UploadBudget caps bytes uploaded per host per hour from a walled
+		// session to non-model hosts, such as "16M". "0" turns the cap off.
+		UploadBudget string `toml:"upload_budget"`
 	} `toml:"network"`
 	// Keymap rebinds launcher commands by name ("session: delete"). A value is
 	// a key, a list of keys, or "" to unbind. `config keymap` lists the names.
@@ -142,6 +148,7 @@ func DefaultSettings() Settings {
 	s.Sandbox.Paste = "images-and-pdf"
 	s.Sandbox.PackageManagers = api.DefaultPackageManagers
 	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
+	s.Network.UploadBudget = api.DefaultUploadBudget
 	return s
 }
 
@@ -453,6 +460,9 @@ func LoadSettingsChecked() (Settings, string) {
 	}
 	if s.Network.MinReleaseAge == "" {
 		s.Network.MinReleaseAge = d.Network.MinReleaseAge
+	}
+	if s.Network.UploadBudget == "" {
+		s.Network.UploadBudget = d.Network.UploadBudget
 	}
 	return s, ""
 }

@@ -11,11 +11,11 @@ type closeWriter interface {
 	CloseWrite() error
 }
 
-// spliceConns copies bytes bidirectionally between client and upstream until
-// both directions finish or ctx is cancelled, returning (upBytes, downBytes).
+// spliceConnsWithBudget copies bytes bidirectionally while enforcing host's
+// rolling upload budget when budget is non-nil and has a positive limit.
 // It propagates half-closes when the connections support CloseWrite so
 // protocols that rely on EOF work cleanly.
-func spliceConns(ctx context.Context, client, upstream net.Conn) (up, down int64) {
+func spliceConnsWithBudget(ctx context.Context, client, upstream net.Conn, host string, budget *UploadBudget) (up, down int64, budgetHit bool) {
 	stop := context.AfterFunc(ctx, func() {
 		_ = client.Close()
 		_ = upstream.Close()
@@ -25,7 +25,16 @@ func spliceConns(ctx context.Context, client, upstream net.Conn) (up, down int64
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		up, _ = io.Copy(upstream, client)
+		if budget != nil && budget.Limit() > 0 && host != "" {
+			up, budgetHit = copyUpWithBudget(upstream, client, host, budget)
+			if budgetHit {
+				_ = client.Close()
+				_ = upstream.Close()
+				return
+			}
+		} else {
+			up, _ = io.Copy(upstream, client)
+		}
 		if cw, ok := upstream.(closeWriter); ok {
 			_ = cw.CloseWrite()
 		} else {
@@ -44,7 +53,7 @@ func spliceConns(ctx context.Context, client, upstream net.Conn) (up, down int64
 	wg.Wait()
 	_ = client.Close()
 	_ = upstream.Close()
-	return up, down
+	return up, down, budgetHit
 }
 
 // streamListener adapts accepted link streams (or any net.Conn) into a

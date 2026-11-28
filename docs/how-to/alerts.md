@@ -35,7 +35,7 @@ simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
 
 The token is stored only on the host, in the alerts file, which only you can read. To keep it in a file of its own instead, edit the alerts file by hand and set `token_file` (see [the alerts file](#the-alerts-file)). The token file must be mode 0600 too.
 
-The alert's title names the host, and its text is the summary, such as "auth-fix on my-vps needs you". `needs_input`, `failed`, `oom` and `memory` have high priority. The others have the default. Set `priority` in the file to change that.
+The alert's title names the host, and its text is the summary, such as "auth-fix on my-vps needs you". `needs_input`, `failed`, `oom`, `memory` and `model_budget` have high priority. The others have the default. Set `priority` in the file to change that.
 
 ## Set up a webhook
 
@@ -138,6 +138,7 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `failed` | The program ended with another code, or a signal |
 | `oom` | A process in the session hit its memory cap and was stopped. When that process was the program itself, `oom` is the session's end, in place of `failed`, and has `exit_code` and `signal`. A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
 | `memory` | The session is close to its memory cap, before the cap stops a process |
+| `model_budget` | A walled session reached `network.model_budget`, and its egress process started refusing model requests |
 | `started` | The session started, or `resume` started its agent again |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |

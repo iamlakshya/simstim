@@ -201,6 +201,10 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 		s.handlePortGrant(w, req)
 	case "port.revoke":
 		s.handlePortRevoke(w, req)
+	case "usage":
+		s.handleUsage(w, req)
+	case "policy.reload":
+		s.handlePolicyReload(w, req)
 	case "peek", "send", "ports":
 		s.forwardHolderRequest(w, req)
 	default:

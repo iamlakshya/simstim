@@ -37,6 +37,7 @@ type Options struct {
 	UploadTimeout    time.Duration // 15s
 	AlertsPath       string        // override alerts config path (optional)
 	Egress           *egress.Client
+	EgressStarter    func(ctx context.Context, id string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error)
 	EgressExe        string
 }
 
@@ -79,14 +80,16 @@ type Supervisor struct {
 	ctlNext atomic.Uint64
 	pending map[uint64]chan proto.Response
 
-	mu       sync.Mutex
-	m        *host.Manifest
-	mem      host.MemTracker
-	dirty    bool
-	ended    bool
-	stopping bool
-	lastHB   time.Time
-	hbSilent bool
+	mu               sync.Mutex
+	m                *host.Manifest
+	mem              host.MemTracker
+	dirty            bool
+	ended            bool
+	stopping         bool
+	lastHB           time.Time
+	hbSilent         bool
+	budgetAlerted    bool
+	budgetAlertLimit int64
 
 	saveMu sync.Mutex
 	closed bool

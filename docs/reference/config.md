@@ -23,6 +23,8 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sandbox.package_managers` | string | `"guarded"` | Controls the settings that guest init writes for package managers inside a sandbox: "guarded" (minimum release age, no dependency install scripts for npm, pnpm, Yarn and Bun, and Go proxy settings), "strict" (also blocks pip and uv source builds), or "off". |
 | `sandbox.env` | table | — | Sets extra environment variables inside a sandbox. A name set here replaces the guest init's value for that name. |
 | `network.min_release_age` | string | `"7d"` | Sets the minimum release age for package managers inside a sandbox, as a whole number of days from "0d" to "365d". "0d" turns the age check off. |
+| `network.model_budget` | integer | — | Caps the total model tokens a walled session may use across gateway requests. 0 turns the cap off. |
+| `network.upload_budget` | string | `"16M"` | Caps bytes uploaded per host per hour from a walled session to non-model hosts, such as "16M". "0" turns the cap off. |
 | `keymap` | table | — | Rebinds launcher commands by name ("session: delete"). A value is a key, a list of keys, or "" to unbind. `config keymap` lists the names. |
 | `secrets` | table | — | Names secrets for sessions, each as a command string or a [secrets.NAME] table with run (the command that prints the value) and optional hosts, header, format and route bindings. In a walled session, secrets whose hosts come from [secrets.NAME] or the agent table stay in the egress process and never enter the sandbox. Values are never stored. |
 
