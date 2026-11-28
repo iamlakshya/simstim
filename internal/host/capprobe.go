@@ -11,7 +11,6 @@ import (
 	"os/user"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -424,8 +423,4 @@ func parseProcStatusGroups(b []byte) []int {
 		}
 	}
 	return nil
-}
-
-func containsInt(list []int, want int) bool {
-	return slices.Contains(list, want)
 }

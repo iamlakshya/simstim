@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -64,7 +65,7 @@ func probeKVM(uid int, u *user.User) api.KVM {
 			}
 		}
 		if nowGroups, err := os.Getgroups(); err == nil {
-			k.InGroupNow = containsInt(nowGroups, gid)
+			k.InGroupNow = slices.Contains(nowGroups, gid)
 		}
 		k.InGroupManager = userManagerInGroup(gid)
 	}
@@ -103,7 +104,7 @@ func userManagerInGroup(gid int) bool {
 	if err != nil {
 		return false
 	}
-	return containsInt(parseProcStatusGroups(status), gid)
+	return slices.Contains(parseProcStatusGroups(status), gid)
 }
 
 func posixModeString(m os.FileMode) string {
