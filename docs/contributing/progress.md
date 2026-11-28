@@ -1,6 +1,6 @@
 # Progress of the isolation and CLI plans
 
-Updated 2026-11-27. This page tracks the tasks of the [isolation plan](isolation-plan.md) and the [CLI plan](cli-plan.md) on the feature branch `docs/isolated-sessions`. Nothing reaches `main` until every task is done.
+Updated 2026-11-28. This page tracks the tasks of the [isolation plan](isolation-plan.md) and the [CLI plan](cli-plan.md) on the feature branch `docs/isolated-sessions`. Nothing reaches `main` until every task is done.
 
 States:
 
@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 17 |
-| To do | 82 |
+| Done | 18 |
+| To do | 81 |
 | **All** | **99** |
 
 ## Current focus
@@ -39,7 +39,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P0.7 | 0 | Day 1 | Done | Safe copies and safer git on the trusted side |
 | P0.8 | 0 | Day 1 | Done | Lima VMs that cannot reach the laptop's loopback |
 | P0.9 | 0 | Day 1 | Done | Watch pins that no package ecosystem covers |
-| H3 | 0 | Day 1 | To do | Pinned host keys and `host rekey` |
+| H3 | 0 | Day 1 | Done | Pinned host keys and `host rekey` |
 | H4 | 0 | Day 1 | To do | The host ID and the tiers file |
 | H5 | 0 | Day 1 | To do | The grant gate and the grant ledger |
 | P1.1 | 1 | Day 1 | To do | Wall levels, the sandbox probe and the floor |
