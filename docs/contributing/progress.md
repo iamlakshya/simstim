@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 24 |
-| To do | 75 |
+| Done | 25 |
+| To do | 74 |
 | **All** | **99** |
 
 ## Current focus
@@ -66,7 +66,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P2.16 | 2 | Day 1 | To do | Model usage and budgets |
 | P2.8 | 2 | Day 1 | To do | Package managers in the guest |
 | P2.10 | 2 | Day 1 | To do | Walls by default |
-| P4.1 | 3 | Day 1 | To do | The release manifest and the check before the bridge |
+| P4.1 | 3 | Day 1 | Done | The release manifest and the check before the bridge |
 | H10 | 3 | Day 1 | To do | Prepare in `host add` |
 | P4.4 | 4 | Day 1 | Done | A signed-tag release gate |
 | H15 | 4 | Day 1 | To do | Leave and wipe |
