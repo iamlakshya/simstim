@@ -21,16 +21,16 @@ Your phone shows "Test alert from my-vps". From now on, every session on `my-vps
 
 **ntfy.sh, the public server.** Use a topic name nobody can guess, as above.
 
-**Your own ntfy server, or a reserved topic.** These need an access token. Give `--token-cmd` a command that prints the token on your laptop, such as a keychain read. The client runs it, sends the token to the host, and never prints it:
+**Your own ntfy server, or a reserved topic.** These need an access token. Give `--token-command` a command that prints the token on your laptop, such as a keychain read. The client runs it, sends the token to the host, and never prints it:
 
 ```sh
 # macOS keychain
 simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
-  --token-cmd 'security find-generic-password -s ntfy-token -w'
+  --token-command 'security find-generic-password -s ntfy-token -w'
 
 # 1Password
 simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
-  --token-cmd 'op read op://Private/ntfy/token'
+  --token-command 'op read op://Private/ntfy/token'
 ```
 
 The token is stored only on the host, in the alerts file, which only you can read. To keep it in a file of its own instead, edit the alerts file by hand and set `token_file` (see [the alerts file](#the-alerts-file)). The token file must be mode 0600 too.
@@ -118,7 +118,7 @@ These `host alerts set` flags write the same keys:
 
 | Flag | Key |
 | --- | --- |
-| `--ntfy URL`, `--token-cmd CMD` | an ntfy destination, with `token` |
+| `--ntfy URL`, `--token-command CMD` | an ntfy destination, with `token` |
 | `--webhook URL`, `--format F` | a webhook destination |
 | `--command CMD` | a command destination |
 | `--events a,b` | `events` |
@@ -192,7 +192,7 @@ simstim host alerts test my-vps --event needs_input
 It says what each destination did. Then look at the delivery log, which also says why an event was not sent:
 
 ```sh
-simstim host alerts log my-vps -n 50
+simstim host alerts log my-vps --lines 50
 ```
 
 If the log has nothing from a session at all, the session may run an older helper, from before alerts. Start it again.

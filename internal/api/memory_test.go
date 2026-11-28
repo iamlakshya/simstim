@@ -55,3 +55,40 @@ func TestParseMemoryMax(t *testing.T) {
 		}
 	}
 }
+
+func TestParseSize(t *testing.T) {
+	for in, want := range map[string]int64{
+		"0.001K":  1,
+		"1K":      1 << 10,
+		"512k":    512 << 10,
+		"1M":      1 << 20,
+		"512M":    512 << 20,
+		"1.5G":    1536 << 20,
+		"4GiB":    4 << 30,
+		"4 GiB":   4 << 30,
+		"40gb":    40 << 30,
+		"1T":      1 << 40,
+		"255M":    255 << 20,
+		" 64KiB ": 64 << 10,
+	} {
+		if got, err := ParseSize(in); err != nil || got != want {
+			t.Errorf("ParseSize(%q) = %d, %v, want %d", in, got, err, want)
+		}
+	}
+	for in, why := range map[string]string{
+		"":          "is not a size",
+		"auto":      "is not a size",
+		"4096":      "has no unit",
+		"4":         "has no unit",
+		"1.5":       "has no unit",
+		"0G":        "less than 1 byte",
+		"0.0001K":   "less than 1 byte",
+		"-1G":       "is not a size",
+		"4X":        "is not a size",
+		"10000000T": "is too big",
+	} {
+		if got, err := ParseSize(in); err == nil || !strings.Contains(err.Error(), why) {
+			t.Errorf("ParseSize(%q) = %d, %v, want an error that it %s", in, got, err, why)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -17,7 +18,8 @@ const MinMemoryMax = 256 << 20
 // session asked for at its start.
 const MemoryAuto = -1
 
-// MemorySizes lists the forms of a size that ParseMemoryMax takes, for hints.
+// MemorySizes lists the forms of a size that ParseSize and ParseMemoryMax take,
+// for hints.
 const MemorySizes = "512M, 4G, 4Gi, 4GiB, 4GB or 1.5G"
 
 var (
@@ -27,22 +29,15 @@ var (
 	memorySize = regexp.MustCompile(`^([0-9]+(?:\.[0-9]+)?) ?([kmgt])(?:ib?|b)?$`)
 	// bareNumber is a size without its unit.
 	bareNumber = regexp.MustCompile(`^[0-9]+(?:\.[0-9]+)?$`)
+	// errSizeTooSmall marks a size that comes to less than one byte.
+	errSizeTooSmall = errors.New("less than 1 byte")
 )
 
-// ParseMemoryMax reads a session's memory cap: "auto" (or nothing) for the
-// host's default, which is 0, or a size such as "512M", "4Gi" or "1.5GiB".
-// Case does not matter. A size needs its unit, and must be MinMemoryMax or
-// more. "max" and "infinity" mean no limit to systemd. They are refused
-// here, since auto already lets a session use all that the host gives its
-// sessions (decision 0024).
-func ParseMemoryMax(v string) (int64, error) {
+// ParseSize reads a size with a unit in powers of 1024, such as "512M", "4Gi",
+// "4GiB" or "1.5G". Case does not matter. A size needs its unit, and must come
+// to at least one byte.
+func ParseSize(v string) (int64, error) {
 	s := strings.ToLower(strings.TrimSpace(v))
-	switch s {
-	case "", "auto":
-		return 0, nil
-	case "max", "infinity", "inf", "unlimited", "none":
-		return 0, fmt.Errorf("%q is not a size: auto already lets a session use all the memory that the host gives its sessions", v)
-	}
 	m := memorySize.FindStringSubmatch(s)
 	if m == nil {
 		if bareNumber.MatchString(s) {
@@ -59,8 +54,35 @@ func ParseMemoryMax(v string) (int64, error) {
 	switch {
 	case bytes >= 1<<62:
 		return 0, fmt.Errorf("%q is too big", v)
-	case bytes < MinMemoryMax:
-		return 0, fmt.Errorf("%q is below the smallest cap, 256M", v)
+	case bytes < 1:
+		return 0, fmt.Errorf("%q is %w", v, errSizeTooSmall)
 	}
 	return int64(bytes), nil
+}
+
+// ParseMemoryMax reads a session's memory cap: "auto" (or nothing) for the
+// host's default, which is 0, or a size such as "512M", "4Gi" or "1.5GiB".
+// Case does not matter. A size needs its unit, and must be MinMemoryMax or
+// more. "max" and "infinity" mean no limit to systemd. They are refused
+// here, since auto already lets a session use all that the host gives its
+// sessions (decision 0024).
+func ParseMemoryMax(v string) (int64, error) {
+	s := strings.ToLower(strings.TrimSpace(v))
+	switch s {
+	case "", "auto":
+		return 0, nil
+	case "max", "infinity", "inf", "unlimited", "none":
+		return 0, fmt.Errorf("%q is not a size: auto already lets a session use all the memory that the host gives its sessions", v)
+	}
+	bytes, err := ParseSize(v)
+	if err != nil {
+		if errors.Is(err, errSizeTooSmall) {
+			return 0, fmt.Errorf("%q is below the smallest cap, 256M", v)
+		}
+		return 0, err
+	}
+	if bytes < MinMemoryMax {
+		return 0, fmt.Errorf("%q is below the smallest cap, 256M", v)
+	}
+	return bytes, nil
 }

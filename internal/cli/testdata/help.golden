@@ -61,7 +61,7 @@ Flags:
                 ask nothing: a question that needs an answer fails with
                 exit code 4, and names the flag that answers it
                 (<NAME>_NO_INPUT=1 does the same)
-  -v, --version
+      --version
                 version for <name>
 
 Additional help topics:

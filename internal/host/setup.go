@@ -111,7 +111,7 @@ func setupQuestion(repo string, s sessionHooks, changed bool) error {
 	if changed {
 		msg = fmt.Sprintf("the setup script of %s changed after you trusted it", repo)
 	}
-	return questionError(api.CodeSetupTrust, msg, "Pass --setup to run it, or --no-setup to start without it. The launcher asks.",
+	return questionError(api.CodeSetupTrust, msg, "Pass --setup-script to run it, or --no-setup-script to start without it. The launcher asks.",
 		api.SetupQuestion{Repo: repo, Script: script, Hash: s.hash})
 }
 
@@ -157,15 +157,15 @@ func scriptUserError(repo string, err error) error {
 	case e.outside:
 		return UserError(api.CodeSetupOutside,
 			fmt.Sprintf("the setup script of %s, %s, points outside the repository, so it cannot run", repo, e.script),
-			fmt.Sprintf("Make %s a file in the repository, or start with --no-setup.", e.script))
+			fmt.Sprintf("Make %s a file in the repository, or start with --no-setup-script.", e.script))
 	case e.script == "":
 		return UserError(api.CodeSetupUnreadable,
 			fmt.Sprintf("could not read the folder %s, so the setup scripts of %s cannot be checked: %v", e.top, repo, reason(e.err)),
-			fmt.Sprintf("Let your user on the host read the folder %s, or start with --no-setup.", e.top))
+			fmt.Sprintf("Let your user on the host read the folder %s, or start with --no-setup-script.", e.top))
 	}
 	return UserError(api.CodeSetupUnreadable,
 		fmt.Sprintf("could not read the setup script of %s, %s: %v", repo, e.script, reason(e.err)),
-		fmt.Sprintf("Let your user on the host read %s, or start with --no-setup.", e.script))
+		fmt.Sprintf("Let your user on the host read %s, or start with --no-setup-script.", e.script))
 }
 
 // setupHash reads the setup, resume and stop scripts at a repository's top

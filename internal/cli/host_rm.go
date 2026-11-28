@@ -32,8 +32,8 @@ func hostRmCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&opts.destroy, "destroy", false, "delete the machine that `host create` made, then forget the host")
-	cmd.Flags().BoolVar(&opts.force, "force", false, "delete the machine even while a session is working (with --destroy)")
-	cmd.Flags().StringVar(&opts.confirm, "confirm", "", "type the host's name here instead of at the prompt (with --destroy)")
+	addForce(cmd, &opts.force, "delete the machine even while a session is working (with --destroy)")
+	addConfirm(cmd, &opts.confirm, "type the host's name here instead of at the prompt (with --destroy)")
 	return cmd
 }
 
@@ -52,8 +52,8 @@ func hostDestroyCmd() *cobra.Command {
 			return destroyHost(cmd.Context(), prompts(cmd), args[0], force, yes)
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "destroy it even while a session is working")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "do not ask first")
+	addForce(cmd, &force, "destroy it even while a session is working")
+	addYes(cmd, &yes, "do not ask first")
 	return cmd
 }
 

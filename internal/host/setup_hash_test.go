@@ -209,7 +209,7 @@ func TestSetupOutside(t *testing.T) {
 	rel := "." + brand.Name + "/setup"
 	startFails(t, top, api.CodeSetupOutside, func(t *testing.T, name string, pe *proto.Error) {
 		if pe.Message != "the setup script of "+top+", "+rel+", points outside the repository, so it cannot run" ||
-			pe.Hint != "Make "+rel+" a file in the repository, or start with --no-setup." {
+			pe.Hint != "Make "+rel+" a file in the repository, or start with --no-setup-script." {
 			t.Errorf("%s: %q, try %q", name, pe.Message, pe.Hint)
 		}
 	})
@@ -231,7 +231,7 @@ func TestSetupUnreadable(t *testing.T) {
 	rel := "." + brand.Name + "/resume"
 	startFails(t, top, api.CodeSetupUnreadable, func(t *testing.T, name string, pe *proto.Error) {
 		if pe.Message != "could not read the setup script of "+top+", "+rel+": permission denied" ||
-			pe.Hint != "Let your user on the host read "+rel+", or start with --no-setup." {
+			pe.Hint != "Let your user on the host read "+rel+", or start with --no-setup-script." {
 			t.Errorf("%s: %q, try %q", name, pe.Message, pe.Hint)
 		}
 	})
@@ -261,7 +261,7 @@ func TestSetupUnreadableTopLevel(t *testing.T) {
 	}
 	startFails(t, top, api.CodeSetupUnreadable, func(t *testing.T, name string, pe *proto.Error) {
 		if pe.Message != "could not read the folder "+top+", so the setup scripts of "+top+" cannot be checked: permission denied" ||
-			pe.Hint != "Let your user on the host read the folder "+top+", or start with --no-setup." {
+			pe.Hint != "Let your user on the host read the folder "+top+", or start with --no-setup-script." {
 			t.Errorf("%s: %q, try %q", name, pe.Message, pe.Hint)
 		}
 	})

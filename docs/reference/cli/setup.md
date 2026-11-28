@@ -26,10 +26,10 @@ simstim setup --create lima --agents claude --yes --no-login
 
 | Flag | What it does |
 | --- | --- |
-| `--agents <string>` | the agents to install, such as claude,codex (none installs nothing) |
+| `--agents <strings>` | the agents to install, such as claude,codex (none installs nothing) |
 | `--create <string>` | make a new host with a provider: lima, docker or e2b |
 | `--host <string>` | use this host: a saved host, a Host from your SSH config, or user@host |
-| `--name <string>` | the host's name (default: from `--host`, or the provider's name) |
+| `-n`, `--name <string>` | the host's name (default: from `--host`, or the provider's name) |
 | `--no-login` | do not offer the agents' logins |
 | `-y`, `--yes` | do not ask: install the helper, and only the agents in `--agents` |
 

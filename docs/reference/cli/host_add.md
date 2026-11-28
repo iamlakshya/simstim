@@ -29,13 +29,13 @@ simstim host add --local
 | --- | --- |
 | `--autostart <string>` | `--local`: start VM automatically: boot, login or off (default boot) |
 | `--cpus <int>` | `--local`: VM CPUs (default: under half of this Mac) |
-| `--disk <int>` | `--local`: VM disk in GiB (sparse, default 40) |
+| `--disk <size>` | `--local`: VM disk size, such as 40G (sparse, default 40G) |
 | `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |
 | `--host-key <string>` | pin the host key with this SHA256 fingerprint (SHA256:…) |
 | `--idle-stop <string>` | `--local`: idle power-off time, or never (default never) |
-| `--label <string>` | labels, for example provider=gcp,region=eu |
+| `--label <strings>` | labels, for example provider=gcp,region=eu |
 | `--local` | set up this Mac as a host in a pinned Lima VM |
-| `--memory <int>` | `--local`: VM memory in GiB (default: under half of this Mac) |
+| `--memory <size>` | `--local`: VM memory size, such as 8G (default: under half of this Mac) |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
 | `--ssh-config <string>` | an extra SSH config file to include |
 | `--trusted` | mark the host as trusted (you control root on it) |

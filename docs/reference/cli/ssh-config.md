@@ -24,7 +24,7 @@ simstim ssh-config --remove
 | Flag | What it does |
 | --- | --- |
 | `--remove` | remove the generated SSH files and the Include line |
-| `--yes` | add the Include line to ~/.ssh/config without asking |
+| `-y`, `--yes` | add the Include line to ~/.ssh/config without asking |
 
 ## Flags from the parent command
 

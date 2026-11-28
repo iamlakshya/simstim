@@ -32,7 +32,7 @@ func sshConfigCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&remove, "remove", false, "remove the generated SSH files and the Include line")
-	cmd.Flags().BoolVar(&yes, "yes", false, "add the Include line to ~/.ssh/config without asking")
+	addYes(cmd, &yes, "add the Include line to ~/.ssh/config without asking")
 	return cmd
 }
 

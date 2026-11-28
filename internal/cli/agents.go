@@ -59,7 +59,7 @@ func agentsLsCmd() *cobra.Command {
 
 func agentsInstallCmd() *cobra.Command {
 	var hostName string
-	var reinstall, force bool
+	var reinstall, usedOldForce bool
 	cmd := &cobra.Command{
 		Use:   "install <agent> [<host>]",
 		Short: "Install an agent on a host with its official installer",
@@ -71,13 +71,8 @@ func agentsInstallCmd() *cobra.Command {
 			"  " + brand.Name + " agents install codex my-vps --reinstall   # update it",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if cmd.Flags().Changed("force") {
+			if usedOldForce {
 				warnOld(cmd, oldInstallForce)
-				if !cmd.Flags().Changed("reinstall") {
-					reinstall = force
-				} else {
-					reinstall = reinstall || force
-				}
 			}
 			a, err := findAgent(args[0], installable())
 			if err != nil {
@@ -98,10 +93,11 @@ func agentsInstallCmd() *cobra.Command {
 			return installAgent(cmd.Context(), h, a, reinstall, inputOn(cmd))
 		},
 	}
-	cmd.Flags().StringVar(&hostName, "host", "", "the host (needed when you have more than one)")
+	addHostFlag(cmd, &hostName, "the host (needed when you have more than one)")
 	cmd.Flags().BoolVar(&reinstall, "reinstall", false, "run the installer even when the agent is installed, for example to update it")
-	cmd.Flags().BoolVar(&force, "force", false, "")
-	_ = cmd.Flags().MarkHidden("force")
+	if oldInstallForce != nil {
+		addOldFlag(cmd, "reinstall", "force", &usedOldForce, oldInstallForce)
+	}
 	return cmd
 }
 

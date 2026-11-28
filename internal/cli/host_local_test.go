@@ -106,7 +106,7 @@ func TestHostAddLocalCreatesAndConnects(t *testing.T) {
 	if !pinnedCalled {
 		t.Error("ensurePinnedLima was not called")
 	}
-	if cp.got.Name != lima.DefaultMacName || cp.got.CPUs != 5 || cp.got.MemoryGiB != 8 || cp.got.DiskGiB != lima.DefaultDiskGiB || cp.got.IdleStop != "never" || cp.got.Autostart != lima.AutostartBoot {
+	if cp.got.Name != lima.DefaultMacName || cp.got.CPUs != 5 || cp.got.Memory != 8<<30 || cp.got.Disk != lima.DefaultDiskBytes || cp.got.IdleStop != "never" || cp.got.Autostart != lima.AutostartBoot {
 		t.Fatalf("provider.Request = %+v", cp.got)
 	}
 	if !strings.Contains(out, "Added this Mac as mac in ") {

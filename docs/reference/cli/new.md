@@ -29,16 +29,16 @@ simstim new my-vps --agent claude --detach --json
 | `-a`, `--agent <string>` | the agent: claude, codex, opencode, antigravity, gemini, amp, cursor, aider, goose or shell (default: `shell`) |
 | `--base <string>` | the commit or branch the worktree starts from (default: HEAD) |
 | `--detach` | start it without attaching |
-| `-d`, `--dir <string>` | the folder on the host (default: `~`) |
-| `--expose <stringArray>` | expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable) |
+| `-C`, `--dir <string>` | the folder on the host (default: `~`) |
+| `--expose <strings>` | expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `--memory-max <size>` | cap the session's memory: auto, or a size such as 4G (default: sessions.memory_max in config.toml) |
 | `--mkdir` | make the folder on the host if it does not exist, without asking |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
-| `--no-setup` | do not run the repository's setup script this time |
-| `--secret <stringArray>` | pass a secret from config.toml's [secrets] to the session (repeatable) |
-| `--setup` | run the repository's setup script this time, whatever your answer for it |
+| `--no-setup-script` | do not run the repository's setup script this time |
+| `--secret <strings>` | pass a secret from config.toml's [secrets] to the session (repeatable, or comma-separated) |
+| `--setup-script` | run the repository's setup script this time, whatever your answer for it |
 | `--wall <string>` | sandbox wall level: none, process or gvisor |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
@@ -50,5 +50,15 @@ simstim new my-vps --agent claude --detach --json
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until |
+| --- | --- | --- |
+| new -d | new -C | v0.4.0 and 11 November 2027, whichever comes later |
+| --setup | --setup-script | v0.4.0 and 11 November 2027, whichever comes later |
+| --no-setup | --no-setup-script | v0.4.0 and 11 November 2027, whichever comes later |
 
 See [all commands](_index.md).

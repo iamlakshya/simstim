@@ -49,12 +49,17 @@ func Root() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		Args:          unknownCommand,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runHome(cmd)
-		},
+		RunE:          runRoot,
 	}
 	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), showCmd(), agentsCmd(), imageCmd(), attachCmd(), resumeCmd(), stopCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), cpCmd(), doctorCmd(), debugCmd(), configCmd(), sshConfigCmd(), sshProxyCmd(), demoCmd(), versionCmd())
 	root.AddCommand(topics()...)
+	// Define --version without a short form so Cobra's InitDefaultVersionFlag
+	// never adds -v (cli-spec 10.1). -v stays as a hidden old form.
+	root.Flags().Bool("version", false, "version for "+brand.Name)
+	if oldVersionShort != nil {
+		var oldVersion bool
+		addOldShortBoolFlag(root, "old-version", "v", &oldVersion, oldVersionShort)
+	}
 	addRootFlags(root)
 	addDebugFlags(root)
 	// Cobra adds these two itself when it runs, after guard would have
@@ -70,6 +75,15 @@ func Root() *cobra.Command {
 	}
 	guard(root)
 	return root
+}
+
+func runRoot(cmd *cobra.Command, _ []string) error {
+	if boolFlag(cmd, "old-version") {
+		warnOld(cmd, oldVersionShort)
+		fmt.Fprintf(cmd.OutOrStdout(), "%s version %s\n", cmd.Name(), cmd.Version)
+		return nil
+	}
+	return runHome(cmd)
 }
 
 func versionCmd() *cobra.Command {

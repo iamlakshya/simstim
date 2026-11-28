@@ -31,6 +31,7 @@ func termSize() (int, int) {
 type newOpts struct {
 	agent, dir, name, base, memoryMax, wallLevel            string
 	detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
+	usedOldDir, usedOldSetup, usedOldNoSetup                bool
 	secrets, expose                                         []string
 }
 
@@ -46,30 +47,76 @@ func newCmd() *cobra.Command {
 			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop\n" +
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
-		Args: cobra.MinimumNArgs(1),
+		Args: newArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runNew(cmd, args, o)
 		},
 	}
 	cmd.Flags().StringVarP(&o.agent, "agent", "a", "shell", "the agent: "+agentKinds())
-	cmd.Flags().StringVarP(&o.dir, "dir", "d", "~", "the folder on the host")
+	cmd.Flags().StringVarP(&o.dir, "dir", "C", "~", "the folder on the host")
+	if oldNewShortDir != nil {
+		addOldShortFlag(cmd, "dir", "old-dir", "d", &o.usedOldDir, oldNewShortDir)
+	}
 	cmd.Flags().BoolVar(&o.mkdir, "mkdir", false, "make the folder on the host if it does not exist, without asking")
-	cmd.Flags().StringVarP(&o.name, "name", "n", "", "a name for the session (default: the folder name)")
-	cmd.Flags().BoolVar(&o.detach, "detach", false, "start it without attaching")
+	addName(cmd, &o.name, "a name for the session (default: the folder name)")
+	addDetach(cmd, &o.detach, "start it without attaching")
 	cmd.Flags().BoolVarP(&o.worktree, "worktree", "w", false, "give the session its own git worktree and branch")
 	cmd.Flags().BoolVar(&o.inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
 	cmd.Flags().StringVar(&o.base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
-	cmd.Flags().StringVar(&o.memoryMax, "memory-max", "", "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
-	cmd.Flags().StringArrayVar(&o.secrets, "secret", nil, "pass a secret from config.toml's [secrets] to the session (repeatable)")
-	cmd.Flags().StringArrayVar(&o.expose, "expose", nil, "expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable)")
-	cmd.Flags().BoolVar(&o.setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
-	cmd.Flags().BoolVar(&o.noSetup, "no-setup", false, "do not run the repository's setup script this time")
+	addMemoryMax(cmd, &o.memoryMax, "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
+	addSecret(cmd, &o.secrets, "pass a secret from config.toml's [secrets] to the session (repeatable, or comma-separated)")
+	cmd.Flags().StringSliceVar(&o.expose, "expose", nil, "expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated)")
+	cmd.Flags().BoolVar(&o.setup, "setup-script", false, "run the repository's setup script this time, whatever your answer for it")
+	cmd.Flags().BoolVar(&o.noSetup, "no-setup-script", false, "do not run the repository's setup script this time")
+	if oldNewSetup != nil {
+		addOldFlag(cmd, "setup-script", "setup", &o.usedOldSetup, oldNewSetup)
+	}
+	if oldNewNoSetup != nil {
+		addOldFlag(cmd, "no-setup-script", "no-setup", &o.usedOldNoSetup, oldNewNoSetup)
+	}
 	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: none, process or gvisor")
 	addJSON(cmd, &o.asJSON)
 	return cmd
 }
 
+// newArgs checks the positional words of new: exactly one host before any "--"
+// (cli-spec 10.4, isolation-spec 14.14).
+func newArgs(cmd *cobra.Command, args []string) error {
+	before := len(args)
+	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
+		before = dash
+	}
+	if before == 0 {
+		return missingArgument(cmd, "<host>")
+	}
+	if before > 1 {
+		hint := helpOf(cmd)
+		if client.ValidHostName(args[0]) {
+			cand := brand.Name + " new " + shellWord(args[0]) + " -- " + joinWords(args[1:])
+			if whole(cand) {
+				hint = cand
+			}
+		}
+		return &client.UserError{
+			Msg:  "new takes one host. A command goes after --",
+			Hint: hint,
+			Code: "extra_argument",
+			Kind: client.KindUsage,
+		}
+	}
+	return nil
+}
+
 func runNew(cmd *cobra.Command, args []string, o newOpts) error {
+	if o.usedOldDir {
+		warnOld(cmd, oldNewShortDir)
+	}
+	if o.usedOldSetup {
+		warnOld(cmd, oldNewSetup)
+	}
+	if o.usedOldNoSetup {
+		warnOld(cmd, oldNewNoSetup)
+	}
 	if err := beforeAttach(cmd, o.asJSON, o.detach); err != nil {
 		return err
 	}
@@ -80,12 +127,22 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 	if err != nil {
 		return err
 	}
+	if cmd.Flags().Changed("secret") {
+		if o.secrets, err = parseNameList("--secret", o.secrets, false, "Pass one or more secret names from [secrets] in config.toml."); err != nil {
+			return err
+		}
+	}
+	if cmd.Flags().Changed("expose") {
+		if o.expose, err = parseNameList("--expose", o.expose, false, "Pass one or more secret names from [secrets] in config.toml."); err != nil {
+			return err
+		}
+	}
 	h, err := client.FindHost(args[0])
 	if err != nil {
 		return err
 	}
 	if o.setup && o.noSetup {
-		return &client.UserError{Msg: "--setup and --no-setup cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
+		return &client.UserError{Msg: "--setup-script and --no-setup-script cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
 	}
 	var memMax int64
 	if cmd.Flags().Changed("memory-max") {
@@ -314,7 +371,7 @@ func lsCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&hostName, "host", "", "only this host, as the argument does")
+	addHostFlag(cmd, &hostName, "only this host, as the argument does")
 	addJSON(cmd, &asJSON)
 	return cmd
 }

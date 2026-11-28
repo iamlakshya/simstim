@@ -23,8 +23,9 @@ import (
 // terminal. The launcher drives the same engine.
 
 type guideOpts struct {
-	host, create, name, agents string
-	agentsSet, yes, noLogin    bool
+	host, create, name      string
+	agents                  []string
+	agentsSet, yes, noLogin bool
 }
 
 func setupCmd() *cobra.Command {
@@ -54,11 +55,11 @@ func setupCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.host, "host", "", "use this host: a saved host, a Host from your SSH config, or user@host")
+	addHostFlag(cmd, &o.host, "use this host: a saved host, a Host from your SSH config, or user@host")
 	f.StringVar(&o.create, "create", "", "make a new host with a provider: lima, docker or e2b")
-	f.StringVar(&o.name, "name", "", "the host's name (default: from --host, or the provider's name)")
-	f.StringVar(&o.agents, "agents", "", "the agents to install, such as claude,codex (none installs nothing)")
-	f.BoolVarP(&o.yes, "yes", "y", false, "do not ask: install the helper, and only the agents in --agents")
+	addName(cmd, &o.name, "the host's name (default: from --host, or the provider's name)")
+	f.StringSliceVar(&o.agents, "agents", nil, "the agents to install, such as claude,codex (none installs nothing)")
+	addYes(cmd, &o.yes, "do not ask: install the helper, and only the agents in --agents")
 	f.BoolVar(&o.noLogin, "no-login", false, "do not offer the agents' logins")
 	return cmd
 }
@@ -163,7 +164,7 @@ func (g *guide) check() error {
 		}
 	}
 	if g.o.agentsSet {
-		if err := onboard.CheckAgents(g.o.agents); err != nil {
+		if err := onboard.CheckAgents(strings.Join(g.o.agents, ",")); err != nil {
 			return fromFlag(err, "agents")
 		}
 	}

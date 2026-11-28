@@ -81,7 +81,7 @@ var (
 	qHostRekey     = &question{cmd: "host rekey", flag: "--confirm"}
 	qAddAgents     = &question{cmd: "host add", flag: "--yes", keep: true}
 	qMakeFolder    = &question{cmd: "new", flag: "--mkdir"}
-	qSetupScript   = &question{cmd: "new", flag: "--setup", keep: true}
+	qSetupScript   = &question{cmd: "new", flag: "--setup-script", keep: true}
 	qFix           = &question{cmd: "doctor", flag: "-y"}
 	qHostFix       = &question{cmd: "host doctor", flag: "-y"}
 	qDestroy       = &question{cmd: "host destroy", flag: "-y"}

@@ -192,7 +192,7 @@ func TestAlertsCommands(t *testing.T) {
 	}
 	fails(t, "nothing to set", "host", "alerts", "set", "box")
 	fails(t, "--format needs --webhook", "host", "alerts", "set", "box", "--format", "slack")
-	fails(t, "--token-cmd needs --ntfy", "host", "alerts", "set", "box", "--token-cmd", "echo x")
+	fails(t, "--token-command needs --ntfy", "host", "alerts", "set", "box", "--token-command", "echo x")
 	got := filepath.Join(th.h.Home, "alert.json")
 	out := ok(t, "host", "alerts", "set", "box", "--command", "cat > "+got)
 	if !strings.Contains(out, "Alerts on box are on") || !strings.Contains(out, "→ command  cat > "+got) {
@@ -205,7 +205,7 @@ func TestAlertsCommands(t *testing.T) {
 	if b, _ := os.ReadFile(got); !strings.Contains(string(b), `"needs_input"`) {
 		t.Errorf("the command got %q", b)
 	}
-	out = ok(t, "host", "alerts", "set", "box", "--add", "--ntfy", "https://ntfy.example.com/topic", "--token-cmd", "echo tok-123",
+	out = ok(t, "host", "alerts", "set", "box", "--add", "--ntfy", "https://ntfy.example.com/topic", "--token-command", "echo tok-123",
 		"--events", "failed,oom", "--delay", "30s", "--min-turn", "2m", "--detail")
 	for _, want := range []string{"events   failed, oom", "needs_input waits 30s", "turns of 2m0s or more", "detail on", "→ ntfy     https://ntfy.example.com/…  (token set)"} {
 		if !strings.Contains(out, want) {
@@ -226,14 +226,14 @@ func TestAlertsCommands(t *testing.T) {
 	if out := ok(t, "host", "alerts", "log", "box"); !strings.Contains(out, "needs_input") && out != "box has sent no alerts yet.\n" {
 		t.Errorf("alerts log = %q", out)
 	}
-	ok(t, "host", "alerts", "log", "box", "--json", "-n", "3")
+	ok(t, "host", "alerts", "log", "box", "--json", "--lines", "3")
 	if out := okSaid(t, "host", "alerts", "off", "box"); out != "Alerts on box are off: its alerts file is gone.\n" {
 		t.Errorf("alerts off = %q", out)
 	}
 	if out := okSaid(t, "host", "alerts", "off", "box"); out != "Alerts on box were already off.\n" {
 		t.Errorf("alerts off again = %q", out)
 	}
-	fails(t, "the token command failed", "host", "alerts", "set", "box", "--ntfy", "https://ntfy.example.com/t", "--token-cmd", "exit 3")
+	fails(t, "the token command failed", "host", "alerts", "set", "box", "--ntfy", "https://ntfy.example.com/t", "--token-command", "exit 3")
 }
 
 // said runs fn and returns what it said on stderr. It prints no data, so

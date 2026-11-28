@@ -10,14 +10,14 @@ Choose where a host sends alerts, and which ones.
 simstim host alerts set <host> [flags]
 ```
 
-Writes the host's alerts file (mode 0600). A destination flag replaces the file's destinations, unless you add `--add`. With no destination flag, only the settings you give change. `--token-cmd` runs a command here, such as a keychain read, and sends what it prints as the ntfy token.
+Writes the host's alerts file (mode 0600). A destination flag replaces the file's destinations, unless you add `--add`. With no destination flag, only the settings you give change. `--token-command` runs a command here, such as a keychain read, and sends what it prints as the ntfy token.
 
 ## Examples
 
 ```sh
 simstim host alerts set my-vps --ntfy https://ntfy.sh/<your-topic>
 simstim host alerts set my-vps --ntfy https://ntfy.example.com/agents \
-  --token-cmd 'security find-generic-password -s ntfy -w'
+  --token-command 'security find-generic-password -s ntfy -w'
 simstim host alerts set my-vps --add --format slack --events failed,oom \
   --webhook https://hooks.slack.com/services/…
 simstim host alerts set my-vps --add \
@@ -37,7 +37,7 @@ simstim host alerts set my-vps --delay 30s --min-turn 5m
 | `--format <string>` | the webhook's body: json (the event), slack or discord |
 | `--min-turn <duration>` | the shortest turn that sends turn_done (default 1m) |
 | `--ntfy <string>` | send to this ntfy topic (`https://ntfy.sh/<topic>` or your own server) |
-| `--token-cmd <string>` | run this here and use its output as the ntfy token (it is never printed) |
+| `--token-command <string>` | run this here and use its output as the ntfy token (it is never printed) |
 | `--webhook <string>` | POST to this web address |
 
 ## Flags from the parent command
@@ -48,5 +48,13 @@ simstim host alerts set my-vps --delay 30s --min-turn 5m
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until |
+| --- | --- | --- |
+| --token-cmd | --token-command | v0.4.0 and 11 November 2027, whichever comes later |
 
 Part of [`host alerts`](host_alerts.md): show where a host sends alerts, and the last deliveries.

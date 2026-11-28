@@ -26,6 +26,7 @@ const jsonVersion = 1
 // addJSON gives cmd the flag --json.
 func addJSON(cmd *cobra.Command, p *bool) {
 	cmd.Flags().BoolVar(p, "json", false, "print JSON for scripts, and ask nothing (see docs/how-to/scripting.md)")
+	markSharedFlag(cmd.Flags().Lookup("json"))
 }
 
 // jsonOn reports whether cmd prints JSON.
@@ -36,6 +37,8 @@ func addRootFlags(root *cobra.Command) {
 	f := root.PersistentFlags()
 	f.Bool("no-input", false, "ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it ("+noInputEnv+"=1 does the same)")
 	f.Bool("no-color", false, "print no colour (NO_COLOR does the same)")
+	markSharedFlag(f.Lookup("no-input"))
+	markSharedFlag(f.Lookup("no-color"))
 }
 
 // applyNoColor makes --no-color hold for everything this run draws,

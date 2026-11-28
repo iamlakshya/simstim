@@ -317,7 +317,12 @@ func unknownFlag(c *cobra.Command, name string, e *pflag.NotExistError) error {
 	}
 }
 
-func flagName(f *pflag.Flag) string { return "--" + f.Name }
+func flagName(f *pflag.Flag) string {
+	if isOldShortFlag(f) && f.Shorthand != "" {
+		return "-" + f.Shorthand
+	}
+	return "--" + f.Name
+}
 
 // valueKind says what a flag's value must be, from its type.
 func valueKind(e *pflag.InvalidValueError) string {

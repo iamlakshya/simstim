@@ -47,7 +47,7 @@ func powersOffWhenIdle(p string) bool { return onboard.PowersOffWhenIdle(p) }
 
 func hostCreateCmd() *cobra.Command {
 	var req provider.Request
-	var floor string
+	var floor, memStr, diskStr string
 	var trusted bool
 	cmd := &cobra.Command{
 		Use:   "create <provider> [<name>]",
@@ -62,6 +62,16 @@ func hostCreateCmd() *cobra.Command {
 			p, err := findProvider(args[0])
 			if err != nil {
 				return err
+			}
+			if cmd.Flags().Changed("memory") {
+				if req.Memory, err = parseLegacyGiBSizeFlag(cmd, "--memory", memStr, oldCreateMemoryBare); err != nil {
+					return err
+				}
+			}
+			if cmd.Flags().Changed("disk") {
+				if req.Disk, err = parseLegacyGiBSizeFlag(cmd, "--disk", diskStr, oldCreateDiskBare); err != nil {
+					return err
+				}
 			}
 			if floor != "" {
 				lvl, err := wall.ParseLevel(floor)
@@ -89,12 +99,12 @@ func hostCreateCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.IntVar(&req.CPUs, "cpus", lima.DefaultCPUs, "lima: CPUs")
-	f.IntVar(&req.MemoryGiB, "memory", lima.DefaultMemoryGiB, "lima: memory in GiB")
-	f.IntVar(&req.DiskGiB, "disk", lima.DefaultDiskGiB, "lima: disk in GiB (sparse: it grows as it fills)")
+	addCPUs(cmd, &req.CPUs, lima.DefaultCPUs, "lima: CPUs")
+	addMemory(cmd, &memStr, fmt.Sprintf("%dG", lima.DefaultMemoryGiB), "lima: memory `size`, such as 4G")
+	addDisk(cmd, &diskStr, fmt.Sprintf("%dG", lima.DefaultDiskGiB), "lima: disk `size`, such as 40G (sparse: it grows as it fills)")
 	f.StringVar(&req.Image, "image", docker.DefaultImage, "docker: the image, which needs sh, bash and coreutils")
 	f.StringVar(&req.Template, "template", e2b.DefaultTemplate, "e2b: the template, which sets CPUs and memory")
-	f.StringVar(&req.TokenCommand, "token-command", "", "e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in")
+	addTokenCommand(cmd, &req.TokenCommand, "e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in")
 	f.StringVar(&req.IdleStop, "idle-stop", "", "stop after this long with no client and no working session, or never (lima: 30m, e2b: 15m)")
 	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
 	f.StringVar(&req.Autostart, "autostart", "", "lima on macOS: start VM automatically: boot, login or off")

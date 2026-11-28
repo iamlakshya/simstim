@@ -66,7 +66,7 @@ func (g *guide) terminalBusy() bool {
 // or asks which to install.
 func (g *guide) checklist(f *onboard.Flow) error {
 	if g.o.agentsSet {
-		if err := f.Choose(g.o.agents); err != nil {
+		if err := f.Choose(strings.Join(g.o.agents, ",")); err != nil {
 			return err
 		}
 	}

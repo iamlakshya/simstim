@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -22,9 +23,11 @@ const install = "Install Lima (https://lima-vm.io/docs/installation/), then run 
 
 // Defaults for a new VM: small, and a sparse disk.
 const (
-	DefaultCPUs      = 2
-	DefaultMemoryGiB = 4
-	DefaultDiskGiB   = 40
+	DefaultCPUs        = 2
+	DefaultMemoryGiB   = 4
+	DefaultDiskGiB     = 40
+	DefaultMemoryBytes = DefaultMemoryGiB << 30
+	DefaultDiskBytes   = DefaultDiskGiB << 30
 	// Template is Lima's Ubuntu LTS template.
 	Template = "template:ubuntu-lts"
 	// DefaultIdleStop is how long a VM idles before it powers itself off.
@@ -101,21 +104,30 @@ func parseList(out []byte, name string) (*instance, error) {
 // that hostLoopback can close the loopback path, and --nested-virt asks Lima
 // to run Apple's own nesting check when the VM starts.
 func CreateArgs(inst string, req provider.Request, system string) []string {
-	cpus, mem, disk := req.CPUs, req.MemoryGiB, req.DiskGiB
+	cpus, mem, disk := req.CPUs, req.Memory, req.Disk
 	if cpus <= 0 {
 		cpus = DefaultCPUs
 	}
 	if mem <= 0 {
-		mem = DefaultMemoryGiB
+		mem = DefaultMemoryBytes
 	}
 	if disk <= 0 {
-		disk = DefaultDiskGiB
+		disk = DefaultDiskBytes
 	}
 	args := []string{"create", "--tty=false", "--name=" + inst, "--plain"}
 	if system == "darwin" {
 		args = append(args, "--vm-type=vz", "--set=.networkOpts.hostLoopback = false", "--nested-virt")
 	}
-	return append(args, fmt.Sprintf("--cpus=%d", cpus), fmt.Sprintf("--memory=%d", mem), fmt.Sprintf("--disk=%d", disk), Template)
+	return append(args, fmt.Sprintf("--cpus=%d", cpus), "--memory="+formatGiB(mem), "--disk="+formatGiB(disk), Template)
+}
+
+// formatGiB writes bytes in GiB for limactl's --memory and --disk flags,
+// which take a floating-point number of GiB. Whole GiB print without a point.
+func formatGiB(bytes int64) string {
+	if bytes%(1<<30) == 0 {
+		return strconv.FormatInt(bytes>>30, 10)
+	}
+	return strconv.FormatFloat(float64(bytes)/float64(1<<30), 'f', -1, 32)
 }
 
 // Create makes and starts the VM, and returns the host that reaches it

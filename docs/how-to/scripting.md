@@ -30,7 +30,7 @@ These are the questions, and the flag that answers each:
 | `host add` | Install the helper? | `--yes` | Fails with exit code 4 |
 | `host add` | Which agents to install, when the host lacks one | `--yes` offers none | Installs nothing |
 | `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4. Without a terminal and without `--detach`, `new` fails with exit code 2 first |
-| `new` | Run the repository's setup script? | `--setup` or `--no-setup` | Skips the script, and says so |
+| `new` | Run the repository's setup script? | `--setup-script` or `--no-setup-script` | Skips the script, and says so |
 | `doctor --fix`, `host doctor --fix` | Fix it? | `-y` | Fails with exit code 4. With `--json` and `-y`, the JSON holds how each fix ended |
 | `host rm --destroy` | Type the host's name to delete the machine? | `--confirm <host>` | Fails with exit code 4 |
 | `host set <host> trusted=true` | Type the host's name to mark it trusted? | `--confirm <host>` | Fails with exit code 4 |
@@ -161,6 +161,15 @@ These old forms work today:
 | `kill <address>` | `rm <address> -y` |
 | `flip [<address>]` | `attach [<address>]` |
 | `rm` with input off and without `-y`, which deletes | `rm -y`. After the end, `rm` without `-y` fails with exit code 4 |
+| `host idle <host> <time>` | `host set <host> idle=<time>` |
+| `host destroy <host>` | `host rm <host> --destroy` |
+| `agents install --force` | `agents install --reinstall` |
+| `host alerts set --token-cmd` | `host alerts set --token-command` |
+| `new -d <folder>` | `new -C <folder>` (`-d` means `--detach` after the end) |
+| `new --setup`, `new --no-setup` | `new --setup-script`, `new --no-setup-script` |
+| `host alerts log -n <lines>` | `host alerts log --lines <lines>` |
+| `-v` on the root command | `--version` |
+| `host create --memory 8`, `--disk 40` (bare numbers) | `--memory 8G`, `--disk 40G` |
 | The Go keys of `host ls --json` | The same keys in `snake_case` |
 
 Each works until v0.4.0 and 11 November 2027, whichever comes later. `host ls --json` printed each host's keys as `Name`, `SSH` and `SSHConfig`. It now prints them in `snake_case` too, as `name`, `ssh` and `ssh_config`. Both forms print until v0.4.0 and 11 November 2027, whichever comes later. The 12 months start on the day of the release that adds the warning. Move your scripts to the `snake_case` keys. `host ls --json` prints the warning on every run, also when you have no hosts, so that a script learns of the change before it needs it.

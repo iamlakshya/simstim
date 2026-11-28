@@ -53,7 +53,7 @@ func agentsLoginCmd() *cobra.Command {
 			return logIn(cmd.Context(), h, a, inputOn(cmd))
 		},
 	}
-	cmd.Flags().StringVar(&hostName, "host", "", "the host, as the second argument names it")
+	addHostFlag(cmd, &hostName, "the host, as the second argument names it")
 	addJSON(cmd, &asJSON)
 	return cmd
 }

@@ -70,9 +70,13 @@ func TestCreateArgs(t *testing.T) {
 			t.Errorf("%s: args =\n%q\nwant\n%q", goos, got, want)
 		}
 	}
-	got := strings.Join(CreateArgs("vm", provider.Request{CPUs: 4, MemoryGiB: 8, DiskGiB: 80}, "darwin"), " ")
+	got := strings.Join(CreateArgs("vm", provider.Request{CPUs: 4, Memory: 8 << 30, Disk: 80 << 30}, "darwin"), " ")
 	if !strings.Contains(got, "--cpus=4 --memory=8 --disk=80") {
 		t.Fatal(got)
+	}
+	frac := strings.Join(CreateArgs("vm", provider.Request{CPUs: 2, Memory: 1536 << 20, Disk: 512 << 20}, "linux"), " ")
+	if !strings.Contains(frac, "--cpus=2 --memory=1.5 --disk=0.5") {
+		t.Fatal(frac)
 	}
 }
 

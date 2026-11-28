@@ -36,7 +36,8 @@ func hostCmd() *cobra.Command {
 }
 
 func hostAddCmd() *cobra.Command {
-	var sshConfig, label, providerScript, hostKey, floor string
+	var sshConfig, providerScript, hostKey, floor string
+	var label []string
 	var yes, wake, trusted bool
 	var loc localMacOpts
 	cmd := &cobra.Command{
@@ -108,27 +109,28 @@ func hostAddCmd() *cobra.Command {
 	f := cmd.Flags()
 	f.StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
 	f.StringVar(&hostKey, "host-key", "", "pin the host key with this SHA256 fingerprint (SHA256:…)")
-	f.StringVar(&label, "label", "", "labels, for example provider=gcp,region=eu")
-	f.BoolVarP(&yes, "yes", "y", false, "install the helper without asking, pin an unknown host key on first use, and offer no agents to install")
+	addLabel(cmd, &label, "labels, for example provider=gcp,region=eu")
+	addYes(cmd, &yes, "install the helper without asking, pin an unknown host key on first use, and offer no agents to install")
 	f.StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	f.BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
 	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
 	f.BoolVar(&trusted, "trusted", false, "mark the host as trusted (you control root on it)")
 	f.BoolVar(&loc.local, "local", false, "set up this Mac as a host in a pinned Lima VM")
-	f.IntVar(&loc.cpus, "cpus", 0, "--local: VM CPUs (default: under half of this Mac)")
-	f.IntVar(&loc.memoryGiB, "memory", 0, "--local: VM memory in GiB (default: under half of this Mac)")
-	f.IntVar(&loc.diskGiB, "disk", 0, "--local: VM disk in GiB (sparse, default 40)")
+	addCPUs(cmd, &loc.cpus, 0, "--local: VM CPUs (default: under half of this Mac)")
+	addMemory(cmd, &loc.memory, "", "--local: VM memory `size`, such as 8G (default: under half of this Mac)")
+	addDisk(cmd, &loc.disk, "", "--local: VM disk `size`, such as 40G (sparse, default 40G)")
 	f.StringVar(&loc.autostart, "autostart", "", "--local: start VM automatically: boot, login or off (default boot)")
 	f.StringVar(&loc.idleStop, "idle-stop", "", "--local: idle power-off time, or never (default never)")
 	return cmd
 }
 
-func parseLabels(label string) map[string]string {
-	if label == "" {
+func parseLabels(values []string) map[string]string {
+	items, _ := parseNameList("--label", values, true, "")
+	if len(items) == 0 {
 		return nil
 	}
 	out := map[string]string{}
-	for _, kv := range strings.Split(label, ",") {
+	for _, kv := range items {
 		k, v, _ := strings.Cut(kv, "=")
 		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
 	}

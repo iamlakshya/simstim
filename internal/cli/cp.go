@@ -79,7 +79,7 @@ func cpCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().BoolVarP(&force, "force", "f", false, "replace existing files at the destination")
+	addForceShort(cmd, &force, "replace existing files at the destination")
 	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "copy folders recursively (already the default)")
 	cmd.Flags().BoolVar(&allowFlagged, "allow-flagged", false, "copy files that can run code or contain hidden text without asking")
 	return cmd

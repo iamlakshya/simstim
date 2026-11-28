@@ -47,7 +47,7 @@ func hostSetCmd() *cobra.Command {
 			return runHostSet(cmd.Context(), cmd, prompts(cmd), args[0], args[1:], confirm)
 		},
 	}
-	cmd.Flags().StringVar(&confirm, "confirm", "", "type the host's name here instead of at the prompt when setting trusted=true")
+	addConfirm(cmd, &confirm, "type the host's name here instead of at the prompt when setting trusted=true")
 	return cmd
 }
 
@@ -346,14 +346,12 @@ func parseHostSettings(h client.Host, pairs []string) (parsedHostSettings, error
 					Kind: client.KindUsage,
 				}
 			}
-			if v != "never" {
-				if d, perr := time.ParseDuration(v); perr != nil || d < time.Minute {
-					return parsedHostSettings{}, &client.UserError{
-						Msg:  fmt.Sprintf("%q is not an idle time", v),
-						Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.",
-						Code: "bad_value",
-						Kind: client.KindUsage,
-					}
+			if _, _, perr := parseDurationFlag("idle", v, true, time.Minute); perr != nil || strings.TrimSpace(v) == "" {
+				return parsedHostSettings{}, &client.UserError{
+					Msg:  fmt.Sprintf("%q is not an idle time", v),
+					Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.",
+					Code: "bad_value",
+					Kind: client.KindUsage,
 				}
 			}
 			val := v

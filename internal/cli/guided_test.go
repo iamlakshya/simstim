@@ -130,7 +130,7 @@ func testGuide(t *testing.T, ctx context.Context, o guideOpts, l onboard.Local, 
 func TestSetupWithFlags(t *testing.T) {
 	_, tr := withFake(t, nil)
 	tr.SetAgents([]api.AgentCheck{readyCheck("claude", "Claude Code", api.LoginYes)})
-	o := guideOpts{create: "fake", name: "box", agents: "codex", agentsSet: true, yes: true, noLogin: true}
+	o := guideOpts{create: "fake", name: "box", agents: []string{"codex"}, agentsSet: true, yes: true, noLogin: true}
 	g, out, ran := testGuide(t, context.Background(), o, onboard.System{Providers: providers}, tr, "", false)
 	if err := g.run(); err != nil {
 		t.Fatalf("%v\n%s", err, out)
@@ -237,7 +237,7 @@ func TestSetupNeedsATerminalOrFlags(t *testing.T) {
 			t.Errorf("%+v: err = %v", o, err)
 		}
 	}
-	for _, o := range []guideOpts{{host: "a", create: "fake", yes: true}, {create: "nope", yes: true}, {host: "a", agents: "nope", agentsSet: true, yes: true}} {
+	for _, o := range []guideOpts{{host: "a", create: "fake", yes: true}, {create: "nope", yes: true}, {host: "a", agents: []string{"nope"}, agentsSet: true, yes: true}} {
 		g, _, _ := testGuide(t, context.Background(), o, &guideLocal{}, &clienttest.Transport{}, "", false)
 		var ue *client.UserError
 		if err := g.run(); !errors.As(err, &ue) || ue.Hint == "" {

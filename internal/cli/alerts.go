@@ -71,7 +71,7 @@ type alertsSetFlags struct {
 	ntfy, webhook, format, command, tokenCmd string
 	events                                   []string
 	delay, minTurn                           time.Duration
-	detail, add                              bool
+	detail, add, usedOldTokenCmd             bool
 }
 
 func alertsSetCmd() *cobra.Command {
@@ -81,10 +81,10 @@ func alertsSetCmd() *cobra.Command {
 		Short: "Choose where a host sends alerts, and which ones",
 		Long: "Writes the host's alerts file (mode 0600). A destination flag replaces the file's destinations,\n" +
 			"unless you add --add. With no destination flag, only the settings you give change.\n" +
-			"--token-cmd runs a command here, such as a keychain read, and sends what it prints as the ntfy token.",
+			"--token-command runs a command here, such as a keychain read, and sends what it prints as the ntfy token.",
 		Example: "  " + brand.Name + " host alerts set my-vps --ntfy https://ntfy.sh/<your-topic>\n" +
 			"  " + brand.Name + " host alerts set my-vps --ntfy https://ntfy.example.com/agents \\\n" +
-			"    --token-cmd 'security find-generic-password -s ntfy -w'\n" +
+			"    --token-command 'security find-generic-password -s ntfy -w'\n" +
 			"  " + brand.Name + " host alerts set my-vps --add --format slack --events failed,oom \\\n" +
 			"    --webhook https://hooks.slack.com/services/…\n" +
 			"  " + brand.Name + " host alerts set my-vps --add \\\n" +
@@ -92,6 +92,9 @@ func alertsSetCmd() *cobra.Command {
 			"  " + brand.Name + " host alerts set my-vps --delay 30s --min-turn 5m",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if f.usedOldTokenCmd {
+				warnOld(cmd, oldAlertsTokenCmd)
+			}
 			cfg, add, err := f.config(cmd)
 			if err != nil {
 				return err
@@ -119,7 +122,10 @@ func alertsSetCmd() *cobra.Command {
 	fl.StringVar(&f.webhook, "webhook", "", "POST to this web address")
 	fl.StringVar(&f.format, "format", "", "the webhook's body: json (the event), slack or discord")
 	fl.StringVar(&f.command, "command", "", "run this command line on the host, with the event on stdin and in the environment")
-	fl.StringVar(&f.tokenCmd, "token-cmd", "", "run this here and use its output as the ntfy token (it is never printed)")
+	addTokenCommand(cmd, &f.tokenCmd, "run this here and use its output as the ntfy token (it is never printed)")
+	if oldAlertsTokenCmd != nil {
+		addOldFlag(cmd, "token-command", "token-cmd", &f.usedOldTokenCmd, oldAlertsTokenCmd)
+	}
 	fl.StringSliceVar(&f.events, "events", nil, "the events to send: needs_input, turn_done, exited, failed, oom, memory, started, restored")
 	fl.DurationVar(&f.delay, "delay", 0, "how long needs_input waits before it is sent (default 10s)")
 	fl.DurationVar(&f.minTurn, "min-turn", 0, "the shortest turn that sends turn_done (default 1m)")
@@ -134,7 +140,7 @@ func (f *alertsSetFlags) config(cmd *cobra.Command) (client.AlertsConfig, bool, 
 	var c client.AlertsConfig
 	fl := cmd.Flags()
 	if f.tokenCmd != "" && f.ntfy == "" {
-		return c, false, &client.UserError{Msg: "--token-cmd needs --ntfy", Hint: "Give the ntfy topic with --ntfy.", Code: "missing_flag", Kind: client.KindUsage}
+		return c, false, &client.UserError{Msg: "--token-command needs --ntfy", Hint: "Give the ntfy topic with --ntfy.", Code: "missing_flag", Kind: client.KindUsage}
 	}
 	if f.format != "" && f.webhook == "" {
 		return c, false, &client.UserError{Msg: "--format needs --webhook", Hint: "Give the address with --webhook.", Code: "missing_flag", Kind: client.KindUsage}
@@ -149,9 +155,11 @@ func (f *alertsSetFlags) config(cmd *cobra.Command) (client.AlertsConfig, bool, 
 		c.Destinations = append(c.Destinations, client.AlertDestination{Type: "command", Run: f.command})
 	}
 	if fl.Changed("events") {
-		for _, e := range f.events {
-			c.Events = append(c.Events, strings.TrimSpace(e))
+		events, err := parseNameList("--events", f.events, false, "Name one or more events, such as failed,oom.")
+		if err != nil {
+			return c, false, err
 		}
+		c.Events = events
 	}
 	if fl.Changed("delay") {
 		c.Delay = f.delay.String()
@@ -205,13 +213,16 @@ func alertsTestCmd() *cobra.Command {
 
 func alertsLogCmd() *cobra.Command {
 	var n int
-	var asJSON bool
+	var asJSON, usedOldLines bool
 	cmd := &cobra.Command{
 		Use:     "log <host>",
 		Short:   "Show the host's last alert deliveries, and why any were not sent",
 		Example: "  " + brand.Name + " host alerts log my-vps",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if usedOldLines {
+				warnOld(cmd, oldAlertsLogShortN)
+			}
 			return withHost(cmd.Context(), args[0], func(ctx context.Context, h client.Host, conn *client.Conn) error {
 				log, err := conn.AlertsLog(ctx, n)
 				if err != nil {
@@ -229,7 +240,10 @@ func alertsLogCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().IntVarP(&n, "lines", "n", 20, "how many lines to show")
+	cmd.Flags().IntVar(&n, "lines", 20, "how many lines to show")
+	if oldAlertsLogShortN != nil {
+		addOldShortFlag(cmd, "lines", "old-lines", "n", &usedOldLines, oldAlertsLogShortN)
+	}
 	addJSON(cmd, &asJSON)
 	return cmd
 }

@@ -18,7 +18,7 @@ You can choose another host name, sizing or autostart mode:
 
 <!-- test: help (it downloads Lima and makes a VM) -->
 ```sh
-simstim host add my-mac --local --cpus 4 --memory 8 --autostart boot
+simstim host add my-mac --local --cpus 4 --memory 8G --autostart boot
 ```
 
 What `host add --local` does:

@@ -813,6 +813,7 @@ Each short flag has one meaning everywhere. A test walks `Root()`, and fails whe
 | `-f` | `--force` | Go on although work is lost, such as a file that `cp` replaces | `cp` (P5.2) |
 | `-h` | `--help` | Help | every command |
 | `-n` | `--name` | The name of what the command makes | `new`, `setup`, `shell`, `fork` |
+| `-r` | `--recursive` | Copy folders recursively (accepted on `cp`, where recursion is already the default) | `cp` (P1.6) |
 | `-w` | `--worktree` | Give the session its own worktree | `new` |
 | `-y` | `--yes` | Answer yes to the command's questions | every command that asks |
 

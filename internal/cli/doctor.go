@@ -64,8 +64,8 @@ func doctorCmd() *cobra.Command {
 		},
 	}
 	addJSON(cmd, &asJSON)
-	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
+	addFix(cmd, &fix, "offer to fix the problems found, one by one")
+	addYes(cmd, &yes, "with --fix, apply every fix without asking")
 	cmd.AddCommand(&cobra.Command{
 		Use:     "terminal",
 		Short:   "Ask this terminal what it supports: keys, colours and more",

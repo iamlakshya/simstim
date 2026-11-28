@@ -32,4 +32,12 @@ simstim version --json
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until |
+| --- | --- | --- |
+| -v | --version | v0.4.0 and 11 November 2027, whichever comes later |
+
 See [all commands](_index.md).

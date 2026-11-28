@@ -432,7 +432,7 @@ func TestNewSkipsTheSetupScriptWithInputOff(t *testing.T) {
 		}
 	}
 	_, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--no-input", "--", "sleep", "60")
-	if err != nil || !strings.Contains(errOut, "Skipping the setup script of "+repo+": you have not said that it may run on box. Pass --setup to run it.") {
+	if err != nil || !strings.Contains(errOut, "Skipping the setup script of "+repo+": you have not said that it may run on box. Pass --setup-script to run it.") {
 		t.Fatalf("new --no-input: %v\n%s", err, errOut)
 	}
 	out, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--json", "--", "sleep", "60")

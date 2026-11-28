@@ -28,6 +28,8 @@ func addDebugFlags(root *cobra.Command) {
 		strings.ReplaceAll(diag.CatList, ",", ", ")+". A list binds only in the = form, such as --debug=net")
 	f.Lookup("debug").NoOptDefVal = diag.CatList
 	f.String("debug-file", "", "write the client's debug records to this `file`. On its own, it turns on every category ("+diag.EnvFile+" does the same)")
+	markSharedFlag(f.Lookup("debug"))
+	markSharedFlag(f.Lookup("debug-file"))
 	_ = root.RegisterFlagCompletionFunc("debug", completeCats(diag.AllCats))
 	root.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		applyNoColor(cmd)
@@ -142,7 +144,7 @@ func debugCmd() *cobra.Command {
 
 func debugStartCmd() *cobra.Command {
 	var d time.Duration
-	var only string
+	var only []string
 	cmd := &cobra.Command{
 		Use:   "start <host>/<session>",
 		Short: "Turn on the debug of a running session, for 30 minutes or --for",
@@ -175,19 +177,20 @@ func debugStartCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().DurationVar(&d, "for", api.DebugFor, "how long debug stays on, up to 24h")
-	cmd.Flags().StringVar(&only, "only", "", "record only these host `categories`: attach, memory or runtime (default: all three)")
+	addFor(cmd, &d, api.DebugFor, "how long debug stays on, up to 24h")
+	cmd.Flags().StringSliceVar(&only, "only", nil, "record only these host `categories`: attach, memory or runtime (default: all three)")
 	_ = cmd.RegisterFlagCompletionFunc("only", completeCats(diag.HostCats))
 	return cmd
 }
 
 // hostCats reads --only: categories of the host only. An empty list is
 // every one of them.
-func hostCats(only string) (diag.Cats, error) {
-	if only == "" {
+func hostCats(only []string) (diag.Cats, error) {
+	items, _ := parseNameList("--only", only, true, "")
+	if len(items) == 0 {
 		return diag.HostCats, nil
 	}
-	cats, err := diag.ParseCats(only)
+	cats, err := diag.ParseCats(strings.Join(items, ","))
 	if err != nil {
 		return 0, &client.UserError{Msg: "--only: " + err.Error(), Hint: "Name attach, memory or runtime.", Code: "bad_value", Kind: client.KindUsage}
 	}
@@ -293,7 +296,7 @@ func debugProfileCmd() *cobra.Command {
 			})
 		},
 	}
-	cmd.Flags().DurationVar(&d, "for", diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
+	addFor(cmd, &d, diag.ProfileDefault, "cpu only: how long the profile runs, up to 5m")
 	return cmd
 }
 

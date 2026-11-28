@@ -28,7 +28,7 @@ simstim resume my-vps/auth-fix --detach --json
 | `--detach` | resume it without attaching |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `--memory-max <size>` | cap the session's memory from now on: auto, or a size such as 4G (default: the size it had) |
-| `--secret <stringArray>` | pass again a secret that the session started with and that hosts.toml does not give its host (repeatable) |
+| `--secret <strings>` | pass again a secret that the session started with and that hosts.toml does not give its host (repeatable, or comma-separated) |
 
 ## Flags from the parent command
 

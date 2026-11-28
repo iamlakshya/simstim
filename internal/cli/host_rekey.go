@@ -29,7 +29,7 @@ func hostRekeyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&hostKey, "host-key", "", "require the new host key to match this SHA256 fingerprint (SHA256:…)")
-	cmd.Flags().StringVar(&confirm, "confirm", "", "type the host's name here instead of at the prompt")
+	addConfirm(cmd, &confirm, "type the host's name here instead of at the prompt")
 	return cmd
 }
 

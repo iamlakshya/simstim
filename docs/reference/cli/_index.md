@@ -8,7 +8,7 @@ weight: 1
 Run any coding agent on any host, and use it as if it ran here.
 
 ```text
-simstim
+simstim [flags]
 ```
 
 With no command, simstim opens the launcher: one screen of your hosts and their sessions.
@@ -125,3 +125,4 @@ simstim attach my-vps/auth-fix      # go back to a session
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+| `--version` | version for simstim |

@@ -41,7 +41,7 @@ func rmCmd() *cobra.Command {
 			return removeSession(cmd, a, yes)
 		},
 	}
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "delete the session without asking")
+	addYes(cmd, &yes, "delete the session without asking")
 	return cmd
 }
 

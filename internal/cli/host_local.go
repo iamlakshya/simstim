@@ -19,8 +19,8 @@ import (
 type localMacOpts struct {
 	local     bool
 	cpus      int
-	memoryGiB int
-	diskGiB   int
+	memory    string
+	disk      string
 	autostart string
 	idleStop  string
 }
@@ -58,16 +58,29 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 	if len(args) == 1 {
 		name = args[0]
 	}
-	cpus, mem := localMacSizing(ctx)
+	cpus, memGiB := localMacSizing(ctx)
 	if opts.cpus > 0 {
 		cpus = opts.cpus
 	}
-	if opts.memoryGiB > 0 {
-		mem = opts.memoryGiB
+	mem := int64(memGiB) << 30
+	if cmd.Flags().Changed("memory") {
+		parsed, err := parseLegacyGiBSizeFlag(cmd, "--memory", opts.memory, oldCreateMemoryBare)
+		if err != nil {
+			return err
+		}
+		if parsed > 0 {
+			mem = parsed
+		}
 	}
-	disk := opts.diskGiB
-	if disk <= 0 {
-		disk = lima.DefaultDiskGiB
+	disk := int64(lima.DefaultDiskBytes)
+	if cmd.Flags().Changed("disk") {
+		parsed, err := parseLegacyGiBSizeFlag(cmd, "--disk", opts.disk, oldCreateDiskBare)
+		if err != nil {
+			return err
+		}
+		if parsed > 0 {
+			disk = parsed
+		}
 	}
 	autostart := opts.autostart
 	if autostart == "" {
@@ -81,8 +94,8 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 	req := provider.Request{
 		Name:              name,
 		CPUs:              cpus,
-		MemoryGiB:         mem,
-		DiskGiB:           disk,
+		Memory:            mem,
+		Disk:              disk,
 		IdleStop:          idleStop,
 		Autostart:         autostart,
 		AutostartExplicit: cmd.Flags().Changed("autostart"),
@@ -97,8 +110,8 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 		return err
 	}
 	defer unlock()
-	fmt.Fprintf(os.Stderr, "Setting up this Mac as %s (Lima %s, %d CPUs, %d GiB memory, %d GiB disk)…\n",
-		req.Name, lima.PinnedVersion, req.CPUs, req.MemoryGiB, req.DiskGiB)
+	fmt.Fprintf(os.Stderr, "Setting up this Mac as %s (Lima %s, %d CPUs, %s memory, %s disk)…\n",
+		req.Name, lima.PinnedVersion, req.CPUs, formatGiBText(req.Memory), formatGiBText(req.Disk))
 	start := time.Now()
 	if _, err := ensurePinnedLima(ctx, os.Stderr); err != nil {
 		return err

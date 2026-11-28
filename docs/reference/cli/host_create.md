@@ -26,11 +26,11 @@ simstim host create e2b cloud --template simstim
 | --- | --- |
 | `--autostart <string>` | lima on macOS: start VM automatically: boot, login or off |
 | `--cpus <int>` | lima: CPUs (default: `2`) |
-| `--disk <int>` | lima: disk in GiB (sparse: it grows as it fills) (default: `40`) |
+| `--disk <size>` | lima: disk size, such as 40G (sparse: it grows as it fills) (default: `40G`) |
 | `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |
 | `--idle-stop <string>` | stop after this long with no client and no working session, or never (lima: 30m, e2b: 15m) |
 | `--image <string>` | docker: the image, which needs sh, bash and coreutils (default: `debian:stable-slim`) |
-| `--memory <int>` | lima: memory in GiB (default: `4`) |
+| `--memory <size>` | lima: memory size, such as 4G (default: `4G`) |
 | `--template <string>` | e2b: the template, which sets CPUs and memory (default: `simstim`) |
 | `--token-command <string>` | e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in |
 | `--trusted` | mark the host as trusted (you control root on it) |
@@ -43,5 +43,14 @@ simstim host create e2b cloud --template simstim
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until |
+| --- | --- | --- |
+| --memory &lt;number&gt; | --memory &lt;number&gt;G | v0.4.0 and 11 November 2027, whichever comes later |
+| --disk &lt;number&gt; | --disk &lt;number&gt;G | v0.4.0 and 11 November 2027, whichever comes later |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

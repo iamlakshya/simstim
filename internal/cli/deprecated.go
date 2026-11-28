@@ -78,11 +78,48 @@ var oldForms = []oldForm{
 		Old: "--force", New: "--reinstall", Kind: "flag", Cmd: "agents install",
 		Version: "0.2.0", Code: "old_flag",
 	},
+	{
+		Old: "--token-cmd", New: "--token-command", Kind: "flag", Cmd: "host alerts set",
+		Version: "0.2.0", Code: "old_flag",
+	},
+	{
+		Old: "new -d", New: "new -C", Kind: "short flag", Cmd: "new",
+		Version: "0.2.0", Code: "old_flag",
+	},
+	{
+		Old: "--setup", New: "--setup-script", Kind: "flag", Cmd: "new",
+		Version: "0.2.0", Code: "old_flag",
+	},
+	{
+		Old: "--no-setup", New: "--no-setup-script", Kind: "flag", Cmd: "new",
+		Version: "0.2.0", Code: "old_flag",
+	},
+	{
+		Old: "host alerts log -n", New: "host alerts log --lines", Kind: "short flag", Cmd: "host alerts log",
+		Version: "0.2.0", Code: "old_flag",
+	},
+	{
+		Old: "-v", New: "--version", Kind: "short flag", Cmd: "version",
+		Version: "0.2.0", Code: "old_flag",
+	},
+	{
+		Old: "--memory <number>", New: "--memory <number>G", Kind: "value", Cmd: "host create",
+		Version: "0.2.0", Code: "old_value",
+		Says:  `"--memory" without a unit is now "--memory <size>", such as "--memory 8G".`,
+		Keeps: "A bare number still means GiB",
+	},
+	{
+		Old: "--disk <number>", New: "--disk <number>G", Kind: "value", Cmd: "host create",
+		Version: "0.2.0", Code: "old_value",
+		Says:  `"--disk" without a unit is now "--disk <size>", such as "--disk 40G".`,
+		Keeps: "A bare number still means GiB",
+	},
 }
 
 // The rows that the commands warn with. The release that removes the row
 // of rm without -y, at its end, sets oldRmWithoutYes to nil: rm with input
-// off and without -y then fails with exit code 4 (question C-10).
+// off and without -y then fails with exit code 4 (question C-10). Setting
+// oldNewShortDir to nil switches -d to --detach (cli-spec 10.4).
 var (
 	// oldHostKeys is the row of the Go keys of `host ls --json`.
 	oldHostKeys = oldRow(`the Go keys of "host ls --json"`)
@@ -96,6 +133,20 @@ var (
 	oldHostDestroy = oldRow("host destroy")
 	// oldInstallForce is the row of `agents install --force` (cli-spec 12.2).
 	oldInstallForce = oldRow("--force")
+	// oldAlertsTokenCmd is the row of `host alerts set --token-cmd`.
+	oldAlertsTokenCmd = oldRow("--token-cmd")
+	// oldNewShortDir is the row of `new -d <folder>`.
+	oldNewShortDir = oldRow("new -d")
+	// oldNewSetup and oldNewNoSetup are the rows of `new --setup` and `--no-setup`.
+	oldNewSetup   = oldRow("--setup")
+	oldNewNoSetup = oldRow("--no-setup")
+	// oldAlertsLogShortN is the row of `host alerts log -n`.
+	oldAlertsLogShortN = oldRow("host alerts log -n")
+	// oldVersionShort is the row of `-v` on the root.
+	oldVersionShort = oldRow("-v")
+	// oldCreateMemoryBare and oldCreateDiskBare are the bare-number GiB values of --memory and --disk.
+	oldCreateMemoryBare = oldRow("--memory <number>")
+	oldCreateDiskBare   = oldRow("--disk <number>")
 )
 
 // oldRow is the row of the old form old.
