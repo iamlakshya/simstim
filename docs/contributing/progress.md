@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 18 |
-| To do | 81 |
+| Done | 19 |
+| To do | 80 |
 | **All** | **99** |
 
 ## Current focus
@@ -57,7 +57,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.15 | 1 | Day 1 | To do | Kept caches |
 | P1.9 | 1 | Day 1 | To do | Paste and ports through the supervisor |
 | P1.10 | 1 | Day 1 | To do | Pull through a bundle, with a review |
-| P1.11 | 1 | Day 1 | To do | Destroy, stop, restore and the phase's checks |
+| P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
 | P1.16 | 1 | Day 1 | To do | Runs for many sessions |
 | P2.1 | 2 | Day 1 | To do | DNS policy |
 | P2.3 | 2 | Day 1 | To do | Bound secrets |
