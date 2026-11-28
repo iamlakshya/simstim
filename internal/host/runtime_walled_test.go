@@ -407,6 +407,11 @@ func TestNewWalledRejectsUnknownWall(t *testing.T) {
 }
 
 func TestWalledStopWithTheHostPreservesState(t *testing.T) {
+	// The record keeps the host's boot ID, which only Linux has, and a
+	// host stop is a systemd stop on Linux.
+	if runtime.GOOS != "linux" {
+		t.Skip("host stop and boot IDs need Linux")
+	}
 	hosttest.New(t)
 	s, err := host.New(host.NewArgs{Name: "wsys", Cwd: "~", Argv: []string{"sleep", "60"}, Wall: "plain"})
 	if err != nil {
