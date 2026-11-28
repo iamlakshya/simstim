@@ -9,10 +9,8 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/netip"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -56,6 +54,8 @@ const (
 	ModeSplice Mode = "splice"
 	// ModeHTTP forwards an absolute-form plain HTTP proxy request.
 	ModeHTTP Mode = "http"
+	// ModeGateway proxies a plain-HTTP model API route over verified upstream TLS.
+	ModeGateway Mode = "gateway"
 )
 
 // UnknownAction decides what happens when no rule matches a flow.
@@ -103,9 +103,10 @@ type SandboxConfig struct {
 
 // NetworkConfig holds the session's allowlist, denylist and unknown action.
 type NetworkConfig struct {
-	Allow   []string      `toml:"allow"`
-	Deny    []string      `toml:"deny"`
-	Unknown UnknownAction `toml:"unknown"`
+	Allow      []string            `toml:"allow"`
+	Deny       []string            `toml:"deny"`
+	Unknown    UnknownAction       `toml:"unknown"`
+	ModelTools map[string][]string `toml:"model_tools"`
 }
 
 // LockConfig holds denies that no live session grant can override.
@@ -188,16 +189,18 @@ func builtinPresets() (map[Preset][]rule, error) {
 }
 
 type policySnapshot struct {
-	session    string
-	agent      string
-	preset     Preset
-	unknown    UnknownAction
-	locks      []rule
-	denies     []rule
-	allows     []rule
-	grants     []rule // live grants added at runtime
-	agentRules []rule
-	presetList []rule
+	session      string
+	agent        string
+	preset       Preset
+	unknown      UnknownAction
+	locks        []rule
+	denies       []rule
+	allows       []rule
+	grants       []rule // live grants added at runtime
+	agentRules   []rule
+	presetList   []rule
+	gatewayHosts map[string]struct{}
+	modelTools   map[string]map[string]bool
 }
 
 // Engine evaluates network flows and DNS queries against a flat deny-wins
@@ -261,18 +264,28 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	gwHosts, err := compileGatewayHosts(nil)
+	if err != nil {
+		return nil, err
+	}
+	modelTools, err := compileModelTools(cfg.Network.ModelTools)
+	if err != nil {
+		return nil, err
+	}
 
 	return &policySnapshot{
-		session:    cfg.Session,
-		agent:      cfg.Agent,
-		preset:     preset,
-		unknown:    unknown,
-		locks:      locks,
-		denies:     denies,
-		allows:     allows,
-		grants:     append([]rule(nil), grants...),
-		agentRules: agentRules,
-		presetList: presets[preset],
+		session:      cfg.Session,
+		agent:        cfg.Agent,
+		preset:       preset,
+		unknown:      unknown,
+		locks:        locks,
+		denies:       denies,
+		allows:       allows,
+		grants:       append([]rule(nil), grants...),
+		agentRules:   agentRules,
+		presetList:   presets[preset],
+		gatewayHosts: gwHosts,
+		modelTools:   modelTools,
 	}, nil
 }
 
@@ -315,6 +328,9 @@ func (e *Engine) Reload(cfg Config) error {
 		merged = append(merged, s.locks...)
 		s.locks = merged
 	}
+	for h := range cur.gatewayHosts {
+		s.gatewayHosts[h] = struct{}{}
+	}
 	e.snap.Store(s)
 	return nil
 }
@@ -324,7 +340,7 @@ func (e *Engine) Reload(cfg Config) error {
 var ErrPolicyLocked = errors.New("policy locked")
 
 // Allow adds a live session allow rule atomically. It refuses targets covered
-// by a locked deny.
+// by a locked deny or registered model gateway hosts.
 func (e *Engine) Allow(target string) error {
 	r, err := parseRule(target, false)
 	if err != nil {
@@ -335,6 +351,9 @@ func (e *Engine) Allow(target string) error {
 	cur := e.snap.Load()
 	if locked, pat := matchesAnyLock(cur.locks, r); locked {
 		return fmt.Errorf("egress: %w: %q is locked by %q. Try: remove the lock from config before allowing it", ErrPolicyLocked, target, pat)
+	}
+	if r.kind == ruleExactHost && cur.isGatewayHost(r.host) {
+		return fmt.Errorf("egress: %w: %s", ErrPolicyLocked, gatewayDirectDenyHint(r.host))
 	}
 	next := *cur
 	next.grants = append(append([]rule(nil), cur.grants...), r)
@@ -384,6 +403,9 @@ func (e *Engine) Decide(req Request) Decision {
 	if r, ok := matchRule(s.denies, host, req.Port); ok {
 		return Decision{Action: ActionDeny, Rule: "deny:" + r.raw, Why: "denied by policy"}
 	}
+	if s.isGatewayHost(host) {
+		return Decision{Action: ActionDeny, Rule: "gateway:" + host, Why: gatewayDirectDenyHint(host)}
+	}
 	if r, ok := matchRule(s.allows, host, req.Port); ok {
 		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "allow:" + r.raw}
 	}
@@ -419,6 +441,9 @@ func (e *Engine) DecideDNS(rawHost string) Decision {
 	}
 	if r, ok := matchHostOnlyDeny(s.denies, host); ok {
 		return Decision{Action: ActionDeny, Rule: "deny:" + r.raw, Why: "denied by policy"}
+	}
+	if s.isGatewayHost(host) {
+		return Decision{Action: ActionDeny, Rule: "gateway:" + host, Why: "model host uses gateway route"}
 	}
 	if r, ok := matchAllowedHost(s, s.allows, host); ok {
 		return Decision{Action: ActionAllow, Rule: "allow:" + r.raw}
@@ -464,17 +489,4 @@ func (e *Engine) AllowExplicitIP(addr netip.Addr, port int) bool {
 		}
 	}
 	return false
-}
-
-// DenyHint formats the single-line 403 refusal message with its grant command.
-func (e *Engine) DenyHint(host string, port int) string {
-	target := host
-	if port != 0 && port != 443 {
-		target = net.JoinHostPort(host, strconv.Itoa(port))
-	}
-	sess := e.Session()
-	if sess == "" {
-		return fmt.Sprintf("%s: %s is not allowed. Try: %s policy allow %s", brand.Name, target, brand.Name, target)
-	}
-	return fmt.Sprintf("%s: %s is not allowed in %s. Try: %s policy allow %s --in %s", brand.Name, target, sess, brand.Name, target, sess)
 }

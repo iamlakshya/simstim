@@ -169,3 +169,39 @@ func TestFirstClassEgressHosts(t *testing.T) {
 		t.Errorf("codex.Egress = %q, want %q", codex.Egress, wantCodex)
 	}
 }
+
+func TestFirstClassModelGatewayAndGuard(t *testing.T) {
+	hosts := ModelHosts()
+	wantHosts := []string{"api.anthropic.com", "api.openai.com"}
+	if !slices.Equal(hosts, wantHosts) {
+		t.Fatalf("ModelHosts() = %q, want %q", hosts, wantHosts)
+	}
+
+	claude, _ := Find("claude")
+	if claude.ModelGateway == nil || claude.ModelGateway.Route != "anthropic" ||
+		claude.ModelGateway.BaseURLEnv != "ANTHROPIC_BASE_URL" ||
+		claude.ModelGateway.UpstreamHost() != "api.anthropic.com" {
+		t.Fatalf("claude.ModelGateway = %+v", claude.ModelGateway)
+	}
+	if claude.ModelGuard == nil || claude.ModelGuard.Wire != "anthropic-messages" {
+		t.Fatalf("claude.ModelGuard = %+v", claude.ModelGuard)
+	}
+	if slices.Contains(claude.ModelGuard.Paths, "POST /v1/messages/batches") {
+		t.Error("claude.ModelGuard.Paths must never include /v1/messages/batches")
+	}
+	if b, ok := FindSecretBinding(claude, "CLAUDE_CODE_OAUTH_TOKEN"); !ok {
+		t.Error("missing CLAUDE_CODE_OAUTH_TOKEN binding")
+	} else if h, v := b.FormatHeader("tok"); h != "Authorization" || v != "Bearer tok" {
+		t.Errorf("FormatHeader = (%q, %q), want (Authorization, Bearer tok)", h, v)
+	}
+
+	codex, _ := Find("codex")
+	if codex.ModelGateway == nil || codex.ModelGateway.Route != "openai" ||
+		codex.ModelGateway.BaseURLPath != "/v1" ||
+		!strings.Contains(codex.ModelGateway.ConfigTmpl, "supports_websockets = false") {
+		t.Fatalf("codex.ModelGateway = %+v", codex.ModelGateway)
+	}
+	if codex.ModelGuard == nil || codex.ModelGuard.Wire != "openai-responses" {
+		t.Fatalf("codex.ModelGuard = %+v", codex.ModelGuard)
+	}
+}

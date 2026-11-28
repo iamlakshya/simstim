@@ -36,11 +36,13 @@ type StreamHeader struct {
 // StartArgs is sent by the supervisor on the ctl stream as the "init" request
 // before any network flow is dispatched.
 type StartArgs struct {
-	PolicyTOML     string            `json:"policy_toml,omitempty"`
-	Session        string            `json:"session,omitempty"`
-	Agent          string            `json:"agent,omitempty"`
-	DNSMode        DNSMode           `json:"dns_mode,omitempty"`
-	ExposedSecrets map[string]string `json:"exposed_secrets,omitempty"`
+	PolicyTOML     string               `json:"policy_toml,omitempty"`
+	Session        string               `json:"session,omitempty"`
+	Agent          string               `json:"agent,omitempty"`
+	DNSMode        DNSMode              `json:"dns_mode,omitempty"`
+	ExposedSecrets map[string]string    `json:"exposed_secrets,omitempty"`
+	GatewayRoutes  []GatewayRouteConfig `json:"gateway_routes,omitempty"`
+	BoundSecrets   []BoundCredential    `json:"bound_secrets,omitempty"`
 }
 
 // TargetArgs is the payload of live "policy.allow" and "policy.deny" requests.
@@ -51,6 +53,17 @@ type TargetArgs struct {
 // ReloadArgs is the payload of a live "policy.reload" request.
 type ReloadArgs struct {
 	PolicyTOML string `json:"policy_toml"`
+}
+
+// ArmSecretsArgs is the payload of a live "secrets.arm" request.
+type ArmSecretsArgs struct {
+	Secrets []BoundCredential `json:"secrets"`
+}
+
+// AllowToolsArgs is the payload of a live "policy.allow_tools" request.
+type AllowToolsArgs struct {
+	Host  string   `json:"host"`
+	Tools []string `json:"tools"`
 }
 
 // StatusResult is returned by the "status" ctl request.
@@ -104,6 +117,7 @@ func RunOnConn(ctx context.Context, id string, conn net.Conn, baseOpts *ServerOp
 		_ = ctl.Close()
 		return err
 	}
+	defer srv.Close()
 
 	return serveLink(ctx, sess, ctl, ctlReader, ctlWriter, srv, id)
 }
@@ -164,10 +178,26 @@ func handleInit(r *bufio.Reader, w *proto.Writer, id string, baseOpts *ServerOpt
 		return nil, err
 	}
 
+	secrets := NewSecretStore()
+	if len(args.BoundSecrets) > 0 {
+		if err := secrets.Arm(args.BoundSecrets); err != nil {
+			secrets.Close()
+			_ = w.WriteJSON(proto.TResponse, proto.Response{
+				ID:    req.ID,
+				Error: &proto.Error{Code: "bad_secret", Message: err.Error(), Hint: "check the bound secret route, header and value"},
+			})
+			return nil, err
+		}
+	}
+	redactor := NewRedactor(args.ExposedSecrets)
+	redactor.Merge(secrets.RedactMap())
+
 	opts := ServerOptions{
-		Engine:   eng,
-		Redactor: NewRedactor(args.ExposedSecrets),
-		DNSMode:  args.DNSMode,
+		Engine:        eng,
+		Redactor:      redactor,
+		Secrets:       secrets,
+		GatewayRoutes: args.GatewayRoutes,
+		DNSMode:       args.DNSMode,
 		Audit: func(ev AuditEvent) {
 			_ = w.WriteJSON(proto.TEvent, ev)
 		},
@@ -177,12 +207,17 @@ func handleInit(r *bufio.Reader, w *proto.Writer, id string, baseOpts *ServerOpt
 		opts.Dialer = baseOpts.Dialer
 		opts.SNITimeout = baseOpts.SNITimeout
 		opts.NonproxyHandler = baseOpts.NonproxyHandler
+		opts.GatewayTLS = baseOpts.GatewayTLS
+		if len(opts.GatewayRoutes) == 0 {
+			opts.GatewayRoutes = baseOpts.GatewayRoutes
+		}
 		if baseOpts.Dialer != nil && baseOpts.Dialer.Engine == nil {
 			baseOpts.Dialer.Engine = eng
 		}
 	}
 	srv, err := NewServer(opts)
 	if err != nil {
+		secrets.Close()
 		_ = w.WriteJSON(proto.TResponse, proto.Response{
 			ID:    req.ID,
 			Error: &proto.Error{Code: "init_failed", Message: err.Error(), Hint: "check host network interfaces"},
@@ -327,6 +362,28 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_policy", Message: err.Error(), Hint: "fix the policy fields"}}
 		}
 		return proto.Response{ID: req.ID, OK: true}
+	case "policy.allow_tools":
+		var a AllowToolsArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_args", Message: err.Error(), Hint: "pass host and tools"}}
+		}
+		if err := srv.Engine.AllowTools(a.Host, a.Tools); err != nil {
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_rule", Message: err.Error(), Hint: "pass a valid model host and tool grant names"}}
+		}
+		return proto.Response{ID: req.ID, OK: true}
+	case "secrets.arm":
+		var a ArmSecretsArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_args", Message: err.Error(), Hint: "pass secrets"}}
+		}
+		if err := srv.Secrets.Arm(a.Secrets); err != nil {
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_secret", Message: err.Error(), Hint: "check each bound credential"}}
+		}
+		srv.Redactor.Merge(srv.Secrets.RedactMap())
+		return proto.Response{ID: req.ID, OK: true}
+	case "usage":
+		res, _ := json.Marshal(srv.Usage.Snapshot())
+		return proto.Response{ID: req.ID, OK: true, Result: res}
 	case "status":
 		d, _ := processDumpable()
 		res, _ := json.Marshal(StatusResult{Session: id, Dumpable: d})
@@ -334,7 +391,7 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 	default:
 		return proto.Response{
 			ID:    req.ID,
-			Error: &proto.Error{Code: "unknown_op", Message: fmt.Sprintf("unknown ctl op %q", req.Op), Hint: "use policy.allow, policy.deny, policy.reload or status"},
+			Error: &proto.Error{Code: "unknown_op", Message: fmt.Sprintf("unknown ctl op %q", req.Op), Hint: "use policy.allow, policy.deny, policy.reload, policy.allow_tools, secrets.arm, usage or status"},
 		}
 	}
 }

@@ -170,6 +170,33 @@ func (c *Client) Reload(ctx context.Context, policyTOML string) error {
 	return err
 }
 
+// AllowTools grants model API tool names (such as web_fetch or mcp) for host
+// on the running egress process.
+func (c *Client) AllowTools(ctx context.Context, host string, tools []string) error {
+	_, err := c.call(ctx, "policy.allow_tools", AllowToolsArgs{Host: host, Tools: tools})
+	return err
+}
+
+// ArmSecrets installs or updates bound credentials in the egress process's
+// memory (decision 0032).
+func (c *Client) ArmSecrets(ctx context.Context, creds []BoundCredential) error {
+	_, err := c.call(ctx, "secrets.arm", ArmSecretsArgs{Secrets: creds})
+	return err
+}
+
+// Usage queries the running egress process for cumulative model token usage.
+func (c *Client) Usage(ctx context.Context) (UsageSummary, error) {
+	raw, err := c.call(ctx, "usage", nil)
+	if err != nil {
+		return UsageSummary{}, err
+	}
+	var res UsageSummary
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return UsageSummary{}, fmt.Errorf("egress client: decode usage: %w", err)
+	}
+	return res, nil
+}
+
 // Status queries the running egress process for its status and dumpable flag.
 func (c *Client) Status(ctx context.Context) (StatusResult, error) {
 	raw, err := c.call(ctx, "status", nil)

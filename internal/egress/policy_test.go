@@ -64,9 +64,12 @@ network.deny = ["evil.example"]
 	if dec := eng.Decide(Request{Host: "example.com", Port: 80}); dec.Action != ActionAllow {
 		t.Errorf("example.com:80 = %+v, want allow", dec)
 	}
-	// Agent and balanced preset hosts pass.
-	if dec := eng.Decide(Request{Host: "api.anthropic.com", Port: 443}); dec.Action != ActionAllow {
-		t.Errorf("api.anthropic.com:443 = %+v, want allow", dec)
+	// Model hosts are never allowed for direct CONNECT (they use the gateway).
+	if dec := eng.Decide(Request{Host: "api.anthropic.com", Port: 443}); dec.Action != ActionDeny || dec.Rule != "gateway:api.anthropic.com" {
+		t.Errorf("api.anthropic.com:443 = %+v, want deny by gateway rule", dec)
+	}
+	if dec := eng.Decide(Request{Host: "platform.claude.com", Port: 443}); dec.Action != ActionAllow {
+		t.Errorf("platform.claude.com:443 = %+v, want allow", dec)
 	}
 	if dec := eng.Decide(Request{Host: "pypi.org", Port: 443}); dec.Action != ActionAllow {
 		t.Errorf("pypi.org:443 = %+v, want allow", dec)
@@ -84,19 +87,22 @@ func TestParsePolicyRejectsUnknownKeyAndBadTOML(t *testing.T) {
 
 func TestLockedPresetAgentEgress(t *testing.T) {
 	for _, tc := range []struct {
-		agent   string
-		allowed []string
-		denied  []string
+		agent        string
+		allowed      []string
+		gatewayHosts []string
+		denied       []string
 	}{
 		{
-			agent:   "claude",
-			allowed: []string{"api.anthropic.com", "platform.claude.com", "claude.ai", "claude.com", "sso.claude.com"},
-			denied:  []string{"mcp-proxy.anthropic.com", "downloads.claude.ai", "registry.npmjs.org", "example.com"},
+			agent:        "claude",
+			allowed:      []string{"platform.claude.com", "claude.ai", "claude.com", "sso.claude.com"},
+			gatewayHosts: []string{"api.anthropic.com"},
+			denied:       []string{"mcp-proxy.anthropic.com", "downloads.claude.ai", "registry.npmjs.org", "example.com"},
 		},
 		{
-			agent:   "codex",
-			allowed: []string{"api.openai.com", "chatgpt.com", "auth.openai.com"},
-			denied:  []string{"registry.npmjs.org", "example.com", "api.anthropic.com"},
+			agent:        "codex",
+			allowed:      []string{"chatgpt.com", "auth.openai.com"},
+			gatewayHosts: []string{"api.openai.com"},
+			denied:       []string{"registry.npmjs.org", "example.com"},
 		},
 	} {
 		t.Run(tc.agent, func(t *testing.T) {
@@ -116,6 +122,15 @@ func TestLockedPresetAgentEgress(t *testing.T) {
 					t.Errorf("%s locked: %s:80 = %+v, want deny", tc.agent, h, dec)
 				}
 			}
+			for _, h := range tc.gatewayHosts {
+				dec := eng.Decide(Request{Host: h, Port: 443})
+				if dec.Action != ActionDeny || dec.Rule != "gateway:"+h {
+					t.Errorf("%s locked: direct CONNECT to model host %s = %+v, want gateway deny", tc.agent, h, dec)
+				}
+				if d := eng.DecideDNS(h); d.Action != ActionDeny {
+					t.Errorf("%s locked: direct DNS to model host %s = %+v, want deny", tc.agent, h, d)
+				}
+			}
 			for _, h := range tc.denied {
 				dec := eng.Decide(Request{Host: h, Port: 443})
 				if dec.Action != ActionDeny {
@@ -127,6 +142,38 @@ func TestLockedPresetAgentEgress(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestModelHostsNeverAllowedForDirectConnect(t *testing.T) {
+	eng, err := NewEngine(Config{
+		Session: "dev/open",
+		Agent:   "claude",
+		Sandbox: SandboxConfig{Preset: PresetOpen},
+		Network: NetworkConfig{
+			Allow: []string{"api.anthropic.com", "api.openai.com"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	for _, host := range []string{"api.anthropic.com", "api.openai.com"} {
+		if dec := eng.Decide(Request{Host: host, Port: 443}); dec.Action != ActionDeny || dec.Rule != "gateway:"+host {
+			t.Errorf("open preset + explicit allow for %s = %+v, want gateway deny", host, dec)
+		}
+		if err := eng.Allow(host); err == nil {
+			t.Errorf("live Allow(%s) unexpectedly succeeded", host)
+		}
+		if dec := eng.DecideGateway(host, 443); dec.Action != ActionAllow || dec.Mode != ModeGateway {
+			t.Errorf("DecideGateway(%s) = %+v, want allow/gateway", host, dec)
+		}
+	}
+	// Explicit deny or lock still beats the gateway route (deny wins).
+	if err := eng.Deny("api.anthropic.com"); err != nil {
+		t.Fatalf("Deny: %v", err)
+	}
+	if dec := eng.DecideGateway("api.anthropic.com", 443); dec.Action != ActionDeny {
+		t.Errorf("DecideGateway after Deny = %+v, want deny", dec)
 	}
 }
 

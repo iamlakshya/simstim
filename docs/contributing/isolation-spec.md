@@ -990,7 +990,7 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 | Object stores (`*.s3.amazonaws.com`, `storage.googleapis.com`, `*.blob.core.windows.net`) | Every method but GET and HEAD, when a grant allows the host at all |
 | Any bound host | Endpoints that mint or rotate tokens, listed for each service |
 
-**Model APIs (P2, a graft from "Agent rows as policy" and the red team).** Model hosts are always intercepted. For each agent, `ModelGuard` in the agent table (8.6) names the wire format, the allowed paths and the allowed tool types. The egress process parses the JSON body of each model request. When the agent uses OpenAI's WebSocket mode, as Codex does, it also parses each `response.create` message on the socket ([build facts](../research/build-facts.md#2-model-apis)). It refuses:
+**Model APIs (P2, a graft from "Agent rows as policy" and the red team).** Model hosts are always reached through the egress process's plain-HTTP model gateway route (`/gw/<route>`, [decision 0057](decisions/0057-model-gateway-route.md)), never by direct `CONNECT` or TLS interception on the daily path. Direct `CONNECT`, forward-proxy HTTP, transparent splice and guest DNS to model hosts are always refused, even under `preset = "open"` or explicit allow rules, so a key planted inside the sandbox cannot bypass the gateway. For each agent, `ModelGateway` names the base-URL variable or provider config block (such as `ANTHROPIC_BASE_URL` for Claude Code, and a Codex `[model_providers.gateway]` block with `supports_websockets = false`), and `ModelGuard` in the agent table (8.6) names the wire format, the allowed paths and the allowed tool types. The egress process drops every credential header sent by the guest, injects the real key held in memory over verified upstream TLS 1.2+, refuses WebSocket upgrades, and parses the decoded JSON body of each model request ([build facts](../research/build-facts.md#2-model-apis)). It refuses:
 
 - **A tool type that is not on the agent's list.** A `tools[]` entry passes when it has no `type`, or when its `type` is in `ModelGuard.Tools`. A type in `ModelGuard.Search` passes too, under every preset but `locked`. Every other type is refused, so a new dated server tool fails closed. The refused types include Anthropic's `web_fetch_*`, `code_execution_*` and `mcp_toolset`, and OpenAI's `mcp`, `file_search` and `code_interpreter`.
 - **An MCP server that the provider calls.** Anthropic's top-level `mcp_servers` when it is not empty, and every OpenAI `mcp` tool, whether it names a `server_url`, a `connector_id` or a `tunnel_id` ([OpenAI](https://developers.openai.com/api/docs/guides/tools-connectors-mcp), [Anthropic](https://platform.claude.com/docs/en/agents-and-tools/mcp-connector)).
@@ -1001,7 +1001,7 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 
 Each refusal is an HTTP 403 in the API's own error shape, with the header `x-should-retry: false`, so that no SDK retries it. For Anthropic: `{"type":"error","error":{"type":"permission_error","message":"<line>"},"request_id":"req_<random>"}`. For OpenAI: `{"error":{"message":"<line>","type":"request_forbidden","param":null,"code":null}}`. The line reads `simstim: devbox/auth-fix may not use web_fetch_20260318 at api.anthropic.com. Try: simstim policy allow api.anthropic.com --tools web_fetch --in devbox/auth-fix`. Each refusal raises `egress_blocked`.
 
-On a model host, the egress process reads the frames of a WebSocket itself, instead of passing the upgraded connection through `httputil.ReverseProxy`. It removes `permessage-deflate` from the upgrade's `Sec-WebSocket-Extensions`, so no message arrives compressed, and it refuses a frame with the compression bit (RSV1) set. A refused message closes the socket with code 1008 and the line as its reason, cut to 123 bytes. Codex then falls back to HTTPS, where the same request gets the 403 (UNVERIFIED: P2.4 checks it in a recording).
+WebSocket upgrades on the model gateway are refused with HTTP 403 and `x-should-retry: false`; Codex runs with `supports_websockets = false` in its gateway provider block so all model calls use HTTPS streaming ([decision 0057](decisions/0057-model-gateway-route.md)).
 
 A grant `net <host> --tools <name>` opens refused types for one session. The names are `web_fetch` (Anthropic `web_fetch_*`), `web_search` (the search types under `locked`) and `code_execution` (Anthropic `code_execution_*` and OpenAI `code_interpreter`). The others are `mcp` (`mcp_servers`, `mcp_toolset` and OpenAI `mcp`), `url_content` (content by URL) and `files` (the file API). The lists come from recorded traffic of each first-class agent (task P2.4).
 
@@ -1044,7 +1044,7 @@ It never holds a query string, a header value or a body. Before it writes a path
 
 **Today.** A secret is a value that a command fetches on the laptop at the start, and that goes only into the agent's environment ([secrets](../how-to/secrets.md)). Naming a secret with `--secret` or the host's `secrets` list is the grant. The grant gate also checks it against the host's tier (14.8.2).
 
-**Bound secrets (P2).** A secret is bound when its hosts are known: from `[secrets.NAME] hosts` in `config.toml`, or from the agent table's `Secrets` rows. Its value goes to the egress process only, and lives only in its memory ([0032](decisions/0032-secret-values-in-memory-only.md)). The guest sees a sentinel: the value's known prefix (such as `sk-ant-api03-`) and random characters of the same length and alphabet, new at each start, so format checks in the agent pass.
+**Bound secrets (P2).** A secret is bound when its hosts are known: from `[secrets.NAME] hosts` in `config.toml`, or from the agent table's `Secrets` rows. Its value goes to the egress process only, and lives only in its memory ([0032](decisions/0032-secret-values-in-memory-only.md)). On the daily model API path ([0057](decisions/0057-model-gateway-route.md)), the agent reaches a plain-HTTP gateway route on its loopback proxy with a non-secret placeholder credential; the egress process drops every credential header from the guest and injects the real value over verified upstream TLS, with no TLS interception and no guest CA. Swap inside TLS interception for tools without a base-URL setting comes later.
 
 - **Swap.** On a bound host, the egress process puts the value into the named header only: `x-api-key`, `Authorization: Bearer`, or the password of `Authorization: Basic` for git over HTTPS. Never into a body or a URL.
 - **Identity pin.** On a bound host, a request that carries any other credential in a credential header is refused, and raises `secret_misuse`. This stops an attacker's own key on an allowed model API.
@@ -1551,6 +1551,8 @@ ProjectFiles []string `json:"project_files,omitempty"`
 // Fork starts a copy of the agent's conversation under a new ID.
 // {agent_session_id} is replaced.
 Fork []string `json:"fork,omitempty"`
+// ModelGateway configures the plain-HTTP gateway route for the agent's model API.
+ModelGateway *ModelGateway `json:"model_gateway,omitempty"`
 // ModelGuard is the wire format and the allowed paths and tools of the
 // agent's model API.
 ModelGuard *ModelGuard `json:"model_guard,omitempty"`
@@ -4200,7 +4202,7 @@ The research raised four more questions, and the design answers them, so they ar
 
 ### 17.8 Model usage and budgets (P2.16)
 
-- The egress process reads the usage of each model API answer that it already parses (P2.4), by model, as each API defines it ([build facts](../research/build-facts.md#2-model-apis)):
+- The egress process reads the usage of each model API answer observed directly on the gateway route (P2.4, [0057](decisions/0057-model-gateway-route.md)), by model, as each API defines it ([build facts](../research/build-facts.md#2-model-apis)):
   - **Anthropic Messages.** A plain answer has `usage`. A stream starts with `message_start`, whose `message.usage` holds `input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens` and `output_tokens`. Each `message_delta` has a `usage` whose counts are cumulative. The egress process takes the `message_start` values, then replaces each field with its value in the last `message_delta`. It never adds deltas. It also keeps `server_tool_use.web_search_requests`.
   - **OpenAI Responses.** The `usage` of the `response` object in `response.completed`, `response.incomplete` or `response.failed`, over HTTP or WebSocket: `input_tokens`, `input_tokens_details.cached_tokens`, `output_tokens`, `output_tokens_details.reasoning_tokens` and `total_tokens`.
   - **OpenAI Chat Completions.** A plain answer has `usage`. A stream has it only when the client set `stream_options.include_usage`. Then one chunk before `data: [DONE]` holds it, and every other chunk has `usage: null`. The egress process never adds the option.

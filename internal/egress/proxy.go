@@ -20,19 +20,27 @@ type ServerOptions struct {
 	Addrs           *AddressPolicy
 	Dialer          *SafeDialer
 	Redactor        *Redactor
+	Secrets         *SecretStore
+	Usage           *UsageTracker
+	GatewayRoutes   []GatewayRouteConfig
+	GatewayTLS      *tls.Config // optional test override; production uses verified system roots
 	Audit           AuditSink
 	DNSMode         DNSMode
 	SNITimeout      time.Duration
-	NonproxyHandler http.Handler // optional handler for relative-path requests (e.g. model gateway)
+	NonproxyHandler http.Handler // optional override for relative-path requests; nil mounts Gateway
 }
 
-// Server is the egress HTTP CONNECT proxy, plain HTTP forward proxy,
-// transparent flow handler and DNS policy responder for one walled session.
+// Server is the egress HTTP CONNECT proxy, plain HTTP forward proxy, model
+// gateway, transparent flow handler and DNS policy responder for one walled
+// session.
 type Server struct {
 	Engine   *Engine
 	Addrs    *AddressPolicy
 	Dialer   *SafeDialer
 	Redactor *Redactor
+	Secrets  *SecretStore
+	Usage    *UsageTracker
+	Gateway  *Gateway
 	DNS      *DNSHandler
 
 	audit      AuditSink
@@ -66,6 +74,14 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if redactor == nil {
 		redactor = NewRedactor(nil)
 	}
+	secrets := opts.Secrets
+	if secrets == nil {
+		secrets = NewSecretStore()
+	}
+	usage := opts.Usage
+	if usage == nil {
+		usage = NewUsageTracker()
+	}
 	sniTimeout := opts.SNITimeout
 	if sniTimeout <= 0 {
 		sniTimeout = defaultSNITimeout
@@ -76,6 +92,8 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		Addrs:      addrs,
 		Dialer:     dialer,
 		Redactor:   redactor,
+		Secrets:    secrets,
+		Usage:      usage,
 		audit:      opts.Audit,
 		sniTimeout: sniTimeout,
 	}
@@ -86,8 +104,37 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		Mode:   opts.DNSMode,
 		Audit:  opts.Audit,
 	})
-	s.proxy = s.buildProxy(opts.NonproxyHandler)
+	nonproxy := opts.NonproxyHandler
+	if nonproxy == nil {
+		routes := opts.GatewayRoutes
+		if len(routes) == 0 {
+			routes = DefaultGatewayRoutes(opts.Engine.snap.Load().agent)
+		}
+		gw, err := NewGateway(GatewayOptions{
+			Engine:    opts.Engine,
+			Dialer:    dialer,
+			Secrets:   secrets,
+			Usage:     usage,
+			Redactor:  redactor,
+			Audit:     opts.Audit,
+			Routes:    routes,
+			TLSConfig: opts.GatewayTLS,
+		})
+		if err != nil {
+			return nil, err
+		}
+		s.Gateway = gw
+		nonproxy = gw
+	}
+	s.proxy = s.buildProxy(nonproxy)
 	return s, nil
+}
+
+// Close wipes any in-memory bound credentials held by the server.
+func (s *Server) Close() {
+	if s != nil && s.Secrets != nil {
+		s.Secrets.Close()
+	}
 }
 
 func (s *Server) buildProxy(nonproxy http.Handler) *goproxy.ProxyHttpServer {
@@ -134,6 +181,13 @@ func (s *Server) emitAudit(ev AuditEvent) {
 	s.audit(ev)
 }
 
+func (s *Server) denyBody(host string, port int, dec Decision) string {
+	if dec.Why != "" && len(dec.Rule) >= len("gateway:") && dec.Rule[:len("gateway:")] == "gateway:" {
+		return dec.Why
+	}
+	return s.Engine.DenyHint(host, port)
+}
+
 func auditDecision(d Decision) string {
 	if d.Action != ActionAllow {
 		return string(ActionDeny)
@@ -157,7 +211,7 @@ func (s *Server) handleConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.Con
 
 	dec := s.Engine.Decide(Request{Host: normHost, Port: port, Method: http.MethodConnect})
 	if dec.Action != ActionAllow {
-		body := s.Engine.DenyHint(normHost, port)
+		body := s.denyBody(normHost, port, dec)
 		s.emitAudit(AuditEvent{
 			Kind: "net", Host: normHost, Port: port, Mode: string(ModeSplice), Method: http.MethodConnect,
 			Status: http.StatusForbidden, Rule: dec.Rule, Decision: string(ActionDeny), Why: dec.Why,
@@ -291,7 +345,7 @@ func (s *Server) handleHTTPRequest(r *http.Request, ctx *goproxy.ProxyCtx) (*htt
 		Host: normHost, Port: port, Method: r.Method, Path: r.URL.Path, Header: r.Header,
 	})
 	if dec.Action != ActionAllow {
-		body := s.Engine.DenyHint(normHost, port)
+		body := s.denyBody(normHost, port, dec)
 		s.emitAudit(AuditEvent{
 			Kind: "net", Host: normHost, Port: port, Mode: string(ModeHTTP), Method: r.Method,
 			Path: redactedPath, Status: http.StatusForbidden, Rule: dec.Rule,

@@ -66,13 +66,31 @@ When a sandbox runs the DNS stub, every query crosses the link to the egress pro
 
 ## Audit log
 
-The egress process sends one JSON line per connection or DNS query back to the supervisor over its control stream:
+The egress process sends one JSON line per connection, gateway request or DNS query back to the supervisor over its control stream:
 
 ```json
 {"v":1,"t":"2026-11-27T10:12:03Z","kind":"net","host":"registry.npmjs.org","port":443,"mode":"splice","method":"CONNECT","status":200,"up":512,"down":2048,"rule":"preset:balanced","decision":"allow"}
 ```
 
-Audit lines never include query strings, header values or bodies. Before writing a path, the egress process replaces every exposed secret value with `[NAME]` and cuts the path to 256 bytes.
+Audit lines never include query strings, header values or bodies. Before writing a path, the egress process replaces every exposed or bound secret value with `[NAME]` and cuts the path to 256 bytes.
+
+## Model gateway and guard
+
+Model API hosts (such as `api.anthropic.com` and `api.openai.com`) are never allowed for direct `CONNECT`, forward-proxy HTTP, transparent splice or guest DNS, even under `preset = "open"` or an explicit allow rule ([decision 0057](../contributing/decisions/0057-model-gateway-route.md)). A key planted inside the sandbox cannot reach the model provider directly.
+
+Instead, the agent speaks plain HTTP over its isolated loopback proxy and private link to a gateway route served by the egress process (`http://127.0.0.1:3128/gw/<route>`):
+
+- **Claude Code:** sets `ANTHROPIC_BASE_URL=http://127.0.0.1:3128/gw/anthropic` with a non-secret placeholder in its credential variable.
+- **Codex:** writes a `[model_providers.gateway]` block in `.codex/config.toml` pointing `base_url` at `http://127.0.0.1:3128/gw/openai/v1` with `wire_api = "responses"` and `supports_websockets = false`.
+
+For each gateway request, the egress process:
+
+1. Refuses WebSocket upgrades, path traversal, unlisted endpoints (such as `/v1/messages/batches` and `/v1/batches`) and file uploads (`/v1/files`) unless granted.
+2. Decompresses `gzip` or `deflate` request bodies up to 64 MiB and inspects the JSON body. Any `tools[].type` not on the agent's allowlist, any provider-side MCP server (`mcp_servers`, `mcp_toolset` or OpenAI `mcp`), any URL-fetched image or document, and web search under the `locked` preset are refused with HTTP 403, `x-should-retry: false` and the provider's JSON error shape.
+3. Strips every guest credential header (`Authorization`, `X-Api-Key`, `Proxy-Authorization`, `Api-Key`), injects the real key held only in the egress process's memory ([decision 0032](../contributing/decisions/0032-secret-values-in-memory-only.md)), and dials the provider over verified TLS 1.2+ with no TLS interception.
+4. Counts token usage from streamed SSE and plain JSON responses (estimating `(request + response) / 4` when a stream ends without usage) and attaches the count to the audit event and the `usage` control query.
+
+To grant a refused model capability for a session, add `[network.model_tools]` in the session policy (valid names: `web_fetch`, `web_search`, `code_execution`, `mcp`, `url_content`, `files`) or allow it live through the `policy.allow_tools` control operation.
 
 ## Process hardening
 

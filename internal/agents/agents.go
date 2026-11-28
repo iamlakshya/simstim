@@ -78,10 +78,19 @@ type Agent struct {
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
 	// Egress lists the hosts the agent needs: its model API and its login.
-	// The locked preset allows these on port 443 and nothing else.
+	// The locked preset allows these on port 443 and nothing else. Model API
+	// hosts listed in ModelGuard are served only through the model gateway.
 	Egress []string `json:"egress,omitempty"`
 	// ProxyEnv are extra variables that make the agent use HTTPS_PROXY.
 	ProxyEnv map[string]string `json:"proxy_env,omitempty"`
+	// Secrets binds the agent's credential variables to hosts and headers (spec 8.6).
+	Secrets []SecretBinding `json:"secrets,omitempty"`
+	// ModelGateway configures the plain-HTTP gateway route that keeps model
+	// credentials outside the sandbox (decision 0053, spec 7.2 and 7.3).
+	ModelGateway *ModelGateway `json:"model_gateway,omitempty"`
+	// ModelGuard lists the wire format, hosts, paths and tool types allowed on
+	// the agent's model API route (spec 7.2 and 8.6).
+	ModelGuard *ModelGuard `json:"model_guard,omitempty"`
 }
 
 // GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less
@@ -188,6 +197,9 @@ var Table = []Agent{
 			"claude.com",
 			"sso.claude.com",
 		},
+		Secrets:      claudeSecrets,
+		ModelGateway: claudeGateway,
+		ModelGuard:   claudeGuard,
 	},
 	{
 		Kind: "codex", Title: "Codex", Binaries: []string{"codex"},
@@ -248,6 +260,9 @@ var Table = []Agent{
 			"chatgpt.com",
 			"auth.openai.com",
 		},
+		Secrets:      codexSecrets,
+		ModelGateway: codexGateway,
+		ModelGuard:   codexGuard,
 	},
 	{
 		Kind: "opencode", Title: "opencode", Binaries: []string{"opencode"},
