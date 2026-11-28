@@ -75,10 +75,11 @@ type guide struct {
 	o     guideOpts
 	// p builds the error of a question that input off leaves without an
 	// answer, from the command line.
-	p           *prompter
-	log         *onboard.Log
-	part        int
-	readerStuck bool
+	p                 *prompter
+	log               *onboard.Log
+	part              int
+	readerStuck       bool
+	rebuildAfterCheck bool
 
 	// session runs an install or a login in a session on a host, and
 	// returns the session's ID and whether it ended; checks reads a host's

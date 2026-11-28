@@ -205,3 +205,35 @@ func TestFirstClassModelGatewayAndGuard(t *testing.T) {
 		t.Fatalf("codex.ModelGuard = %+v", codex.ModelGuard)
 	}
 }
+
+func TestAgentsDiskDirsAndSandboxEnv(t *testing.T) {
+	claude, ok := Find("claude")
+	if !ok {
+		t.Fatal("claude agent missing")
+	}
+	if !slices.Contains(claude.InstallDirs, ".local/share/claude") {
+		t.Errorf("claude.InstallDirs = %q, want .local/share/claude", claude.InstallDirs)
+	}
+	if claude.SandboxEnv["DISABLE_AUTOUPDATER"] != "1" {
+		t.Errorf("claude.SandboxEnv = %v, want DISABLE_AUTOUPDATER=1", claude.SandboxEnv)
+	}
+
+	codex, ok := Find("codex")
+	if !ok {
+		t.Fatal("codex agent missing")
+	}
+	if !slices.Contains(codex.InstallDirs, ".codex/packages") {
+		t.Errorf("codex.InstallDirs = %q, want .codex/packages", codex.InstallDirs)
+	}
+	if codex.SandboxEnv["NO_UPDATE_NOTIFIER"] != "1" {
+		t.Errorf("codex.SandboxEnv = %v, want NO_UPDATE_NOTIFIER=1", codex.SandboxEnv)
+	}
+
+	opencode, ok := Find("opencode")
+	if !ok {
+		t.Fatal("opencode agent missing")
+	}
+	if !slices.Contains(opencode.InstallDirs, ".opencode") {
+		t.Errorf("opencode.InstallDirs = %q, want .opencode", opencode.InstallDirs)
+	}
+}

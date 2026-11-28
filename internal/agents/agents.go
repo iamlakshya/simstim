@@ -83,6 +83,10 @@ type Agent struct {
 	Egress []string `json:"egress,omitempty"`
 	// ProxyEnv are extra variables that make the agent use HTTPS_PROXY.
 	ProxyEnv map[string]string `json:"proxy_env,omitempty"`
+	// SandboxEnv are extra variables set in walled sessions (for example to
+	// disable background self-updaters when binaries come read-only from the
+	// host or agents disk; question 21).
+	SandboxEnv map[string]string `json:"-"`
 	// Secrets binds the agent's credential variables to hosts and headers (spec 8.6).
 	Secrets []SecretBinding `json:"secrets,omitempty"`
 	// ModelGateway configures the plain-HTTP gateway route that keeps model
@@ -198,6 +202,7 @@ var Table = []Agent{
 			"sso.claude.com",
 		},
 		Secrets:      claudeSecrets,
+		SandboxEnv:   map[string]string{"DISABLE_AUTOUPDATER": "1"},
 		ModelGateway: claudeGateway,
 		ModelGuard:   claudeGuard,
 	},
@@ -240,8 +245,9 @@ var Table = []Agent{
 		Inline: Inline{Args: []string{"--no-alt-screen"}},
 		// "4-GB minimum (8-GB recommended)":
 		// https://github.com/openai/codex/blob/main/docs/install.md#system-requirements.
-		Memory:    4 * GB,
-		StateDirs: []string{".codex/sessions"},
+		Memory:      4 * GB,
+		InstallDirs: []string{".codex/packages"},
+		StateDirs:   []string{".codex/sessions"},
 		Setup: &Setup{
 			// The installer puts codex in $CODEX_INSTALL_DIR, by default ~/.local/bin.
 			Install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
@@ -261,17 +267,19 @@ var Table = []Agent{
 			"auth.openai.com",
 		},
 		Secrets:      codexSecrets,
+		SandboxEnv:   map[string]string{"NO_UPDATE_NOTIFIER": "1"},
 		ModelGateway: codexGateway,
 		ModelGuard:   codexGuard,
 	},
 	{
 		Kind: "opencode", Title: "opencode", Binaries: []string{"opencode"},
-		Launch:    []string{"opencode"},
-		Resume:    []string{"opencode", "-s", "{agent_session_id}"},
-		Continue:  []string{"opencode", "-c"},
-		IDCapture: "scan",
-		Support:   Supported,
-		StateDirs: []string{".local/share/opencode"},
+		Launch:      []string{"opencode"},
+		Resume:      []string{"opencode", "-s", "{agent_session_id}"},
+		Continue:    []string{"opencode", "-c"},
+		IDCapture:   "scan",
+		Support:     Supported,
+		InstallDirs: []string{".opencode"},
+		StateDirs:   []string{".local/share/opencode"},
 		Setup: &Setup{
 			Install: "curl -fsSL https://opencode.ai/install | bash",
 			Source:  "https://opencode.ai/docs/",
@@ -463,22 +471,6 @@ func (a Agent) ResumeTemplate(stored []string) []string {
 		return slices.Clone(a.Resume)
 	}
 	return stored
-}
-
-// DefaultSize returns the default CPU count and memory cap in bytes for a
-// walled session running kind when neither config nor flags name a size
-// (isolation spec 17.1, question 14).
-func DefaultSize(kind string) (cpus int, memBytes int64) {
-	cpus = 2
-	memBytes = 4 << 30
-	if a, ok := Find(kind); ok && a.Memory > 0 {
-		// Round up to a whole GiB so agent GB requirements (e.g. 4 GB) stay >= 4 GiB.
-		gib := (a.Memory + (1<<30 - 1)) / (1 << 30)
-		if gib > 0 {
-			memBytes = gib << 30
-		}
-	}
-	return cpus, memBytes
 }
 
 // Expand replaces placeholders in argv.

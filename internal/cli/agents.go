@@ -299,7 +299,7 @@ func afterInstall(ctx context.Context, h client.Host, a agents.Agent, interactiv
 	}
 	fmt.Fprintln(os.Stderr)
 	printLine(os.Stderr, l)
-	rebuildAgentsDisk(cctx, conn)
+	rebuildAgentsDisk(ctx, conn)
 	if next != "" {
 		fmt.Fprintf(os.Stderr, "\nNext, log in: %s\n", next)
 	}

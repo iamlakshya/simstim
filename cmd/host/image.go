@@ -106,7 +106,15 @@ func runImageRm(args []string) error {
 }
 
 func runImageAgents(args []string) error {
-	rec, err := host.BuildAgentsDisk(context.Background())
+	var (
+		rec api.AgentsDiskRecord
+		err error
+	)
+	if hasFlag(args, "--ensure") {
+		rec, _, err = host.EnsureAgentsDisk(context.Background())
+	} else {
+		rec, err = host.BuildAgentsDisk(context.Background())
+	}
 	if err != nil {
 		return err
 	}

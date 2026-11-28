@@ -178,6 +178,8 @@ func (g *guide) inSession(h client.Host, f *onboard.Flow, a onboard.Action) erro
 	if err != nil {
 		return err
 	}
+	g.rebuildAfterCheck = a.Kind == onboard.ActInstall && ended
+	defer func() { g.rebuildAfterCheck = false }()
 	checks, err := g.checks(h)
 	if err != nil {
 		return err
@@ -266,5 +268,12 @@ func (g *guide) agentChecks(h client.Host) ([]api.AgentCheck, error) {
 		return nil, err
 	}
 	defer conn.Close()
-	return conn.AgentChecks(cctx)
+	checks, err := conn.AgentChecks(cctx)
+	if err != nil {
+		return nil, err
+	}
+	if g.rebuildAfterCheck {
+		rebuildAgentsDisk(g.ctx, conn)
+	}
+	return checks, nil
 }

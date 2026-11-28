@@ -2,6 +2,8 @@ package image
 
 import (
 	"archive/tar"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"io/fs"
@@ -21,6 +23,8 @@ type agentTarEntry struct {
 	mode     int64
 	size     int64
 	modTime  time.Time
+	ctimeNS  int64
+	ino      uint64
 	linkname string
 	root     *os.Root // non-nil for regular files read via os.Root
 	relPath  string   // path inside root
@@ -138,6 +142,9 @@ func (p *agentsPlan) addSource(src AgentSource) error {
 		if err != nil {
 			continue
 		}
+		if realDir, rerr := filepath.EvalSymlinks(absDir); rerr == nil && realDir != "" {
+			absDir = realDir
+		}
 		st, err := os.Stat(absDir)
 		if err != nil || !st.IsDir() {
 			continue
@@ -166,12 +173,15 @@ func (p *agentsPlan) addSource(src AgentSource) error {
 	if err := p.ensureParents(binTarPath, src.Kind); err != nil {
 		return err
 	}
+	ctimeNS, ino := statIdentity(fi)
 	if err := p.add(agentTarEntry{
 		name:     binTarPath,
 		typeflag: tar.TypeReg,
 		mode:     int64(fi.Mode().Perm()),
 		size:     fi.Size(),
 		modTime:  fi.ModTime().UTC(),
+		ctimeNS:  ctimeNS,
+		ino:      ino,
 		root:     r,
 		relPath:  binBase,
 	}, src.Kind); err != nil {
@@ -241,6 +251,7 @@ func (p *agentsPlan) walkRoot(r *os.Root, rel, tarPrefix, kind string) error {
 			return agentsDiskError(fmt.Sprintf("stat %s file %s: %v", kind, childRel, err), "", err)
 		}
 		mode := fi.Mode()
+		ctimeNS, ino := statIdentity(fi)
 		switch {
 		case mode.IsDir():
 			if err := p.add(agentTarEntry{
@@ -248,6 +259,8 @@ func (p *agentsPlan) walkRoot(r *os.Root, rel, tarPrefix, kind string) error {
 				typeflag: tar.TypeDir,
 				mode:     int64(mode.Perm()),
 				modTime:  fi.ModTime().UTC(),
+				ctimeNS:  ctimeNS,
+				ino:      ino,
 			}, kind); err != nil {
 				return err
 			}
@@ -264,6 +277,8 @@ func (p *agentsPlan) walkRoot(r *os.Root, rel, tarPrefix, kind string) error {
 				typeflag: tar.TypeSymlink,
 				mode:     0o777,
 				modTime:  fi.ModTime().UTC(),
+				ctimeNS:  ctimeNS,
+				ino:      ino,
 				linkname: target,
 			}, kind); err != nil {
 				return err
@@ -275,6 +290,8 @@ func (p *agentsPlan) walkRoot(r *os.Root, rel, tarPrefix, kind string) error {
 				mode:     int64(mode.Perm()),
 				size:     fi.Size(),
 				modTime:  fi.ModTime().UTC(),
+				ctimeNS:  ctimeNS,
+				ino:      ino,
 				root:     r,
 				relPath:  childRel,
 			}, kind); err != nil {
@@ -334,6 +351,26 @@ func hostToRootTarPath(absPath string) string {
 		return "root"
 	}
 	return "root/" + cleaned
+}
+
+// sourceDigest hashes the sorted entry metadata (path, type, mode, size,
+// mtime, ctime, inode and symlink target) so EnsureAgentsDisk can reuse an
+// unchanged disk in O(stat) time while catching replacements that keep the
+// same size and mtime (spec 20.4).
+func (p *agentsPlan) sourceDigest() string {
+	keys := make([]string, 0, len(p.entries))
+	for k := range p.entries {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return compareTarPaths(keys[i], keys[j]) })
+
+	h := sha256.New()
+	for _, k := range keys {
+		e := p.entries[k]
+		fmt.Fprintf(h, "%s\x00%d\x00%o\x00%d\x00%d\x00%d\x00%d\x00%s\n",
+			e.name, e.typeflag, e.mode, e.size, e.modTime.UnixNano(), e.ctimeNS, e.ino, e.linkname)
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
 
 // compareTarPaths orders every folder before its children, and siblings in byte

@@ -305,6 +305,7 @@ func processWalledEnv(a NewArgs, id string, extraPathDirs []string, agent agents
 		"CARGO_HTTP_PROXY":       process.GuestProxyURL,
 	}
 	maps.Copy(vars, agent.ProxyEnv)
+	maps.Copy(vars, agent.SandboxEnv)
 	if a.TermProgram != "" {
 		vars["TERM_PROGRAM"] = a.TermProgram
 	}

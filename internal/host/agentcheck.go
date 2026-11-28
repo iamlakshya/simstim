@@ -13,6 +13,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/image"
 )
 
 // loginStatusTimeout bounds an agent's own status command.
@@ -190,4 +191,70 @@ func agentVersion(bin string, env []string) string {
 	}
 	first, _, _ := strings.Cut(strings.TrimSpace(string(b)), "\n")
 	return versionNumber.FindString(first)
+}
+
+// InstalledAgentSources resolves every installed non-shell agent in the agent
+// table against the host's login shell PATH and home directory, returning its
+// binary and InstallDirs for building the read-only agents disk (spec 20.4).
+func InstalledAgentSources(ctx context.Context) []image.AgentSource {
+	login, err := LoginEnvContext(ctx, 15*time.Second)
+	if err != nil {
+		login = os.Environ()
+	}
+	home, _ := os.UserHomeDir()
+	return InstalledAgentSourcesFromEnv(login, home)
+}
+
+// InstalledAgentSourcesFromEnv resolves installed agents from an explicit
+// login environment and home directory (used by unit tests and doctor checks).
+func InstalledAgentSourcesFromEnv(login []string, home string) []image.AgentSource {
+	pathEnv := envValue(login, "PATH")
+	var out []image.AgentSource
+	for _, a := range agents.Table {
+		if a.Kind == "shell" {
+			continue
+		}
+		binName, binPath := findInstalledAgent(a, pathEnv, home)
+		if binPath == "" {
+			continue
+		}
+		dirs := make([]string, 0, len(a.InstallDirs))
+		for _, d := range a.InstallDirs {
+			if d == "" {
+				continue
+			}
+			if filepath.IsAbs(d) {
+				dirs = append(dirs, d)
+			} else if home != "" {
+				dirs = append(dirs, filepath.Join(home, d))
+			}
+		}
+		out = append(out, image.AgentSource{
+			Kind:        a.Kind,
+			BinaryName:  binName,
+			BinaryPath:  binPath,
+			InstallDirs: dirs,
+		})
+	}
+	return out
+}
+
+func findInstalledAgent(a agents.Agent, pathEnv, home string) (binName, binPath string) {
+	for _, b := range a.Binaries {
+		if strings.HasPrefix(b, "$") {
+			continue
+		}
+		if p, err := lookPath(b, pathEnv); err == nil {
+			return b, p
+		}
+	}
+	if a.Setup != nil {
+		for _, p := range a.Setup.Paths {
+			full := agents.HomePath(p, home)
+			if st, err := os.Stat(full); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
+				return filepath.Base(full), full
+			}
+		}
+	}
+	return "", ""
 }

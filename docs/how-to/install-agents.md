@@ -94,3 +94,12 @@ Agents:
 Sessions find agents through your login shell, the way `ssh my-server` does. An agent the installer put in a folder that is not on `PATH` there, such as `~/.local/bin` on some systems, is installed but cannot start: add the folder to `PATH` in `~/.profile` on the host.
 
 The host decides "logged in" from the agent's own signs, kept as data in the agent table: a variable such as `ANTHROPIC_API_KEY` set in the login shell, the agent's own status command (`claude auth status`, `codex login status`), or its credentials file. It reads no file's content and shows no command's output.
+
+## Agents in microvm sandboxes
+
+Microvm sandboxes get every agent installed on the host from one read-only disk image mounted at `/opt/agents`, with `/opt/agents/bin` first on `PATH`.
+
+- **When the disk updates:** `agents install` and guided `setup` rebuild the disk when an install finishes. Before a microvm starts, the host also checks whether installed agents changed and rebuilds the disk when needed.
+- **Format:** when `mkfs.erofs` (`erofs-utils`) is installed on the host, the helper writes an EROFS image (`images/agents/<sha256>.erofs`). When `mkfs.erofs` is absent, it writes an ext4 image (`images/agents/<sha256>.img`) in Go with no extra tool needed.
+- **No self-updates inside a sandbox:** `/opt/agents` is mounted read-only (`EROFS` on any write), walled sessions disable agent self-updaters (`DISABLE_AUTOUPDATER=1` for Claude Code and `NO_UPDATE_NOTIFIER=1` for Codex), and updater hosts such as `downloads.claude.ai` stay blocked by default. To update an agent, run `simstim agents install <agent> <host> --reinstall` on the host; running sandboxes keep their current disk until their next start.
+- **Cleanup:** `prune` keeps the newest agents disk and any disk still named in a non-deleted session's manifest, and deletes older ones.

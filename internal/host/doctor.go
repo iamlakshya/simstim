@@ -92,6 +92,7 @@ func Doctor() HostInfo {
 		Detail: map[bool]string{true: "xterm-ghostty is installed", false: "xterm-ghostty is missing; sessions fall back to xterm-256color"}[gt],
 		Fix:    "infocmp -x xterm-ghostty | ssh <host> tic -x -"})
 	info.Checks = append(info.Checks, Check{Name: "runtime folder", OK: true, Detail: paths.RuntimeDir()})
+	info.Checks = append(info.Checks, AgentsDiskCheck()...)
 	info.Checks = append(info.Checks, IdleDoctor()...)
 	info.Walls = wall.ToAPIProbes(wall.ProbeAll(context.Background()))
 	return info

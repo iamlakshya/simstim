@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
 
@@ -188,5 +191,60 @@ func TestInstallableAgentsHaveALoginCommand(t *testing.T) {
 		if a.Setup.Login == "" && len(a.Setup.LoginEnv) == 0 {
 			t.Errorf("%s: say how to log in, or which variable holds its key", a.Kind)
 		}
+	}
+}
+
+func TestAfterInstallRebuildsAgentsDisk(t *testing.T) {
+	th := newTestHost(t)
+	t.Setenv("SHELL", "/bin/sh")
+	home := os.Getenv("HOME")
+	verDir := filepath.Join(home, ".local", "share", "claude", "versions")
+	localBin := filepath.Join(home, ".local", "bin")
+	for _, d := range []string{verDir, localBin} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	v1 := filepath.Join(verDir, "1.0")
+	if err := os.WriteFile(v1, []byte("#!/bin/sh\necho claude-v1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claudeLink := filepath.Join(localBin, "claude")
+	if err := os.Symlink(v1, claudeLink); err != nil {
+		t.Fatal(err)
+	}
+	a, ok := agents.Find("claude")
+	if !ok {
+		t.Fatal("claude missing")
+	}
+	if _, err := said(t, func() error { return afterInstall(t.Context(), th.ch, a, false) }); err != nil {
+		t.Fatalf("afterInstall 1: %v", err)
+	}
+	rec1, err := host.ImageStore().LatestAgentsDisk()
+	if err != nil {
+		t.Fatalf("LatestAgentsDisk after install 1: %v", err)
+	}
+	if rec1.Digest == "" {
+		t.Fatalf("empty digest after install 1: %+v", rec1)
+	}
+
+	// Simulate reinstalling a newer version of claude on the host.
+	v2 := filepath.Join(verDir, "2.0")
+	if err := os.WriteFile(v2, []byte("#!/bin/sh\necho claude-v2\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(claudeLink)
+	if err := os.Symlink(v2, claudeLink); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := said(t, func() error { return afterInstall(t.Context(), th.ch, a, false) }); err != nil {
+		t.Fatalf("afterInstall 2: %v", err)
+	}
+	rec2, err := host.ImageStore().LatestAgentsDisk()
+	if err != nil {
+		t.Fatalf("LatestAgentsDisk after install 2: %v", err)
+	}
+	if rec2.Digest == rec1.Digest {
+		t.Fatalf("expected new agents disk digest after reinstall, still %s", rec1.Digest)
 	}
 }

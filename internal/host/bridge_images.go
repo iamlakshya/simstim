@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
 
-	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/image"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -41,6 +38,9 @@ func (b *bridge) handleImages(req proto.Request) bool {
 		b.reply(req.ID, rec, imageProtoError(err))
 	case "image.agents":
 		rec, err := BuildAgentsDisk(context.Background())
+		b.reply(req.ID, rec, imageProtoError(err))
+	case "image.agents.ensure":
+		rec, _, err := EnsureAgentsDisk(context.Background())
 		b.reply(req.ID, rec, imageProtoError(err))
 	default:
 		return false
@@ -99,11 +99,12 @@ func RemoveImage(digest string) (api.ImageRecord, error) {
 	return rec, imageProtoError(err)
 }
 
-// BuildAgentsDisk builds the read-only EROFS agents disk from the agents
+// BuildAgentsDisk builds the read-only agents disk (EROFS via mkfs.erofs, or
+// pure-Go ext4 via tar2ext4 when erofs-utils is absent) from the agents
 // currently installed on this host.
 func BuildAgentsDisk(ctx context.Context) (api.AgentsDiskRecord, error) {
-	sources := installedAgentSources(ctx)
-	rec, err := ImageStore().BuildAgentsDisk(ctx, sources, image.AgentsDiskOptions{})
+	sources := InstalledAgentSources(ctx)
+	rec, err := ImageStore().BuildAgentsDisk(ctx, sources, hostAgentsDiskOptions())
 	return rec, imageProtoError(err)
 }
 
@@ -175,62 +176,4 @@ func sameDigest(a, b string) bool {
 	na := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(a), "sha256:"))
 	nb := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(b), "sha256:"))
 	return na != "" && na == nb
-}
-
-func installedAgentSources(ctx context.Context) []image.AgentSource {
-	login, err := LoginEnvContext(ctx, 15*time.Second)
-	if err != nil {
-		login = os.Environ()
-	}
-	home, _ := os.UserHomeDir()
-	pathEnv := envValue(login, "PATH")
-
-	var out []image.AgentSource
-	for _, a := range agents.Table {
-		if a.Kind == "shell" {
-			continue
-		}
-		binName, binPath := findInstalledAgent(a, pathEnv, home)
-		if binPath == "" {
-			continue
-		}
-		dirs := make([]string, 0, len(a.InstallDirs))
-		for _, d := range a.InstallDirs {
-			if d == "" {
-				continue
-			}
-			if filepath.IsAbs(d) {
-				dirs = append(dirs, d)
-			} else if home != "" {
-				dirs = append(dirs, filepath.Join(home, d))
-			}
-		}
-		out = append(out, image.AgentSource{
-			Kind:        a.Kind,
-			BinaryName:  binName,
-			BinaryPath:  binPath,
-			InstallDirs: dirs,
-		})
-	}
-	return out
-}
-
-func findInstalledAgent(a agents.Agent, pathEnv, home string) (binName, binPath string) {
-	for _, b := range a.Binaries {
-		if strings.HasPrefix(b, "$") {
-			continue
-		}
-		if p, err := lookPath(b, pathEnv); err == nil {
-			return b, p
-		}
-	}
-	if a.Setup != nil {
-		for _, p := range a.Setup.Paths {
-			full := agents.HomePath(p, home)
-			if st, err := os.Stat(full); err == nil && !st.IsDir() && st.Mode()&0o111 != 0 {
-				return filepath.Base(full), full
-			}
-		}
-	}
-	return "", ""
 }

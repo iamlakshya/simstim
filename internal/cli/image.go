@@ -206,13 +206,13 @@ func formatImageSize(n int64) string {
 }
 
 // rebuildAgentsDisk best-effort updates the host's read-only agents disk after
-// an agent install. Hosts without mkfs.erofs (for example hosts that only run
-// unwalled sessions) skip silently.
+// an agent install. It uses its own generous deadline because packaging large
+// standalone agent installs can take longer than an ordinary metadata check.
 func rebuildAgentsDisk(ctx context.Context, conn *client.Conn) {
 	if !conn.HasFeature("images") {
 		return
 	}
-	// Best-effort: hosts without erofs-utils or microvm support do not fail an
-	// agent install.
-	_, _ = conn.BuildAgentsDisk(ctx)
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	_, _ = conn.BuildAgentsDisk(rctx)
 }

@@ -28,11 +28,13 @@ type ImageRemoveArgs struct {
 	Digest string `json:"digest"`
 }
 
-// AgentsDiskRecord describes the host's read-only agents EROFS disk.
+// AgentsDiskRecord describes the host's read-only agents disk (EROFS or ext4).
 type AgentsDiskRecord struct {
-	Digest  string    `json:"digest"`
-	Path    string    `json:"path"`
-	Size    int64     `json:"size"`
-	Agents  []string  `json:"agents"`
-	BuiltAt time.Time `json:"built_at"`
+	Digest       string    `json:"digest"`
+	Path         string    `json:"path"`
+	Format       string    `json:"format,omitempty"`
+	SourceDigest string    `json:"source_digest,omitempty"`
+	Size         int64     `json:"size"`
+	Agents       []string  `json:"agents"`
+	BuiltAt      time.Time `json:"built_at"`
 }

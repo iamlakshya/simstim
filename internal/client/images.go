@@ -61,13 +61,24 @@ func (c *Conn) RemoveImage(ctx context.Context, digest string) (api.ImageRecord,
 	return out, err
 }
 
-// BuildAgentsDisk asks the host to rebuild its read-only agents EROFS disk.
+// BuildAgentsDisk asks the host to rebuild its read-only agents disk.
 func (c *Conn) BuildAgentsDisk(ctx context.Context) (api.AgentsDiskRecord, error) {
 	if err := c.needImages(); err != nil {
 		return api.AgentsDiskRecord{}, err
 	}
 	var out api.AgentsDiskRecord
 	err := c.Call(ctx, "image.agents", nil, &out)
+	return out, err
+}
+
+// EnsureAgentsDisk asks the host to reuse or rebuild its read-only agents disk
+// so it matches the agents currently installed on the host.
+func (c *Conn) EnsureAgentsDisk(ctx context.Context) (api.AgentsDiskRecord, error) {
+	if err := c.needImages(); err != nil {
+		return api.AgentsDiskRecord{}, err
+	}
+	var out api.AgentsDiskRecord
+	err := c.Call(ctx, "image.agents.ensure", nil, &out)
 	return out, err
 }
 

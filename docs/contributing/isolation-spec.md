@@ -5102,15 +5102,15 @@ ro quiet root=/dev/dm-0 rootfstype=erofs init=/init dm-mod.waitfor=/dev/vda,/dev
 
 **Behaviour.** A microvm guest gets the host's installed agents read-only, from one disk at `/opt/agents`. The host builds it, so it is outside guarantee G11. The guest only reads it, so its content cannot harm the trusted side.
 
-1. **When.** The helper rebuilds the disk after `agents install` ends (when `mkfs.erofs` is installed) and on demand via `image.agents`, without maintaining a separate inode and change-time source digest (decision [0053](decisions/0053-rebuild-with-open-source-parts.md)).
-2. **What.** For each agent of the agent table that the host has installed: each folder of its `InstallDirs`, and its resolved binary (`internal/agents`).
+1. **When.** The helper rebuilds the disk after `agents install` and guided `setup` installs end, and checks before a microvm start (`EnsureAgentsDisk` / `image.agents.ensure`), reusing `latest.json` when its `source_digest` matches the installed agents and rebuilding when any agent was added, updated, replaced or removed.
+2. **What.** For each agent of the agent table that the host has installed: each folder of its `InstallDirs` (such as `.local/share/claude`, `.codex/packages`, `.opencode`), and its resolved binary (`internal/agents`).
 3. **Read.** The helper reads each folder with `os.Root`, so no symlink leads outside it. Symlinks stay as symlinks.
 4. **Tar.** It writes one deterministic PAX tar stream. Each entry's name is `root/<host path>`, without the leading `/`. Entries come in byte order, and every folder before its children. `bin/<binary name>` is a symlink to `../root/<resolved path>`. `<resolved path>` is the binary's host path after `filepath.EvalSymlinks`, so a binary on the `PATH` that is itself a symlink still works.
-5. **Owner and conversion.** The helper pipes the tar stream directly into `mkfs.erofs --tar=f --force-uid=1000 --force-gid=1000 -U clear -T 0 --mkfs-time --preserve-mtime --quiet`, so every entry belongs to uid and gid 1000 (the guest's `agent`), keeps its mode and modification time, and builds deterministically into a read-only EROFS image. The file goes to `images/agents/<hex>.erofs`, 0444, where `<hex>` is the file's SHA-256, and `images/agents/latest.json` records the newest disk.
-6. **Boot.** The VMM gets the disk with `readonly=on` (20.3). The guest init mounts it at `/opt/agents` with `ro,nodev,nosuid`, and puts `/opt/agents/bin` first in the agent's `PATH` (P3.4).
+5. **Owner and conversion.** When `mkfs.erofs` is present, the helper pipes the tar stream directly into `mkfs.erofs --tar=f --force-uid=1000 --force-gid=1000 -U clear -T 0 --mkfs-time --preserve-mtime --quiet`, writing `images/agents/<hex>.erofs` (mode `0444`). On hosts without `erofs-utils`, it converts the same uid/gid-1000 tar stream in pure Go via `hcsshim`'s `tar2ext4.Convert` with no verity tree, writing `images/agents/<hex>.img` (mode `0444`). `images/agents/latest.json` records the newest disk's digest, path, format, `source_digest`, size and agents.
+6. **Boot.** The VMM gets the disk with `readonly=on` (20.3). The guest init mounts it at `/opt/agents` with `ro,nodev,nosuid` (trying `erofs` then `ext4`), and puts `/opt/agents/bin` first in the agent's `PATH` (P3.4).
 7. **Record.** The trusted manifest records the disk's digest in `agents` (10.7). A running sandbox keeps its disk until its next start.
 
-Agents cannot update themselves: their files are on a read-only disk ([question 21](#15-open-questions)). `agents install` on the host updates them, and the next start gets the new disk.
+Agents cannot update themselves: their files are on a read-only disk ([question 21](#15-open-questions)), walled sessions set each agent's `SandboxEnv` no-update variables (`DISABLE_AUTOUPDATER=1` for Claude Code, `NO_UPDATE_NOTIFIER=1` for Codex), and updater hosts such as `downloads.claude.ai` stay out of built-in egress allowlists. `agents install` on the host updates them, and the next start gets the new disk.
 
 **Caps.** 4 GiB for the disk, and 500,000 entries. Past either, the build stops with `agents_disk`.
 

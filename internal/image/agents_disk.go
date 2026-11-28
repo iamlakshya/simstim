@@ -35,11 +35,13 @@ type AgentSource struct {
 	InstallDirs []string
 }
 
-// AgentsDiskOptions configures BuildAgentsDisk. Zero fields use defaults.
+// AgentsDiskOptions configures BuildAgentsDisk and EnsureAgentsDisk. Zero
+// fields use defaults.
 type AgentsDiskOptions struct {
-	MkfsErofs  string // path to mkfs.erofs; defaults to exec.LookPath("mkfs.erofs")
-	MaxBytes   int64
-	MaxEntries int
+	MkfsErofs         string // path to mkfs.erofs; defaults to LookPath("mkfs.erofs")
+	AllowExt4Fallback bool   // when true and mkfs.erofs is absent, fall back to hcsshim tar2ext4 (.img)
+	MaxBytes          int64
+	MaxEntries        int
 }
 
 // AgentsDir returns the agents-disk directory inside the store.
@@ -47,50 +49,48 @@ func (s *Store) AgentsDir() string { return filepath.Join(s.Dir, "agents") }
 
 // BuildAgentsDisk streams the host's installed agents as one deterministic tar
 // archive directly into `mkfs.erofs --tar=f --force-uid=1000 --force-gid=1000`
-// and stores the resulting read-only EROFS image at
-// `<store>/agents/<sha256>.erofs` (reuse.md part A, spec 20.4).
+// (or pure-Go hcsshim tar2ext4 when opts.AllowExt4Fallback is enabled and
+// mkfs.erofs is absent) and stores the resulting read-only image at
+// `<store>/agents/<sha256>.{erofs,img}` (reuse.md part A, spec 20.4).
 func (s *Store) BuildAgentsDisk(ctx context.Context, sources []AgentSource, opts AgentsDiskOptions) (api.AgentsDiskRecord, error) {
-	mkfsBin := opts.MkfsErofs
-	if mkfsBin == "" {
-		var err error
-		mkfsBin, err = exec.LookPath("mkfs.erofs")
-		if err != nil {
-			return api.AgentsDiskRecord{}, agentsDiskError(
-				"mkfs.erofs is not installed on this host",
-				"Install erofs-utils (for example, `sudo apt-get install erofs-utils`).",
-				err,
-			)
-		}
-	}
-
-	maxBytes := opts.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = MaxAgentsDiskBytes
-	}
-	maxEntries := opts.MaxEntries
-	if maxEntries <= 0 {
-		maxEntries = MaxAgentsDiskEntries
-	}
-
+	maxBytes, maxEntries := agentsDiskCaps(opts)
 	plan, agentKinds, err := collectAgentsPlan(sources, maxBytes, maxEntries)
 	if err != nil {
 		return api.AgentsDiskRecord{}, err
 	}
 	defer plan.close()
 
+	rec, _, err := s.buildAgentsDiskFromPlan(ctx, plan, agentKinds, plan.sourceDigest(), opts, false)
+	return rec, err
+}
+
+func (s *Store) buildAgentsDiskFromPlan(ctx context.Context, plan *agentsPlan, agentKinds []string, srcDigest string, opts AgentsDiskOptions, reuseIfCurrent bool) (api.AgentsDiskRecord, bool, error) {
+	mkfsBin, format, err := resolveAgentsBuilder(opts)
+	if err != nil {
+		return api.AgentsDiskRecord{}, false, err
+	}
+	maxBytes, _ := agentsDiskCaps(opts)
+
 	agentsDir := s.AgentsDir()
 	if err := os.MkdirAll(agentsDir, 0o700); err != nil {
-		return api.AgentsDiskRecord{}, fmt.Errorf("create agents disk folder: %w", err)
+		return api.AgentsDiskRecord{}, false, fmt.Errorf("create agents disk folder: %w", err)
 	}
 	unlock, err := lockFile(filepath.Join(agentsDir, "build.lock"), true)
 	if err != nil {
-		return api.AgentsDiskRecord{}, err
+		return api.AgentsDiskRecord{}, false, err
 	}
 	defer unlock()
 
-	tmpFile, err := os.CreateTemp(agentsDir, ".agents-*.erofs")
+	if reuseIfCurrent {
+		if latest, ok := s.reusableAgentsDisk(srcDigest, format); ok {
+			return latest, false, nil
+		}
+	}
+
+	ext := agentsDiskExt(format)
+	tmpFile, err := os.CreateTemp(agentsDir, ".agents-*"+ext)
 	if err != nil {
-		return api.AgentsDiskRecord{}, fmt.Errorf("create temporary agents disk: %w", err)
+		return api.AgentsDiskRecord{}, false, fmt.Errorf("create temporary agents disk: %w", err)
 	}
 	tmpPath := tmpFile.Name()
 	_ = tmpFile.Close()
@@ -101,47 +101,55 @@ func (s *Store) BuildAgentsDisk(ctx context.Context, sources []AgentSource, opts
 		}
 	}()
 
-	if err := runMkfsErofs(ctx, mkfsBin, tmpPath, plan); err != nil {
-		return api.AgentsDiskRecord{}, err
+	if format == AgentsFormatExt4 {
+		if err := runTar2Ext4(ctx, tmpPath, plan, maxBytes); err != nil {
+			return api.AgentsDiskRecord{}, false, err
+		}
+	} else {
+		if err := runMkfsErofs(ctx, mkfsBin, tmpPath, plan); err != nil {
+			return api.AgentsDiskRecord{}, false, err
+		}
 	}
 
 	hexDigest, size, err := hashFile(tmpPath)
 	if err != nil {
-		return api.AgentsDiskRecord{}, fmt.Errorf("hash agents disk: %w", err)
+		return api.AgentsDiskRecord{}, false, fmt.Errorf("hash agents disk: %w", err)
 	}
 	if size > maxBytes {
-		return api.AgentsDiskRecord{}, agentsDiskError(
+		return api.AgentsDiskRecord{}, false, agentsDiskError(
 			fmt.Sprintf("agents disk is %d bytes, over the %d byte limit", size, maxBytes),
 			"", nil,
 		)
 	}
 	//nolint:gosec // G302: read-only disk image, mode 0444 per spec 20.4
 	if err := os.Chmod(tmpPath, 0o444); err != nil {
-		return api.AgentsDiskRecord{}, fmt.Errorf("set agents disk mode: %w", err)
+		return api.AgentsDiskRecord{}, false, fmt.Errorf("set agents disk mode: %w", err)
 	}
 
-	finalPath := filepath.Join(agentsDir, hexDigest+".erofs")
+	finalPath := filepath.Join(agentsDir, hexDigest+ext)
 	if _, err := os.Stat(finalPath); err == nil {
 		_ = os.Remove(tmpPath)
 		cleanup = false
 	} else {
 		if err := os.Rename(tmpPath, finalPath); err != nil {
-			return api.AgentsDiskRecord{}, fmt.Errorf("install agents disk: %w", err)
+			return api.AgentsDiskRecord{}, false, fmt.Errorf("install agents disk: %w", err)
 		}
 		cleanup = false
 	}
 
 	rec := api.AgentsDiskRecord{
-		Digest:  "sha256:" + hexDigest,
-		Path:    finalPath,
-		Size:    size,
-		Agents:  agentKinds,
-		BuiltAt: s.now(),
+		Digest:       "sha256:" + hexDigest,
+		Path:         finalPath,
+		Format:       format,
+		SourceDigest: srcDigest,
+		Size:         size,
+		Agents:       agentKinds,
+		BuiltAt:      s.now(),
 	}
 	if err := writeJSONAtomic(filepath.Join(agentsDir, "latest.json"), rec); err != nil {
-		return api.AgentsDiskRecord{}, fmt.Errorf("save latest agents disk record: %w", err)
+		return api.AgentsDiskRecord{}, false, fmt.Errorf("save latest agents disk record: %w", err)
 	}
-	return rec, nil
+	return rec, true, nil
 }
 
 // LatestAgentsDisk returns the newest built agents disk record, if present.
@@ -188,8 +196,8 @@ func (s *Store) PruneAgentsDisks(keepHexes map[string]bool) ([]string, error) {
 		if e.IsDir() {
 			continue
 		}
-		hexName, ok := strings.CutSuffix(e.Name(), ".erofs")
-		if !ok || !isHex64(hexName) {
+		hexName, ok := cutAgentsDiskName(e.Name())
+		if !ok {
 			continue
 		}
 		if hexName == latestHex || keepHexes[hexName] {

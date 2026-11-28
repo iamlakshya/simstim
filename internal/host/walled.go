@@ -262,5 +262,10 @@ func walledEnv(a NewArgs, id, guestHome, resolvedBin string, agent agents.Agent,
 			}
 		}
 	}
+	for k, v := range agent.SandboxEnv {
+		if v != "" {
+			env = append(env, k+"="+v)
+		}
+	}
 	return env, term
 }
