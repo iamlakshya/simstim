@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 21 |
-| To do | 78 |
+| Done | 22 |
+| To do | 77 |
 | **All** | **99** |
 
 ## Current focus
@@ -98,7 +98,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P2.9 | 2 | Later | To do | A repository's own file |
 | P3.1 | 3 | Later | To do | The boot pair |
 | H9 | 3 | Later | To do | Runtime delivery and the host cache |
-| P3.2 | 3 | Later | To do | Images |
+| P3.2 | 3 | Later | Done | Images |
 | P3.3 | 3 | Later | To do | The Cloud Hypervisor driver |
 | P3.4 | 3 | Later | To do | The guest init on a microvm |
 | P3.5 | 3 | Later | To do | The agents disk |
