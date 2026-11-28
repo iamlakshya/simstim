@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -53,7 +54,7 @@ func pushTestImage(t *testing.T, srvURL, repoTag, content string) string {
 	cfg, _ := img.ConfigFile()
 	cfg = cfg.DeepCopy()
 	cfg.OS = "linux"
-	cfg.Architecture = "amd64"
+	cfg.Architecture = runtime.GOARCH
 	img, err = mutate.ConfigFile(img, cfg)
 	if err != nil {
 		t.Fatal(err)
