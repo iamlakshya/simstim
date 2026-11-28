@@ -21,6 +21,11 @@ licence and the files it appears in.
 - vt/: links libghostty-vt from Ghostty (https://github.com/ghostty-org/ghostty),
   Copyright Mitchell Hashimoto and contributors, licensed under the MIT License.
 
+- internal/jail/, internal/wall/process/: uses go-landlock
+  (https://github.com/landlock-lsm/go-landlock), licensed under the MIT License,
+  and go-seccomp-bpf (https://github.com/elastic/go-seccomp-bpf), licensed under
+  the Apache License, Version 2.0.
+
 The docs site (site/) ships these, unchanged or cut down by scripts/site-vendor.sh:
 - site/assets/vendor/three/: three.js 0.186.1 (https://threejs.org),
   Copyright 2010-2026 three.js authors, licensed under the MIT License.

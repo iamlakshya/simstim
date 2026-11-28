@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/jail"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
@@ -170,23 +171,31 @@ func (s *Sandbox) Start(ctx context.Context) (net.Conn, error) {
 		return nil, err
 	}
 
-	bin := cfg.VMMPath
-	args := vmmArgv
-	if s.opts.BwrapPath != "" {
-		bin = s.opts.BwrapPath
-		args = WrapBwrap(cfg, cfg.VMMPath, vmmArgv)
-	}
-
 	stderr := newTailBuffer(maxVMMStderrBytes)
-	cmd := exec.CommandContext(context.WithoutCancel(ctx), bin, args...)
+	var cmd *exec.Cmd
+	jailed := s.opts.BwrapPath != ""
+	if jailed {
+		js := VMMJailSpec(cfg, cfg.VMMPath, vmmArgv)
+		js.BwrapPath = s.opts.BwrapPath
+		cmd, err = jail.Command(context.WithoutCancel(ctx), js)
+		if err != nil {
+			return nil, fmt.Errorf("sandbox_boot: prepare VMM jail: %w", err)
+		}
+	} else {
+		cmd = exec.CommandContext(context.WithoutCancel(ctx), cfg.VMMPath, vmmArgv...)
+	}
 	cmd.Stderr = stderr
 	if cfg.SerialConsole {
 		cmd.Stdout = stderr
 	}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
-	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("sandbox_boot: start Cloud Hypervisor: %w. Try: run host doctor to check /dev/kvm and the VMM binary", err)
+	startErr := cmd.Start()
+	if jailed {
+		jail.CloseInternalFiles(cmd, 0)
+	}
+	if startErr != nil {
+		return nil, fmt.Errorf("sandbox_boot: start Cloud Hypervisor: %w. Try: run host doctor to check /dev/kvm and the VMM binary", startErr)
 	}
 
 	s.mu.Lock()

@@ -37,6 +37,7 @@ Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `cu
 | `holder <id>` (internal) | Owns one session's PTY, ring, socket, manifest and status | The session |
 | `supervise <id>` (internal) | Trusted supervisor of a walled session: owns the sandbox, the trusted manifest, the audit log, alerts, unit memory tracking and the session socket, and relays checked frames over `internal/link` | The session |
 | `wall-init` (internal) | Guest init inside a wall: speaks `internal/link` on fd 3, starts the holder in guest mode, relays `holder` streams byte-for-byte, accepts `put` uploads, sends heartbeats and reaps orphans as PID 1 | The sandbox |
+| `jail-exec` (internal) | Confinement trampoline for trusted-side jails (`internal/jail`): applies Landlock (`go-landlock`) and seccomp (`go-seccomp-bpf`) without calling `setgroups` when user namespaces are unavailable or when Landlock layers inside bubblewrap | Milliseconds (execs target) |
 | `simstim-vt` (internal) | The shadow terminal: a static Zig program on libghostty-vt (source in `vt/`). A child of the holder, fed every output byte; it makes snapshots for new clients and answers terminal queries while no client is attached. Restarted on a crash from the ring. | The session |
 | `attach <id>` | Raw fallback: bridges a plain `ssh -t` to one holder, for any SSH client | One attach |
 | `ls --json`, `watch --json` | Reads manifests and probes holders in parallel. `watch` streams status events as NDJSON. | Seconds, or one client |
@@ -92,6 +93,23 @@ A walled session splits the helper into a trusted side outside the wall and an u
 - **Holder guest mode:** reads its guest socket paths from the environment, skips systemd and host alert delivery, and reports status, agent alerts, agent session IDs, resizes and agent exit to guest init over fd 3. Its PTY, 8 MiB ring, shadow terminal, replay by offset and screen rules stay unchanged inside the wall.
 - **Byte-exact framing and claims:** on attached `holder` streams, the supervisor checks frame types and control-frame sizes and closes the connection on any disallowed type. It never parses or alters `TOutput` or `TSnapshot` payloads. Guest reports on `ctl` are size-capped, rate-limited, cleaned with `CleanText` and recorded as claims (`claimed: true`); the trusted side decides session exit, out-of-memory kills and memory warnings.
 - **Environment:** a walled session starts from a fixed base (`USER=agent`, `LOGNAME=agent`, `LANG=C.UTF-8`, a private `HOME`, terminal variables and a narrow `PATH`), never from the host's login environment. Only the test-only `plain` driver uses this path so far, so ordinary sessions do not change.
+
+### 2.6 Jails and how they differ from walls
+
+A **wall** (`internal/wall/*`) isolates an untrusted session: the agent, its shell, its terminal holder and guest init. Every walled session runs behind a wall with a supervisor outside it and an `internal/link` socket pair between them.
+
+A **jail** (`internal/jail`) confines a single trusted-side helper process that parses or serves untrusted data, such as a VMM (`cloud-hypervisor`), an image converter, host-side git or the egress process ([decision 0053](../contributing/decisions/0053-rebuild-with-open-source-parts.md)).
+
+| Aspect | Wall | Jail |
+| --- | --- | --- |
+| What runs inside | Guest init, holder, agent and any child shells | One trusted-side command (`vmm`, `converter`, `git` or `egress`) |
+| Lifetime and link | Whole session, joined to the supervisor by `internal/link` | One command invocation, returning a normal `*exec.Cmd` |
+| Filesystem | Fresh `/home/agent`, filtered `/etc`, workspace under `/work/` and kept caches | Only system runtime paths and the explicit files or folders the command needs; never `$HOME`, `$XDG_RUNTIME_DIR` or `/dev/vhost-*` |
+| Network | Always empty (or guest loopback proxy over `internal/link`) | `NetNone` (empty network namespace and `AF_INET`/`AF_INET6` blocked by seccomp) by default; `NetHost` for `egress` |
+| Mechanism on Linux | Process wall (bubblewrap + seccomp + Landlock), gVisor (`runsc`) or microVM (`cloud-hypervisor`) | Bubblewrap (`bwrap`) with a `go-seccomp-bpf` filter; falls back to `jail-exec` with `go-landlock` (ABI 3+) and `go-seccomp-bpf` when user namespaces are unavailable |
+| Groups | Maps uid/gid `1000` inside the wall | Never calls `setgroups`, so a `vmm` jail keeps host supplementary groups such as `kvm` |
+
+When unprivileged user namespaces are unavailable (for example on Ubuntu 23.10 or later before the root step), `jail.Userns()` reports `false` by probing a real tmpfs mount inside a user namespace rather than reading a sysctl. `jail.Command` then confines the command through `simstim-host jail-exec` using `PR_SET_NO_NEW_PRIVS`, `PR_SET_DUMPABLE=0`, Landlock and seccomp, and refuses the jail if the kernel's Landlock ABI is below 3.
 
 ## 3. Flows
 

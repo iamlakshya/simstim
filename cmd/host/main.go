@@ -19,6 +19,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/jail"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -77,6 +78,8 @@ var commands = map[string]func(args []string) error{
 	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
 	// The egress process for one walled session, attached to fd 3.
 	"egress": runEgress,
+	// Internal confinement trampoline for trusted-side jails (spec 5.6).
+	jail.ExecSubcommand: jail.RunExec,
 	// SFTP, exec/shell, loopback port dial and bundle pull for the client's
 	// files and editors path (spec 6.10, 17.7, 21.1). Not for people.
 	"sftp":        runSFTP,

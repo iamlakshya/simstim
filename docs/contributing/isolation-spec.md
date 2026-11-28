@@ -718,47 +718,52 @@ func Private(target string) bool
 
 ### 5.6 `internal/jail`
 
+Updated by [0053](decisions/0053-rebuild-with-open-source-parts.md): jails wrap `bubblewrap` (`bwrap`) with `go-seccomp-bpf` and fall back to `go-landlock` + `go-seccomp-bpf` through `simstim-host jail-exec` when user namespaces are unavailable. There is no custom C launcher, no `Subuid` option (server images lack `uidmap`), and no custody, purge or VMM exec-proof layer (spec 3.4, N5).
+
 ```go
 // Package jail confines a trusted-side process that handles untrusted
-// input: the VMM, the image converter, host-side git.
+// input: the VMM, the image converter, host-side git and the egress process.
 package jail
 
 // Spec says how to confine one command.
 type Spec struct {
-    Argv    []string
-    Env     []string
-    Subuid  bool       // run as a subuid when /etc/subuid gives a range and newuidmap exists
-    Net     NetMode    // NetNone: an empty network namespace. NetHost: the host's.
-    Binds   []Bind     // the only paths in the new mount namespace
-    Rules   []PathRule // Landlock rules, at the best ABI the kernel has
-    Seccomp Profile    // "vmm", "converter", "git", "egress"
-    Files   []*os.File // inherited from fd 3
+    Argv       []string   // command and arguments to run
+    Env        []string   // explicit allowlisted environment; host env is cleared
+    Dir        string     // optional working directory inside the jail
+    Net        NetMode    // NetNone: empty network namespace + seccomp. NetHost: host network.
+    Binds      []Bind     // the only non-system paths visible in the jail
+    Rules      []PathRule // optional extra Landlock rules
+    Seccomp    Profile    // "vmm", "converter", "git", "egress"
+    Files      []*os.File // inherited from fd 3
+    BwrapPath  string     // optional bubblewrap path override
+    ExecHelper string     // optional helper binary serving jail-exec
 }
 
 // Command returns a command that starts argv inside the jail. Every jail
-// also sets no_new_privs, and drops all capabilities before it runs argv.
+// sets no_new_privs, drops all capabilities before it runs argv, and never
+// calls setgroups (so a vmm jail keeps supplementary groups such as kvm).
 // execve sets the dumpable flag to 1 again, so a program of the helper,
 // such as egress, sets PR_SET_DUMPABLE to 0 itself before it reads fd 3.
 func Command(ctx context.Context, s Spec) (*exec.Cmd, error)
 
-// Userns says whether jails on this host get a user namespace: directly,
-// or through the namespace launcher (14.4.2).
+// Userns says whether jails on this host get a user namespace through
+// bubblewrap, probed by creating a user namespace and mounting a tmpfs in it
+// rather than reading a sysctl.
 func Userns() bool
 ```
 
-Libraries: `github.com/landlock-lsm/go-landlock` (MIT) and `github.com/elastic/go-seccomp-bpf` (Apache-2.0), with attribution in `NOTICE`. A jail that has a user namespace never shows `$XDG_RUNTIME_DIR` (the systemd user bus, other sessions' sockets, the SSH agent), `/dev/vhost-*` or the user's home.
+Libraries: `github.com/landlock-lsm/go-landlock` (MIT) and `github.com/elastic/go-seccomp-bpf` (Apache-2.0), with attribution in `NOTICE`. A jail refuses to expose `/`, the host's `$HOME`, `$XDG_RUNTIME_DIR` (the systemd user bus, other sessions' sockets, the SSH agent) or `/dev/vhost-*`.
 
-**User namespaces.** Every jail uses `Binds`. The `vmm`, `converter` and `git` jails also use `NetNone`, and `Subuid` where it is possible. These three features need a user namespace. On Ubuntu 23.10 or later, a jail gets one only through the namespace launcher of the root step (14.4.2). The launcher serves jails as it serves process walls. Without one, `Command` still sets `no_new_privs`, Landlock and seccomp, and `Userns` reports false. It then needs Landlock ABI 3 (Linux 6.2) or later, because older ABIs cannot refuse `truncate`. On an older kernel, `Command` refuses the jail and says why. Landlock alone still stops the jail from tracing the supervisor or reading its memory ([build facts](../research/build-facts.md#4-linux-walls)).
+**User namespaces.** Every jail uses `Binds` and a host-ABI-guarded seccomp filter that denies `ptrace`, `process_vm_readv`/`process_vm_writev`, nested namespaces, mounts and dangerous kernel surfaces (`io_uring`, `bpf`, `keyctl`, `userfaultfd`, modules). The `vmm`, `converter` and `git` jails default to `NetNone` (`--unshare-net` plus seccomp refusing non-`AF_UNIX` sockets including `AF_INET` and `AF_INET6`); `vmm` and `converter` refuse `NetHost`. On Ubuntu 23.10 or later, a jail gets a user namespace through `/usr/bin/bwrap` under Ubuntu's `bwrap-userns-restrict` profile (14.4.2). Without a working user namespace, `Command` falls back to `simstim-host jail-exec`, which sets `PR_SET_NO_NEW_PRIVS`, `PR_SET_DUMPABLE=0`, Landlock and seccomp before `execve`, and `Userns` reports `false`. That fallback requires Landlock ABI 3 (Linux 6.2) or later, because older ABIs cannot refuse `truncate`. On an older kernel without user namespaces, `Command` refuses the jail and returns a `Try:` hint. Landlock alone still stops the jail from tracing the supervisor or reading `/proc/<supervisor>/mem` ([build facts](../research/build-facts.md#4-linux-walls)).
 
 | Feature | Without a user namespace |
 | --- | --- |
-| `Binds` | Landlock refuses every other path, but the paths stay visible. |
-| `NetNone` | seccomp refuses `socket` with `AF_INET` and `AF_INET6`. |
-| `Subuid` | None: the command runs as the login user. |
+| `Binds` | Landlock refuses every other path, but the paths stay visible; remapped destinations (`Dest != Src`) are refused. |
+| `NetNone` | seccomp refuses non-`AF_UNIX` `socket` calls (including `AF_INET` and `AF_INET6`), and Landlock ABI 4+ also restricts TCP. |
 | Hiding `$XDG_RUNTIME_DIR` | Landlock controls `connect` to a Unix socket path only from ABI 9 (Linux 7.1). |
-| Hiding the host's abstract Unix sockets | Landlock scopes them only from ABI 6 (Linux 6.12). |
+| Hiding the host's abstract Unix sockets | Landlock scopes them from ABI 6 (Linux 6.12). |
 
-So on Linux 6.8 (Ubuntu 24.04, Landlock ABI 4), such a jail can still connect to the systemd user bus. It can also reach the SSH agent's socket and the host's abstract sockets. The sandbox probe's `userns` is false there, and `host show` names this gap, with the hint `simstim host prepare <host>`. The `egress` jail uses `NetHost`, so only `Binds` and `Subuid` change for it.
+So on Linux 6.8 (Ubuntu 24.04, Landlock ABI 4), a no-userns jail can still reach the user's systemd bus, the SSH agent's socket and abstract sockets. The sandbox probe's `userns` is `false` there, and `host doctor` prints the one-time bubblewrap/AppArmor `sudo` step. The `egress` jail uses `NetHost`, mounting minimal DNS and TLS root files read-only.
 
 ## 6. Flows
 

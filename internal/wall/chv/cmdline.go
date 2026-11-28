@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/iamlakshya/simstim/internal/jail"
 )
 
 // ZeroSaltHex is the 32-zero-byte dm-verity salt shared by the tools image and
@@ -234,62 +236,49 @@ func onOff(v bool) string {
 	return "off"
 }
 
-// WrapBwrap wraps vmmBin and vmmArgv in a minimal bubblewrap confinement shell
-// (empty network namespace, private IPC/UTS/PID namespaces, read-only mounts
-// for artefacts, writable mounts only for the session and socket directories,
-// plus /dev/kvm, /dev/urandom and /dev/null).
-func WrapBwrap(cfg VMConfig, vmmBin string, vmmArgv []string) []string {
-	args := make([]string, 0, 48+len(vmmArgv))
-	args = append(args,
-		"--unshare-net",
-		"--unshare-ipc",
-		"--unshare-uts",
-		"--unshare-pid",
-		"--die-with-parent",
-		"--new-session",
-		"--proc", "/proc",
-		"--tmpfs", "/tmp",
-		"--dev", "/dev",
-		"--dev-bind", "/dev/kvm", "/dev/kvm",
-		"--dev-bind", "/dev/urandom", "/dev/urandom",
-	)
-
-	seenRO := map[string]bool{}
-	bindRO := func(p string) {
-		if p == "" || seenRO[p] {
-			return
+// VMMJailSpec builds the internal/jail.Spec that confines Cloud Hypervisor
+// with no network, /dev/kvm, read-only boot artefacts and read-write socket
+// and session directories (isolation spec 5.6 and 20.3).
+func VMMJailSpec(cfg VMConfig, vmmBin string, vmmArgv []string) jail.Spec {
+	roPaths := make([]string, 0, 5)
+	addRO := func(p string) {
+		if p != "" {
+			roPaths = append(roPaths, p)
 		}
-		seenRO[p] = true
-		args = append(args, "--ro-bind", p, p)
 	}
-	bindRO(vmmBin)
-	bindRO(cfg.KernelPath)
-	bindRO(cfg.Tools.Path)
+	addRO(vmmBin)
+	addRO(cfg.KernelPath)
+	addRO(cfg.Tools.Path)
 	if cfg.Image != nil {
-		bindRO(cfg.Image.Path)
+		addRO(cfg.Image.Path)
 	}
-	bindRO(cfg.AgentsDiskPath)
+	addRO(cfg.AgentsDiskPath)
 
-	seenRW := map[string]bool{}
-	bindRWDir := func(p string) {
-		if p == "" {
-			return
+	rwDirs := make([]string, 0, 3)
+	addRWDir := func(p string) {
+		if p != "" {
+			rwDirs = append(rwDirs, filepath.Dir(p))
 		}
-		d := filepath.Dir(p)
-		if seenRW[d] {
-			return
-		}
-		seenRW[d] = true
-		args = append(args, "--bind", d, d)
 	}
-	bindRWDir(cfg.APISocket)
-	bindRWDir(cfg.VsockSocket)
-	if cfg.SessionDiskPath != "" {
-		bindRWDir(cfg.SessionDiskPath)
-	}
+	addRWDir(cfg.APISocket)
+	addRWDir(cfg.VsockSocket)
+	addRWDir(cfg.SessionDiskPath)
 
-	args = append(args, "--", vmmBin)
-	args = append(args, vmmArgv...)
+	argv := make([]string, 0, 1+len(vmmArgv))
+	argv = append(argv, vmmBin)
+	argv = append(argv, vmmArgv...)
+	return jail.VMMSpec(argv, roPaths, rwDirs)
+}
+
+// WrapBwrap wraps vmmBin and vmmArgv in bubblewrap confinement arguments built
+// by internal/jail (empty network namespace, private IPC/UTS/PID/user
+// namespaces, --cap-drop ALL, --clearenv, read-only boot artefacts, writable
+// socket and session directories, and /dev/kvm).
+func WrapBwrap(cfg VMConfig, vmmBin string, vmmArgv []string) []string {
+	args, err := jail.BuildBwrapArgs(VMMJailSpec(cfg, vmmBin, vmmArgv))
+	if err != nil {
+		return nil
+	}
 	return args
 }
 
