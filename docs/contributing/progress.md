@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 47 |
-| To do | 52 |
+| Done | 49 |
+| To do | 50 |
 | **All** | **99** |
 
 ## Current focus
@@ -101,8 +101,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | H9 | 3 | Later | Done | Runtime delivery and the host cache |
 | P3.2 | 3 | Later | Done | Images |
 | P3.3 | 3 | Later | Done | The Cloud Hypervisor driver |
-| P3.4 | 3 | Later | To do | The guest init on a microvm |
-| P3.5 | 3 | Later | To do | The agents disk |
+| P3.4 | 3 | Later | Done | The guest init on a microvm |
+| P3.5 | 3 | Later | Done | The agents disk |
 | P3.6 | 3 | Later | To do | Lifecycle on a microvm |
 | P3.7 | 3 | Later | To do | The microvm probe, the kernel list and Lima |
 | P3.8 | 3 | Later | To do | Conformance, measurements and release |
