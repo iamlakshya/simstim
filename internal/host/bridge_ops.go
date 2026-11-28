@@ -13,7 +13,7 @@ import (
 // of a session whose agent ended (resume.go), stopping a session while
 // keeping its state (stop.go), SFTP/SSH-exec/bundle-pull/seed file transfers,
 // and port grants for walled sessions (bridge_ports.go).
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle, api.FeatureSeed, "port.grant"}
+var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle, api.FeatureSeed, api.FeaturePulled, "port.grant"}
 
 func init() { Features = append(Features, moreFeatures...) }
 
@@ -66,6 +66,18 @@ func (b *bridge) handleMore(req proto.Request) bool {
 		}
 		err := ApplyCopyIn(a)
 		b.reply(req.ID, map[string]bool{"ok": true}, err)
+	case api.FeaturePulled:
+		var a api.PulledArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the pulled request is not valid JSON", "Update the client."))
+			return true
+		}
+		err := RecordPulled(a)
+		if err != nil {
+			b.reply(req.ID, nil, err)
+			return true
+		}
+		b.reply(req.ID, map[string]bool{"ok": true}, nil)
 	default:
 		return false
 	}

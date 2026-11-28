@@ -19,6 +19,17 @@ const lockFile = "op.lock"
 // session is busy.
 const renameWait = 5 * time.Second
 
+// LockSession takes the exclusive per-session operation lock without waiting.
+func LockSession(id string) (unlock func(), err error) {
+	return lockSession(id)
+}
+
+// LockSessionWait takes the exclusive per-session operation lock, waiting up
+// to d if another operation holds it.
+func LockSessionWait(id string, d time.Duration) (unlock func(), err error) {
+	return lockSessionWait(id, d)
+}
+
 // lockSession takes the lock of session id, so that a resume, a restore,
 // a rename and a delete of the same session never run at once. Each would
 // stop or start the session's holder, or change what a delete checks. The

@@ -175,6 +175,9 @@ func TestPullBundleQuarantineReviewAndFallback(t *testing.T) {
 	if !errors.As(err, &ue) || ue.Code != "pull_flagged" {
 		t.Fatalf("flagged pull = %v, want pull_flagged", err)
 	}
+	if !strings.Contains(ue.Hint, "git diff ") || !strings.Contains(ue.Hint, "pull box/abcd2345 --allow-flagged") {
+		t.Errorf("pull_flagged hint = %q, want git diff and --allow-flagged command", ue.Hint)
+	}
 	// Branch did not move yet.
 	if msg := gitc(local, "log", "-1", "--format=%s", "feature"); msg != "clean work" {
 		t.Errorf("feature moved despite flag refusal: %q", msg)
@@ -185,6 +188,27 @@ func TestPullBundleQuarantineReviewAndFallback(t *testing.T) {
 	}
 	if msg := gitc(local, "log", "-1", "--format=%s", "feature"); msg != "add workflow" {
 		t.Errorf("feature after AllowFlagged = %q", msg)
+	}
+
+	// Secret value in added lines triggers pull_flagged without leaking the secret.
+	const secretVal = "sk-live-secret-1234567890"
+	if err := os.WriteFile(filepath.Join(remote, "secret.txt"), []byte("val="+secretVal+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitc(remote, "add", "secret.txt")
+	gitc(remote, "commit", "-q", "-m", "leak secret")
+	_, err = PullBundleOn(context.Background(), tr, h, s, PullBundleOptions{
+		LocalRepo: local,
+		Secrets:   map[string]string{"MY_SECRET": secretVal},
+	})
+	if !errors.As(err, &ue) || ue.Code != "pull_flagged" {
+		t.Fatalf("secret leak pull = %v, want pull_flagged", err)
+	}
+	if strings.Contains(ue.Msg, secretVal) || strings.Contains(ue.Hint, secretVal) {
+		t.Fatalf("pull error leaked secret value: msg=%q hint=%q", ue.Msg, ue.Hint)
+	}
+	if !strings.Contains(ue.Msg, "MY_SECRET") {
+		t.Errorf("pull error should name secret key MY_SECRET, got %q", ue.Msg)
 	}
 
 	// .gitmodules with CR is hard-blocked even with AllowFlagged.
@@ -286,5 +310,20 @@ func TestPullBundleValidatesRemoteBranchAndFullRetryEdgeCases(t *testing.T) {
 	}}
 	if _, err := PullBundleOn(context.Background(), stNil, h, s, PullBundleOptions{LocalRepo: local}); !errors.As(err, &ue) || ue.Code != "protocol" {
 		t.Fatalf("full retry nil repo => %v, want protocol error", err)
+	}
+}
+
+func TestCheckPullMax(t *testing.T) {
+	if got, canon, err := CheckPullMax(""); err != nil || got != DefaultPullMaxBytes || canon != api.DefaultPullMax {
+		t.Errorf("CheckPullMax(\"\") = (%d, %q, %v), want (%d, %q, nil)", got, canon, err, DefaultPullMaxBytes, api.DefaultPullMax)
+	}
+	if got, _, err := CheckPullMax("1G"); err != nil || got != 1<<30 {
+		t.Errorf("CheckPullMax(\"1G\") = (%d, %v), want (%d, nil)", got, err, int64(1<<30))
+	}
+	for _, bad := range []string{"0", "512", "nope", "-1M"} {
+		var ue *UserError
+		if _, _, err := CheckPullMax(bad); !errors.As(err, &ue) || ue.Code != "pull_max_invalid" || ue.Kind != KindUsage {
+			t.Errorf("CheckPullMax(%q) = %v, want UserError{Code:pull_max_invalid, Kind:KindUsage}", bad, err)
+		}
 	}
 }

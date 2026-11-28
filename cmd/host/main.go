@@ -91,6 +91,10 @@ var commands = map[string]func(args []string) error{
 	"--help":    printUsage,
 }
 
+func init() {
+	host.WalledPullBundle = supervisor.PullBundle
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, usage, brand.HostBinary)

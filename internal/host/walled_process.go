@@ -151,6 +151,9 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}
 	m.Git = gi
+	if gi != nil && gi.BaseSHA != "" {
+		m.SeedHeads = map[string]string{m.Cwd: gi.BaseSHA}
+	}
 	m.Secrets = secrets
 	fillAgentManifest(m, a.Argv, argv, agent, known, inline, hooks, sessionUUID)
 	if a.DeferStart {

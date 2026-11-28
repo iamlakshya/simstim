@@ -23,10 +23,6 @@ func ShadowVTSkip() string {
 	return vtBinSkip
 }
 
-// LockSession takes the lock of a session, as a resume, a restore and a
-// delete do. It returns the function that lets it go.
-func LockSession(id string) (func(), error) { return lockSession(id) }
-
 // SetUploadIdle makes an upload wait d for its next frame, for the rest of
 // a test. It returns a function that puts the old wait back.
 func SetUploadIdle(d time.Duration) func() {

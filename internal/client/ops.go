@@ -228,6 +228,15 @@ func (c *Conn) RevokePort(ctx context.Context, id string, port int) error {
 	return c.Call(ctx, "port.revoke", api.PortGrantArgs{ID: id, Port: port}, nil)
 }
 
+// RecordPulled records commit OIDs successfully pulled from session id in its
+// manifest on the host (isolation spec 6.10).
+func (c *Conn) RecordPulled(ctx context.Context, id string, commits []string) error {
+	if len(commits) == 0 || !c.HasFeature(api.FeaturePulled) {
+		return nil
+	}
+	return c.Call(ctx, api.FeaturePulled, api.PulledArgs{ID: id, Commits: commits}, nil)
+}
+
 // RenameSession renames a session.
 func (c *Conn) RenameSession(ctx context.Context, id, name string) error {
 	name = strings.TrimSpace(name)

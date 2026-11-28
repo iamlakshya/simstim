@@ -7,8 +7,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -16,7 +18,13 @@ import (
 
 // DefaultPullMaxBytes is the default cap for a git bundle created by pull
 // (512 MiB, spec 6.10).
-const DefaultPullMaxBytes int64 = 512 << 20
+const DefaultPullMaxBytes int64 = api.DefaultPullMaxBytes
+
+// WalledPullBundle streams a git bundle for a walled session strictly from
+// inside its sandbox via the supervisor (isolation spec 6.10, 7.1). Wired by
+// cmd/host and hosttest; when nil, RunPullBundle fails closed on walled
+// sessions and never runs git on the host in a sandbox-writable folder.
+var WalledPullBundle func(m *Manifest, req api.PullBundleArgs, out io.Writer) error
 
 type bundleCreateArgs struct {
 	Dir      string `json:"dir"`
@@ -148,6 +156,12 @@ func RunPullBundle(id string, in io.Reader, out io.Writer) error {
 	if err := json.NewDecoder(in).Decode(&req); err != nil && err != io.EOF {
 		return writeErr(UserError("bad_request", "pull-bundle could not read its request: "+err.Error(), "Update the client."))
 	}
+	if isWalled(m) {
+		if WalledPullBundle == nil {
+			return writeErr(UserError("forbidden", "cannot run host git in a walled session", "Update the host helper so walled pulls run through the supervisor."))
+		}
+		return WalledPullBundle(m, req, out)
+	}
 	repoDir, err := resolvePullRepoDir(m, req.Repo)
 	if err != nil {
 		return writeErr(err)
@@ -206,6 +220,62 @@ func RunPullBundle(id string, in io.Reader, out io.Writer) error {
 		return fmt.Errorf("stream bundle file: %w", err)
 	}
 	return nil
+}
+
+// RecordPulled records commit OIDs successfully pulled from session a.ID in
+// its manifest (spec 6.10). For a running walled session it forwards to the
+// supervisor so in-memory state and audit.jsonl stay in step.
+func RecordPulled(a api.PulledArgs) error {
+	if err := CheckCaller(); err != nil {
+		return err
+	}
+	if !validID(a.ID) {
+		return UserError("not_found", "no session "+a.ID, "List sessions to find its ID.")
+	}
+	var valid []string
+	for _, c := range a.Commits {
+		if !isValidGitOID(c) {
+			return UserError("bad_request", "invalid commit ID in pulled request", "Update the client.")
+		}
+		if !slices.Contains(valid, c) {
+			valid = append(valid, c)
+		}
+	}
+	if len(valid) == 0 {
+		return nil
+	}
+	m, err := LoadManifest(a.ID)
+	if err != nil {
+		return UserError("not_found", "no session "+a.ID, "List sessions to find its ID.")
+	}
+	if isWalled(m) && alive(a.ID) {
+		_, err := HolderRequest(a.ID, api.FeaturePulled, map[string][]string{"commits": valid}, 5*time.Second)
+		return err
+	}
+	unlock, err := lockSessionWait(a.ID, renameWait)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	m, err = LoadManifest(a.ID)
+	if err != nil {
+		return UserError("not_found", "no session "+a.ID, "List sessions to find its ID.")
+	}
+	if isWalled(m) && alive(a.ID) {
+		_, err := HolderRequest(a.ID, api.FeaturePulled, map[string][]string{"commits": valid}, 5*time.Second)
+		return err
+	}
+	changed := false
+	for _, c := range valid {
+		if !slices.Contains(m.Pulled, c) {
+			m.Pulled = append(m.Pulled, c)
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return m.Save()
 }
 
 func isValidGitOID(s string) bool {

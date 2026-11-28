@@ -81,6 +81,21 @@ func CheckSandboxSystem(raw string) (string, error) {
 	return sys, nil
 }
 
+// CheckPullMax validates sandbox.pull_max and returns a UserError with code
+// "pull_max_invalid" when invalid (spec 6.10 and 8.1).
+func CheckPullMax(raw string) (bytes int64, canonical string, err error) {
+	bytes, canonical, err = api.ParsePullMax(raw)
+	if err != nil {
+		return 0, "", &UserError{
+			Msg:  api.PullMaxMessage(raw),
+			Hint: api.PullMaxHint,
+			Code: "pull_max_invalid",
+			Kind: KindUsage,
+		}
+	}
+	return bytes, canonical, nil
+}
+
 // ValidatePackageSettings checks sandbox and network policy defaults in s,
 // returning a UserError on invalid values.
 func ValidatePackageSettings(s Settings) error {
@@ -88,6 +103,9 @@ func ValidatePackageSettings(s Settings) error {
 		return err
 	}
 	if _, err := CheckSandboxSystem(s.Sandbox.System); err != nil {
+		return err
+	}
+	if _, _, err := CheckPullMax(s.Sandbox.PullMax); err != nil {
 		return err
 	}
 	if _, _, err := CheckMinReleaseAge(s.Network.MinReleaseAge); err != nil {

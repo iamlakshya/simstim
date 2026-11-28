@@ -77,7 +77,7 @@ func (s *Supervisor) serveSessionConn(sessionID string, conn net.Conn) {
 		Protocol: version.Protocol,
 		Version:  version.Version,
 		Role:     "supervisor",
-		Features: []string{"put", "port.grant", "sftp", "ssh.exec", "arm", "spawn", "stop"},
+		Features: []string{"put", "port.grant", "sftp", "ssh.exec", "arm", "spawn", "stop", "pull.bundle", "pulled"},
 	}); err != nil {
 		return
 	}
@@ -238,6 +238,8 @@ func (s *Supervisor) handleRequest(sessionID string, conn net.Conn, r *bufio.Rea
 		s.handleUsage(w, req)
 	case "policy.reload":
 		s.handlePolicyReload(w, req)
+	case "pulled":
+		s.handlePulled(w, req)
 	case "peek", "send", "ports":
 		s.forwardHolderRequest(sessionID, w, req)
 	default:

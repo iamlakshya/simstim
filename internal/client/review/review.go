@@ -7,17 +7,17 @@ import (
 	"bytes"
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/pelletier/go-toml/v2"
 
+	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -27,6 +27,11 @@ var flagsTOML string
 // MaxScanSize is the largest file that review reads for content checks (1 MiB).
 // Larger changed files are flagged by name and size without reading them.
 const MaxScanSize = 1 << 20
+
+// DefaultSentinelPrefix is the placeholder prefix injected into walled
+// sessions for bound secrets; seeing it in a pulled diff flags the file
+// (isolation spec 7.1).
+var DefaultSentinelPrefix = brand.Name + "-gateway-placeholder-"
 
 // emptyTreeHash is git's well-known SHA-1 of the empty tree, used when a full
 // bundle has no common base in the laptop's repository.
@@ -48,12 +53,39 @@ var loadedRules = func() []ruleGroup {
 	if err := dec.Decode(&cfg); err != nil {
 		panic("review: invalid flags.toml: " + err.Error())
 	}
+	agentIdx := -1
+	for i := range cfg.Rules {
+		if cfg.Rules[i].Category == "agent project files" {
+			agentIdx = i
+			break
+		}
+	}
+	if agentIdx < 0 {
+		cfg.Rules = append(cfg.Rules, ruleGroup{Category: "agent project files"})
+		agentIdx = len(cfg.Rules) - 1
+	}
+	for _, a := range agents.Table {
+		for _, p := range a.ProjectFiles {
+			if !slices.Contains(cfg.Rules[agentIdx].Patterns, p) {
+				cfg.Rules[agentIdx].Patterns = append(cfg.Rules[agentIdx].Patterns, p)
+			}
+		}
+	}
 	cfg.Rules = append(cfg.Rules, ruleGroup{
 		Category: "this tool",
 		Patterns: []string{"." + brand.Name + "/**"},
 	})
 	return cfg.Rules
 }()
+
+// Options configures content checks in ReviewGitDiffWithOptions.
+type Options struct {
+	// Secrets maps secret names to their values to scan added lines for
+	// accidental leaks. Findings name only the secret key, never the value.
+	Secrets map[string]string
+	// SentinelPrefix overrides DefaultSentinelPrefix when non-empty.
+	SentinelPrefix string
+}
 
 // Finding is one flagged file or issue found by review.
 type Finding struct {
@@ -144,77 +176,22 @@ func matchPattern(pattern, target string) bool {
 	return target == pattern || strings.HasSuffix(target, "/"+pattern)
 }
 
-// CheckHiddenText reports whether data contains bidirectional controls,
-// zero-width characters, or Unicode tag characters (spec 7.1).
-func CheckHiddenText(data []byte) bool {
-	for _, r := range string(data) {
-		if isHiddenRune(r) {
-			return true
-		}
-	}
-	return false
-}
-
-func isHiddenRune(r rune) bool {
-	if r == '\t' || r == '\n' || r == '\r' {
-		return false
-	}
-	if r == 0x200B || r == 0x200C || r == 0x200D || r == 0xFEFF {
-		return true
-	}
-	if r >= 0xE0000 && r <= 0xE007F {
-		return true
-	}
-	return unicode.In(r, unicode.Bidi_Control, unicode.Cf, unicode.Other_Default_Ignorable_Code_Point)
-}
-
-// CheckGitmodulesCR reports whether .gitmodules content holds a carriage return
-// (CVE-2025-48384), which must always be refused.
-func CheckGitmodulesCR(data []byte) bool {
-	return bytes.IndexByte(data, '\r') >= 0
-}
-
-// CheckPackageJSONScripts reports whether package.json changed its "scripts"
-// section between oldData and newData (or defines scripts when oldData is nil).
-func CheckPackageJSONScripts(oldData, newData []byte) bool {
-	oldScripts := extractScripts(oldData)
-	newScripts := extractScripts(newData)
-	if len(newScripts) == 0 && len(oldScripts) == 0 {
-		return false
-	}
-	return !bytes.Equal(oldScripts, newScripts)
-}
-
-func extractScripts(data []byte) []byte {
-	if len(data) == 0 {
-		return nil
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(data, &obj); err != nil {
-		// Unparseable package.json: fail closed and flag it.
-		return data
-	}
-	raw, ok := obj["scripts"]
-	if !ok {
-		return nil
-	}
-	var canonical any
-	if err := json.Unmarshal(raw, &canonical); err != nil {
-		return raw
-	}
-	out, err := json.Marshal(canonical)
-	if err != nil {
-		return raw
-	}
-	return out
-}
-
 // ReviewGitDiff reviews every file changed between baseRef (or the empty tree
 // when baseRef is empty) and headRef in repoDir. It never checks out any file
 // and never reads more than MaxScanSize bytes per file.
 func ReviewGitDiff(ctx context.Context, repoDir, baseRef, headRef string) (Result, error) {
+	return ReviewGitDiffWithOptions(ctx, repoDir, baseRef, headRef, Options{})
+}
+
+// ReviewGitDiffWithOptions reviews every file changed between baseRef and
+// headRef in repoDir, including optional secret-value and sentinel checks on
+// added lines (isolation spec 7.1).
+func ReviewGitDiffWithOptions(ctx context.Context, repoDir, baseRef, headRef string, opts Options) (Result, error) {
 	if baseRef == "" {
 		baseRef = emptyTreeHash
+	}
+	if opts.SentinelPrefix == "" {
+		opts.SentinelPrefix = DefaultSentinelPrefix
 	}
 	out, err := gitSafeRun(ctx, repoDir, "diff-tree", "-r", "--no-commit-id", "--name-status", "-z", baseRef, headRef)
 	if err != nil {
@@ -242,14 +219,14 @@ func ReviewGitDiff(ctx context.Context, repoDir, baseRef, headRef string) (Resul
 		if status == "D" {
 			continue
 		}
-		if err := reviewGitFile(ctx, repoDir, baseRef, headRef, filePath, &res); err != nil {
+		if err := reviewGitFile(ctx, repoDir, baseRef, headRef, filePath, opts, &res); err != nil {
 			return res, err
 		}
 	}
 	return res, nil
 }
 
-func reviewGitFile(ctx context.Context, repoDir, baseRef, headRef, filePath string, res *Result) error {
+func reviewGitFile(ctx context.Context, repoDir, baseRef, headRef, filePath string, opts Options, res *Result) error {
 	size, isBlob, err := gitBlobSize(ctx, repoDir, headRef, filePath)
 	if err != nil {
 		return err
@@ -308,12 +285,15 @@ func reviewGitFile(ctx context.Context, repoDir, baseRef, headRef, filePath stri
 			res.Findings = append(res.Findings, Finding{Path: filePath, Category: cat})
 		}
 	}
-	if added, err := gitAddedLines(ctx, repoDir, baseRef, headRef, filePath); err == nil && CheckHiddenText(added) {
-		res.Findings = append(res.Findings, Finding{
-			Path:     filePath,
-			Category: "hidden text",
-			Detail:   "hidden Unicode characters in added lines",
-		})
+	if added, err := gitAddedLines(ctx, repoDir, baseRef, headRef, filePath); err == nil {
+		if CheckHiddenText(added) {
+			res.Findings = append(res.Findings, Finding{
+				Path:     filePath,
+				Category: "hidden text",
+				Detail:   "hidden Unicode characters in added lines",
+			})
+		}
+		checkAddedSecrets(filePath, added, opts, res)
 	}
 	return nil
 }

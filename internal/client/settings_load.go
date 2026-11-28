@@ -82,6 +82,7 @@ func applySettingsDefaults(s *Settings, d Settings) {
 	fill(&s.Sandbox.CopyMax, d.Sandbox.CopyMax)
 	fill(&s.Sandbox.SeedMax, d.Sandbox.SeedMax)
 	fill(&s.Sandbox.System, d.Sandbox.System)
+	fill(&s.Sandbox.PullMax, d.Sandbox.PullMax)
 	fill(&s.Network.MinReleaseAge, d.Network.MinReleaseAge)
 	fill(&s.Network.UploadBudget, d.Network.UploadBudget)
 	fill(&s.Images.Fetch, d.Images.Fetch)

@@ -30,6 +30,7 @@ type PullBundleOptions struct {
 	Force          bool
 	AllowFlagged   bool
 	MaxBytes       int64
+	Secrets        map[string]string
 	ConfirmFlagged func(res review.Result) (bool, error)
 }
 
@@ -116,7 +117,7 @@ func PullBundleOn(ctx context.Context, t Transport, h Host, s *Session, opt Pull
 		}
 	}
 
-	rev, err := reviewQuarantinedBundle(ctx, opt, base, qRef)
+	rev, err := reviewQuarantinedBundle(ctx, opt, h, s, base, qRef)
 	if err != nil {
 		return PullBundleResult{}, err
 	}
@@ -231,14 +232,16 @@ func verifyOrRetryBundle(ctx context.Context, t Transport, h Host, s *Session, o
 	return hdr, newPath, nil
 }
 
-func reviewQuarantinedBundle(ctx context.Context, opt PullBundleOptions, base, qRef string) (review.Result, error) {
+func reviewQuarantinedBundle(ctx context.Context, opt PullBundleOptions, h Host, s *Session, base, qRef string) (review.Result, error) {
 	reviewBase := ""
 	if base != "" {
 		if mb, err := localGitOut(ctx, opt.LocalRepo, "merge-base", base, qRef); err == nil && mb != "" {
 			reviewBase = mb
 		}
 	}
-	rev, err := review.ReviewGitDiff(ctx, opt.LocalRepo, reviewBase, qRef)
+	rev, err := review.ReviewGitDiffWithOptions(ctx, opt.LocalRepo, reviewBase, qRef, review.Options{
+		Secrets: opt.Secrets,
+	})
 	if err != nil {
 		return review.Result{}, fmt.Errorf("review pulled changes: %w", err)
 	}
@@ -256,9 +259,13 @@ func reviewQuarantinedBundle(ctx context.Context, opt PullBundleOptions, base, q
 			return review.Result{}, cerr
 		}
 		if !approved {
+			diffCmd := "git diff " + qRef
+			if reviewBase != "" {
+				diffCmd = "git diff " + reviewBase + " " + qRef
+			}
 			return review.Result{}, &UserError{
 				Msg:  "the pull holds flagged files: " + CleanLine(rev.Summary()),
-				Hint: fmt.Sprintf("Inspect %s with git diff, then run %s pull again with --allow-flagged.", qRef, brand.Name),
+				Hint: fmt.Sprintf("Run %s to inspect, then %s pull %s/%s --allow-flagged.", diffCmd, brand.Name, h.Name, s.ID),
 				Code: "pull_flagged",
 				Kind: KindRefused,
 			}

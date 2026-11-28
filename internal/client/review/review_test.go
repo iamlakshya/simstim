@@ -34,6 +34,14 @@ func TestCheckPath(t *testing.T) {
 		"AGENTS.md":                       "agent project files",
 		".mcp.json":                       "agent project files",
 		".codex/config.toml":              "agent project files",
+		".opencode/config.json":           "agent project files",
+		"opencode.json":                   "agent project files",
+		".gemini/settings.json":           "agent project files",
+		"GEMINI.md":                       "agent project files",
+		".cursor/rules.md":                "agent project files",
+		".cursorrules":                    "agent project files",
+		".aider.conf.yml":                 "agent project files",
+		".goosehints":                     "agent project files",
 		".vscode/tasks.json":              "editor and shell",
 		".vscode/settings.json":           "editor and shell",
 		".idea/workspace.xml":             "editor and shell",
@@ -203,5 +211,42 @@ func TestReviewGitDiff(t *testing.T) {
 	}
 	if hard, ok := res.HardBlocked(); !ok || hard.Category != "gitmodules_cr" {
 		t.Fatalf("expected hard block on >1 MiB .gitmodules with CR, got %+v", res.Findings)
+	}
+
+	// Secret value and gateway sentinel detection in added lines (value never printed).
+	const secretVal = "sk-ant-super-secret-value-987654321"
+	write("leak.txt", []byte("token="+secretVal+"\n"))
+	write("sentinel.txt", []byte("key="+DefaultSentinelPrefix+"abc123\n"))
+	gitRun("add", "leak.txt", "sentinel.txt")
+	gitRun("commit", "-q", "-m", "secret and sentinel leak")
+	leakHead := gitRun("rev-parse", "HEAD")
+
+	res, err = ReviewGitDiffWithOptions(context.Background(), dir, largeGMHead, leakHead, Options{
+		Secrets: map[string]string{
+			"ANTHROPIC_API_KEY": secretVal,
+			"SHORT":             "ab", // ignored (< 4 chars)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := res.Summary()
+	if strings.Contains(summary, secretVal) {
+		t.Fatalf("review summary leaked secret value: %q", summary)
+	}
+	var sawSecret, sawSentinel bool
+	for _, f := range res.Findings {
+		if strings.Contains(f.Detail, secretVal) || strings.Contains(f.Path, secretVal) {
+			t.Fatalf("finding leaked secret value: %+v", f)
+		}
+		if f.Path == "leak.txt" && f.Category == "secrets" && f.Detail == "contains secret ANTHROPIC_API_KEY" {
+			sawSecret = true
+		}
+		if f.Path == "sentinel.txt" && f.Category == "secrets" && f.Detail == "contains a session sentinel" {
+			sawSentinel = true
+		}
+	}
+	if !sawSecret || !sawSentinel {
+		t.Fatalf("expected both secret and sentinel findings, got %+v", res.Findings)
 	}
 }

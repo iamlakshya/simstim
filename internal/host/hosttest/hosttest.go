@@ -27,12 +27,17 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
+
+func init() {
+	host.WalledPullBundle = supervisor.PullBundle
+}
 
 // Main runs the tests, or acts as the host helper when the binary was
 // started as one: "holder <id>", "hook <event> [args]", "git-op <op>" or
@@ -87,6 +92,8 @@ func runHelperSubcommand(args []string) bool {
 		mustRun(host.RunHolder(args[1]))
 	case "supervise":
 		mustRun(supervisor.Run(args[1]))
+	case "egress":
+		mustRun(egress.Run(args[1]))
 	case "hook":
 		host.RunHook(args[1], args[2:])
 	case "rm-as-caller":

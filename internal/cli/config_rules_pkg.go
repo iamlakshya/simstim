@@ -38,6 +38,19 @@ func validatePackageSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			})
 		}
 	}
+	if v := s.Sandbox.PullMax; v != "" {
+		if _, _, err := api.ParsePullMax(v); err != nil {
+			pos := ins.Pos("sandbox", "pull_max")
+			out = append(out, configFinding{
+				Path:     abbrev,
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Severity: "error",
+				Code:     "pull_max_invalid",
+				Message:  strings.TrimSuffix(api.PullMaxMessage(v), "."),
+			})
+		}
+	}
 	if v := s.Network.MinReleaseAge; v != "" {
 		if _, _, err := api.ParseMinReleaseAge(v); err != nil {
 			pos := ins.Pos("network", "min_release_age")

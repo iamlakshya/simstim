@@ -16,6 +16,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -156,10 +157,15 @@ func TestPullBundleAndFoldersUseHostDirForWalledSession(t *testing.T) {
 	const id = "wgit2345"
 	m := saveWalledTestManifest(t, id, "/work/myrepo", repo)
 
-	// 1. RunPullBundle uses m.HostDir() (repo), NOT m.Cwd (/work/myrepo).
+	// 1. RunPullBundle fails closed on walled sessions when WalledPullBundle
+	// is unset, and never runs host git-op in a sandbox-writable folder.
+	prevWalledPull := WalledPullBundle
+	WalledPullBundle = nil
+	t.Cleanup(func() { WalledPullBundle = prevWalledPull })
+
 	var out bytes.Buffer
 	if err := RunPullBundle(id, strings.NewReader(`{"full":true}`), &out); err != nil {
-		t.Fatalf("RunPullBundle: %v", err)
+		t.Fatalf("RunPullBundle(walled, unset hook): %v", err)
 	}
 	br := bufio.NewReader(&out)
 	line, err := br.ReadBytes('\n')
@@ -170,12 +176,43 @@ func TestPullBundleAndFoldersUseHostDirForWalledSession(t *testing.T) {
 	if err := json.Unmarshal(line, &hdr); err != nil {
 		t.Fatalf("decode header: %v (%q)", err, line)
 	}
+	if hdr.Error == nil || hdr.Error.Code != "forbidden" {
+		t.Fatalf("walled pull-bundle without supervisor hook = %+v, want error forbidden", hdr)
+	}
+
+	// Unwalled sessions still use host git-op on m.HostDir().
+	const unwalledID = "ugit2345"
+	um := &Manifest{
+		Schema:    1,
+		ID:        unwalledID,
+		Name:      "unwalled-sess",
+		CreatedAt: time.Now().UTC(),
+		Cwd:       repo,
+		Agent:     AgentInfo{Kind: "shell", Argv: []string{"/bin/sh"}},
+	}
+	if err := um.Save(); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := RunPullBundle(unwalledID, strings.NewReader(`{"full":true}`), &out); err != nil {
+		t.Fatalf("RunPullBundle(unwalled): %v", err)
+	}
+	br = bufio.NewReader(&out)
+	line, err = br.ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read unwalled header: %v", err)
+	}
+	hdr = api.PullBundleHeader{}
+	if err := json.Unmarshal(line, &hdr); err != nil {
+		t.Fatalf("decode unwalled header: %v (%q)", err, line)
+	}
 	if hdr.Error != nil {
-		t.Fatalf("pull-bundle returned error: %+v", hdr.Error)
+		t.Fatalf("unwalled pull-bundle returned error: %+v", hdr.Error)
 	}
 	if hdr.Head != head || hdr.Size == 0 || hdr.Repo == nil || hdr.Repo.Branch != "main" {
-		t.Fatalf("unexpected pull header: %+v (want head %s)", hdr, head)
+		t.Fatalf("unexpected unwalled pull header: %+v (want head %s)", hdr, head)
 	}
+	_ = os.RemoveAll(paths.SessionDir(unwalledID))
 
 	// 2. Folders() recent list returns host path ("~/myrepo"), NOT "/work/myrepo".
 	fr := Folders("", 12)

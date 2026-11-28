@@ -65,7 +65,7 @@ func NewGVisorSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			CacheDirs:      cacheDirs,
 			ExtraRO:        extraRO,
 			ExtraRW:        extraRW,
-			GuestPATH:      envLookup(m.Env, "PATH"),
+			GuestPATH:      envPath(m.Env),
 			ExtraEnv:       []string{brand.Env("GUEST_PROXY") + "=1"},
 		}),
 	}

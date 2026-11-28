@@ -235,7 +235,65 @@ func applyStagedSeeds(m *Manifest, stageDir string, seeds []api.SeedRepoSpec) er
 	}
 	m.SeedRepos = records
 	attachSeedWorkspaces(m, workBase, records)
+	recordSeedHeads(m, records)
 	return nil
+}
+
+func recordSeedHeads(m *Manifest, records []api.SeedRepoRecord) {
+	for _, r := range records {
+		if r.SeedHead == "" {
+			continue
+		}
+		if m.SeedHeads == nil {
+			m.SeedHeads = map[string]string{}
+		}
+		m.SeedHeads[hostToGuestPath(m, r.Dir)] = r.SeedHead
+	}
+}
+
+func hostToGuestPath(m *Manifest, hostDir string) string {
+	if m == nil || m.Wall == nil {
+		return hostDir
+	}
+	if m.Wall.WorkspaceHost == hostDir && m.Wall.WorkspaceGuest != "" {
+		return m.Wall.WorkspaceGuest
+	}
+	for _, wm := range m.Wall.ExtraRW {
+		if wm.Source == hostDir && wm.Dest != "" {
+			return wm.Dest
+		}
+	}
+	for _, wm := range m.Wall.ExtraRO {
+		if wm.Source == hostDir && wm.Dest != "" {
+			return wm.Dest
+		}
+	}
+	return hostDir
+}
+
+// ResolvePullGuestRepo resolves the guest workspace path and trusted seed head
+// OID for walled bundle pulls, honouring --repo on multi-repo sessions
+// (isolation spec 6.10, 17.4).
+func ResolvePullGuestRepo(m *Manifest, wantRepo string) (guestDir, seedHead string, err error) {
+	hostDir, err := resolvePullRepoDir(m, wantRepo)
+	if err != nil {
+		return "", "", err
+	}
+	guestDir = hostToGuestPath(m, hostDir)
+	for _, r := range m.SeedRepos {
+		if r.Dir == hostDir && r.SeedHead != "" {
+			return guestDir, r.SeedHead, nil
+		}
+	}
+	if m != nil && len(m.SeedHeads) > 0 {
+		if sha := m.SeedHeads[guestDir]; sha != "" {
+			return guestDir, sha, nil
+		}
+		if sha := m.SeedHeads[m.Cwd]; sha != "" {
+			return guestDir, sha, nil
+		}
+	}
+	return guestDir, "", nil
 }
 
 // attachSeedWorkspaces updates the session's workspace (and sandboxed-wall

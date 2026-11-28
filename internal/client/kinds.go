@@ -184,6 +184,7 @@ var hostKinds = map[string]Kind{
 	"cache_path_invalid":    KindUsage,
 	"model_budget_invalid":  KindUsage,
 	"upload_budget_invalid": KindUsage,
+	"pull_max_invalid":      KindUsage,
 	"feed_unavailable":      KindFailed,
 	"env_is_secret":         KindRefused,
 	"copy_sensitive":        KindRefused,

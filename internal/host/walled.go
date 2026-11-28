@@ -201,6 +201,9 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}
 	m.Git = gi
+	if gi != nil && gi.BaseSHA != "" {
+		m.SeedHeads = map[string]string{m.Cwd: gi.BaseSHA}
+	}
 	m.Secrets = secrets
 	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
 	m.RunHook = m.SetupHook

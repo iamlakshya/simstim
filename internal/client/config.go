@@ -161,6 +161,9 @@ type Settings struct {
 		// sandbox restarts, such as [".bash_history"]. Startup and hook files
 		// such as .bashrc and .profile are refused (keep_refused).
 		Keep []string `toml:"keep"`
+		// PullMax caps the size of a git bundle streamed by pull, such as
+		// "512M" or "1G".
+		PullMax string `toml:"pull_max"`
 	} `toml:"sandbox"`
 	// Network holds defaults for sandbox network policy.
 	Network struct {
@@ -212,6 +215,7 @@ func DefaultSettings() Settings {
 	s.Sandbox.CopyMax = "64M"
 	s.Sandbox.SeedMax = "512M"
 	s.Sandbox.System = api.DefaultSandboxSystem
+	s.Sandbox.PullMax = api.DefaultPullMax
 	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
 	s.Network.UploadBudget = api.DefaultUploadBudget
 	s.Images.Fetch = api.ImagesFetchAuto

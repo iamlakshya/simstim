@@ -20,6 +20,8 @@ func (r *runner) handleExtraStream(ctx context.Context, st *link.Stream) {
 		r.serveSFTP(ctx, st)
 	case link.KindExec:
 		r.serveExec(ctx, st)
+	case link.KindBundle:
+		r.serveBundle(ctx, st)
 	default:
 		_ = st.Close()
 	}

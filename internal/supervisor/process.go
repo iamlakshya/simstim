@@ -78,17 +78,16 @@ func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			KeepFiles:      keepFiles,
 			ExtraRO:        extraRO,
 			ExtraRW:        extraRW,
-			GuestPATH:      envLookup(m.Env, "PATH"),
+			GuestPATH:      envPath(m.Env),
 			ExtraEnv:       extraEnv,
 			ShareNet:       shareNet,
 		}),
 	}
 }
 
-func envLookup(env []string, key string) string {
-	prefix := key + "="
+func envPath(env []string) string {
 	for _, kv := range env {
-		if val, ok := strings.CutPrefix(kv, prefix); ok {
+		if val, ok := strings.CutPrefix(kv, "PATH="); ok {
 			return val
 		}
 	}

@@ -8,9 +8,11 @@ cd ~/src/app
 simstim pull my-server/auth-fix
 ```
 
-`pull` packs the session's branch on the host as a git bundle (with hooks and fsmonitor turned off), streams it over the host's transport, checks it with `git bundle verify`, and fetches it into a quarantine ref with `transfer.fsckObjects=true`, `fetch.fsckObjects=true` and `--no-tags`. Neither working tree changes.
+`pull` packs the session's branch as a git bundle (with hooks and fsmonitor turned off), streams it over the host's transport under the `sandbox.pull_max` cap (default `512M`), checks it with `git bundle verify`, and fetches it into a quarantine ref (`refs/simstim/sessions/<host>/<id>/<branch>`) with `transfer.fsckObjects=true`, `fetch.fsckObjects=true` and `--no-tags`. Neither working tree changes.
 
-Before moving your local branch, `pull` reviews the diff for files that can run code on your laptop or in CI (such as `.github/workflows/**`, `.githooks/**`, `.envrc`, or changed `package.json` scripts), hidden Unicode characters in added lines, and changed files over 1 MiB. A `.gitmodules` file with a carriage return (CVE-2025-48384) is always refused.
+On walled sessions, the host never runs `git` in the sandbox's folder. Guest init packs the bundle inside the sandbox over `internal/link`, and the supervisor enforces the size cap, records the pulled commits in `manifest.json` and logs an audit entry. Pulling from a stopped walled session starts a short-lived bundle-only sandbox with no agent, network or secrets, streams the bundle, tears it down, and leaves the session stopped.
+
+Before moving your local branch, `pull` reviews the diff for files that can run code on your laptop or in CI (such as `.github/workflows/**`, `.githooks/**`, `.envrc`, agent project files from the agent table, or changed `package.json` scripts), hidden Unicode characters, leaked session secrets or gateway sentinels in added lines, and changed files over 1 MiB. A `.gitmodules` file with a carriage return (CVE-2025-48384) is always refused.
 
 - `--into review/auth-fix` updates another branch name.
 - `--allow-flagged` updates the branch after you have inspected flagged changes in the quarantine ref.

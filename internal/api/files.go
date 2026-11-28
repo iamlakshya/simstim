@@ -1,12 +1,44 @@
 package api
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Feature flags advertised in the bridge hello for files, editors and bundle pull.
 const (
 	FeatureSFTP       = "sftp"
 	FeatureSSHExec    = "ssh-exec"
 	FeaturePullBundle = "pull.bundle"
 	FeatureSeed       = "seed"
+	FeaturePulled     = "pulled"
 )
+
+// Defaults and hints for sandbox.pull_max (isolation spec 6.10 and 8.1).
+const (
+	DefaultPullMax      = "512M"
+	DefaultPullMaxBytes = 512 << 20
+	PullMaxHint         = `Set sandbox.pull_max to a size such as "512M" or "1G" in config.toml`
+)
+
+// PullMaxMessage returns the error sentence for an invalid sandbox.pull_max
+// value, without a trailing Try: hint.
+func PullMaxMessage(raw string) string {
+	return fmt.Sprintf(`sandbox.pull_max is %q, and it must be a size such as "512M" or "1G".`, raw)
+}
+
+// ParsePullMax validates sandbox.pull_max (empty defaults to 512 MiB).
+func ParsePullMax(raw string) (bytes int64, canonical string, err error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return DefaultPullMaxBytes, DefaultPullMax, nil
+	}
+	n, perr := ParseSize(trimmed)
+	if perr != nil {
+		return 0, "", fmt.Errorf("%s Try: %s", PullMaxMessage(raw), PullMaxHint)
+	}
+	return n, trimmed, nil
+}
 
 // GitOpBundleCreate is the host helper's git operation that creates a git
 // bundle for a session's branch inside the git scope, with hooks and
@@ -132,4 +164,11 @@ type PullBundleHeader struct {
 		Message string `json:"message"`
 		Hint    string `json:"hint,omitempty"`
 	} `json:"error,omitempty"`
+}
+
+// PulledArgs records commit OIDs successfully pulled from a session into a
+// local clone (isolation spec 6.10).
+type PulledArgs struct {
+	ID      string   `json:"id"`
+	Commits []string `json:"commits"`
 }

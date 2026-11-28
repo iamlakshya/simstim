@@ -17,7 +17,7 @@ import (
 // sessionOps are the bridge's requests that act on a session.
 var sessionOps = map[string]bool{
 	"delete": true, "resume": true, "restore": true, "stop": true, "send": true, "peek": true, "rename": true, "kill": true,
-	"port.grant": true, "port.revoke": true, "sftp": true, "ssh.exec": true, "session.start": true, "copy.apply": true, "spawn": true, "exec": true,
+	"port.grant": true, "port.revoke": true, "sftp": true, "ssh.exec": true, "session.start": true, "copy.apply": true, "spawn": true, "exec": true, "pulled": true,
 }
 
 // refuseInside answers a frame that a bridge inside a session (or another

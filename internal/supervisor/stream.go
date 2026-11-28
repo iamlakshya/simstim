@@ -19,7 +19,7 @@ import (
 const streamOpenTimeout = 5 * time.Second
 
 func isStreamRequest(op string) bool {
-	return op == "sftp" || op == "ssh.exec"
+	return op == "sftp" || op == "ssh.exec" || op == "pull.bundle"
 }
 
 // bufferedConn wraps a net.Conn with a bufio.Reader so bytes already read
@@ -44,6 +44,9 @@ func (b *bufferedConn) CloseWrite() error {
 // AllowVersionMismatch, splicing the odd-ID client stream with the matching
 // guest stream.
 func (s *Supervisor) handleStreamRequest(conn net.Conn, r *bufio.Reader, w *proto.Writer, req proto.Request) bool {
+	if req.Op == "pull.bundle" {
+		return s.handlePullBundle(conn, w, req)
+	}
 	fail := func(code, msg, hint string) bool {
 		_ = w.WriteJSON(proto.TResponse, proto.Response{
 			ID:    req.ID,

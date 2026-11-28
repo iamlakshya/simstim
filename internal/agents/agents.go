@@ -4,15 +4,6 @@
 // add a row here.
 package agents
 
-import (
-	"errors"
-	"fmt"
-	"regexp"
-	"slices"
-	"strings"
-	"sync"
-)
-
 // Agent describes one agent CLI.
 type Agent struct {
 	Kind     string   `json:"kind"`
@@ -75,6 +66,9 @@ type Agent struct {
 	// stops so conversations can resume without keeping shell startup scripts
 	// or hooks (isolation spec 7.1).
 	StateDirs []string `json:"state_dirs,omitempty"`
+	// ProjectFiles lists repository-relative file or folder patterns that can
+	// direct this agent when opened on the laptop (isolation spec 7.1).
+	ProjectFiles []string `json:"project_files,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
 	// Egress lists the hosts the agent needs: its model API and its login.
@@ -181,9 +175,10 @@ var Table = []Agent{
 		// renderer, which keeps the conversation in the terminal's scrollback.
 		Inline: Inline{Env: map[string]string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1"}},
 		// "4 GB+ RAM": https://code.claude.com/docs/en/setup#system-requirements.
-		Memory:      4 * GB,
-		InstallDirs: []string{".local/share/claude"},
-		StateDirs:   []string{".claude/projects"},
+		Memory:       4 * GB,
+		InstallDirs:  []string{".local/share/claude"},
+		StateDirs:    []string{".claude/projects"},
+		ProjectFiles: []string{".claude/**", "CLAUDE.md", ".mcp.json"},
 		Setup: &Setup{
 			Install: "curl -fsSL https://claude.ai/install.sh | bash",
 			Source:  "https://code.claude.com/docs/en/setup",
@@ -250,9 +245,10 @@ var Table = []Agent{
 		Inline: Inline{Args: []string{"--no-alt-screen"}},
 		// "4-GB minimum (8-GB recommended)":
 		// https://github.com/openai/codex/blob/main/docs/install.md#system-requirements.
-		Memory:      4 * GB,
-		InstallDirs: []string{".codex/packages"},
-		StateDirs:   []string{".codex/sessions"},
+		Memory:       4 * GB,
+		InstallDirs:  []string{".codex/packages"},
+		StateDirs:    []string{".codex/sessions"},
+		ProjectFiles: []string{"AGENTS.md", ".codex/**"},
 		Setup: &Setup{
 			// The installer puts codex in $CODEX_INSTALL_DIR, by default ~/.local/bin.
 			Install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
@@ -279,13 +275,14 @@ var Table = []Agent{
 	},
 	{
 		Kind: "opencode", Title: "opencode", Binaries: []string{"opencode"},
-		Launch:      []string{"opencode"},
-		Resume:      []string{"opencode", "-s", "{agent_session_id}"},
-		Continue:    []string{"opencode", "-c"},
-		IDCapture:   "scan",
-		Support:     Supported,
-		InstallDirs: []string{".opencode"},
-		StateDirs:   []string{".local/share/opencode"},
+		Launch:       []string{"opencode"},
+		Resume:       []string{"opencode", "-s", "{agent_session_id}"},
+		Continue:     []string{"opencode", "-c"},
+		IDCapture:    "scan",
+		Support:      Supported,
+		InstallDirs:  []string{".opencode"},
+		StateDirs:    []string{".local/share/opencode"},
+		ProjectFiles: []string{".opencode/**", "opencode.json", "AGENTS.md"},
 		Setup: &Setup{
 			Install: "curl -fsSL https://opencode.ai/install | bash",
 			Source:  "https://opencode.ai/docs/",
@@ -315,11 +312,12 @@ var Table = []Agent{
 	},
 	{
 		Kind: "gemini", Title: "Gemini CLI", Binaries: []string{"gemini"},
-		Launch:    []string{"gemini", "--session-id", "{session_uuid}"},
-		Resume:    []string{"gemini", "--resume", "{agent_session_id}"},
-		Continue:  []string{"gemini", "--resume"},
-		IDCapture: "choose",
-		Support:   BestEffort, // consumer plans moved to Antigravity CLI
+		Launch:       []string{"gemini", "--session-id", "{session_uuid}"},
+		Resume:       []string{"gemini", "--resume", "{agent_session_id}"},
+		Continue:     []string{"gemini", "--resume"},
+		IDCapture:    "choose",
+		Support:      BestEffort, // consumer plans moved to Antigravity CLI
+		ProjectFiles: []string{".gemini/**", "GEMINI.md"},
 		Setup: &Setup{
 			Install: "npm install -g @google/gemini-cli",
 			Source:  "https://github.com/google-gemini/gemini-cli#readme",
@@ -349,11 +347,12 @@ var Table = []Agent{
 	},
 	{
 		Kind: "cursor", Title: "Cursor CLI", Binaries: []string{"agent", "cursor-agent"},
-		Launch:    []string{"agent"},
-		Resume:    []string{"agent", "--resume", "{agent_session_id}"},
-		Continue:  []string{"agent", "--continue"},
-		IDCapture: "scan",
-		Support:   BestEffort,
+		Launch:       []string{"agent"},
+		Resume:       []string{"agent", "--resume", "{agent_session_id}"},
+		Continue:     []string{"agent", "--continue"},
+		IDCapture:    "scan",
+		Support:      BestEffort,
+		ProjectFiles: []string{".cursor/**", ".cursorrules"},
 		Setup: &Setup{
 			// `agent login` and CURSOR_API_KEY:
 			// https://cursor.com/docs/cli/reference/authentication.
@@ -366,10 +365,11 @@ var Table = []Agent{
 	},
 	{
 		Kind: "aider", Title: "Aider", Binaries: []string{"aider"},
-		Launch:    []string{"aider"},
-		Continue:  []string{"aider", "--restore-chat-history"},
-		IDCapture: "none",
-		Support:   BestEffort,
+		Launch:       []string{"aider"},
+		Continue:     []string{"aider", "--restore-chat-history"},
+		IDCapture:    "none",
+		Support:      BestEffort,
+		ProjectFiles: []string{".aider.conf.yml", ".aiderignore"},
 		Setup: &Setup{
 			// Aider has no login of its own: it uses the model provider's API key.
 			Install:  "curl -LsSf https://aider.chat/install.sh | sh",
@@ -380,10 +380,11 @@ var Table = []Agent{
 	},
 	{
 		Kind: "goose", Title: "Goose", Binaries: []string{"goose"},
-		Launch:    []string{"goose", "session"},
-		Continue:  []string{"goose", "session", "-r"},
-		IDCapture: "none",
-		Support:   BestEffort,
+		Launch:       []string{"goose", "session"},
+		Continue:     []string{"goose", "session", "-r"},
+		IDCapture:    "none",
+		Support:      BestEffort,
+		ProjectFiles: []string{".goosehints"},
 		Setup: &Setup{
 			// `goose configure` sets up a provider and its key.
 			Install: "curl -fsSL https://github.com/aaif-goose/goose/releases/download/stable/download_cli.sh | bash",
@@ -409,84 +410,4 @@ func Find(kind string) (Agent, bool) {
 		}
 	}
 	return Agent{}, false
-}
-
-// The reasons that CheckID gives for an ID that it refuses.
-var (
-	// ErrNoIDForm is for an agent whose row has no IDPattern.
-	ErrNoIDForm = errors.New("the agent table gives no form for this agent's session IDs")
-	// ErrWrongIDForm is for an ID that does not match the agent's IDPattern.
-	ErrWrongIDForm = errors.New("it does not have the form of the agent's session IDs")
-)
-
-// idForms holds, for each IDPattern, a function that compiles it the
-// first time it runs, and then returns the same result.
-var idForms sync.Map // string -> func() (*regexp.Regexp, error)
-
-// compileIDForm compiles an IDPattern to match a whole ID. A test counts
-// its calls.
-var compileIDForm = func(pattern string) (*regexp.Regexp, error) {
-	re, err := regexp.Compile(`^(?:` + pattern + `)$`)
-	if err != nil {
-		return nil, fmt.Errorf("the agent table's form for this agent's session IDs does not compile: %w", err)
-	}
-	return re, nil
-}
-
-// idForm returns pattern compiled. Callers that ask at the same time, the
-// first time, share one compile: the function is stored before it runs.
-func idForm(pattern string) (*regexp.Regexp, error) {
-	v, ok := idForms.Load(pattern)
-	if !ok {
-		v, _ = idForms.LoadOrStore(pattern, sync.OnceValues(func() (*regexp.Regexp, error) { return compileIDForm(pattern) }))
-	}
-	compile, _ := v.(func() (*regexp.Regexp, error))
-	return compile()
-}
-
-// CheckID reports whether id, as a whole, has the form of the agent's own
-// session IDs, IDPattern. It returns nil when it does. An agent without a
-// pattern has no known form, so no ID passes (ErrNoIDForm). A pattern that
-// does not compile passes no ID either, and the error says so.
-func (a Agent) CheckID(id string) error {
-	if a.IDPattern == "" {
-		return ErrNoIDForm
-	}
-	re, err := idForm(a.IDPattern)
-	switch {
-	case err != nil:
-		return err
-	case !re.MatchString(id):
-		return ErrWrongIDForm
-	}
-	return nil
-}
-
-// ValidID reports whether id has the form of the agent's own session IDs
-// (CheckID).
-func (a Agent) ValidID(id string) bool { return a.CheckID(id) == nil }
-
-// ResumeTemplate returns the resume command to expand for a session that
-// saved stored, a copy of Resume from when it started. An older helper
-// saved the same command without its "--". That one gets the current
-// command, so that the ID stays a positional argument. Any other command
-// stays as it was saved.
-func (a Agent) ResumeTemplate(stored []string) []string {
-	older := slices.DeleteFunc(slices.Clone(a.Resume), func(s string) bool { return s == "--" })
-	if len(older) < len(a.Resume) && slices.Equal(stored, older) {
-		return slices.Clone(a.Resume)
-	}
-	return stored
-}
-
-// Expand replaces placeholders in argv.
-func Expand(argv []string, vars map[string]string) []string {
-	out := make([]string, len(argv))
-	for i, a := range argv {
-		for k, v := range vars {
-			a = strings.ReplaceAll(a, "{"+k+"}", v)
-		}
-		out[i] = a
-	}
-	return out
 }

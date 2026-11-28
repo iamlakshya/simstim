@@ -34,7 +34,7 @@ func pullCmd() *cobra.Command {
 			}
 			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				if conn.HasFeature(api.FeaturePullBundle) {
-					return pullBundle(cmd, ctx, h, s, into, repo, force, allowFlagged)
+					return pullBundle(cmd, ctx, h, conn, s, into, repo, force, allowFlagged)
 				}
 				return pull(ctx, h, s, into, force)
 			})
@@ -47,7 +47,15 @@ func pullCmd() *cobra.Command {
 	return cmd
 }
 
-func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *client.Session, into, repo string, force, allowFlagged bool) error {
+func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, conn *client.Conn, s *client.Session, into, repo string, force, allowFlagged bool) error {
+	settings := client.LoadSettings()
+	maxBytes, _, err := client.CheckPullMax(settings.Sandbox.PullMax)
+	if err != nil {
+		return err
+	}
+	secrets := fetchPullReviewSecrets(ctx, settings, s)
+	defer clear(secrets)
+
 	p := prompts(cmd)
 	confirm := func(res review.Result) (bool, error) {
 		if !p.on {
@@ -62,6 +70,8 @@ func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *clien
 		Repo:           repo,
 		Force:          force,
 		AllowFlagged:   allowFlagged,
+		MaxBytes:       maxBytes,
+		Secrets:        secrets,
 		ConfirmFlagged: confirm,
 	})
 	if err != nil {
@@ -74,6 +84,9 @@ func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *clien
 		}
 		return nil
 	}
+	if conn != nil && res.Head != "" {
+		_ = conn.RecordPulled(ctx, s.ID, []string{res.Head})
+	}
 	fmt.Fprintf(os.Stderr, "Fetched %s from %s on %s into %s", client.CleanLine(res.Branch), client.CleanLine(s.Name), h.Name, client.CleanLine(res.Into))
 	if res.Ahead != "" && res.Ahead != "0" {
 		fmt.Fprintf(os.Stderr, ": %s commits that your current branch does not have", res.Ahead)
@@ -83,6 +96,44 @@ func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *clien
 		fmt.Fprintf(os.Stderr, "The session has %d files with uncommitted changes; they stay on the host until they are committed there.\n", res.Dirty)
 	}
 	return nil
+}
+
+// fetchPullReviewSecrets best-effort fetches locally configured secret values
+// for the session without prompting, so review can flag accidental secret leaks
+// in added lines (spec 7.1). Secrets that are unconfigured or require terminal
+// interaction are silently skipped so pull never blocks on them.
+func fetchPullReviewSecrets(ctx context.Context, settings client.Settings, s *client.Session) map[string]string {
+	if s == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var names []string
+	for _, list := range [][]string{s.Secrets, s.BoundSecrets, s.ExposedSecrets} {
+		for _, n := range list {
+			if n != "" && !seen[n] && client.ValidSecretName(n) {
+				seen[n] = true
+				names = append(names, n)
+			}
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(names))
+	for _, name := range names {
+		cfg, ok, err := settings.SecretConfig(name)
+		if err != nil || !ok || cfg.Run == "" {
+			continue
+		}
+		vals, err := client.FetchSecrets(ctx, settings, []string{name}, false)
+		if err != nil {
+			continue
+		}
+		if v := string(vals[name]); v != "" {
+			out[name] = v
+		}
+	}
+	return out
 }
 
 func pull(ctx context.Context, h client.Host, s *client.Session, into string, force bool) error {

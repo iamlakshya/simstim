@@ -33,6 +33,16 @@ type ExecHeader struct {
 	SSH     *api.SSHExecArgs `json:"ssh,omitempty"`
 }
 
+// BundleHeader is the JSON header of a link.KindBundle stream (supervisor -> guest).
+type BundleHeader struct {
+	Dir      string `json:"dir,omitempty"`
+	Session  string `json:"session,omitempty"`
+	WorkDir  string `json:"work_dir,omitempty"`
+	Base     string `json:"base,omitempty"`
+	Full     bool   `json:"full,omitempty"`
+	MaxBytes int64  `json:"max_bytes,omitempty"`
+}
+
 // PutHeader is the JSON header of a link.KindPut stream.
 type PutHeader struct {
 	Name   string `json:"name"`

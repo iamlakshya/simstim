@@ -25,23 +25,28 @@ import (
 // cross-platform supervisor stream tests.
 type inProcSandbox struct {
 	runDir string
-	done   chan supervisor.Exit
+	done   chan struct{}
+	exit   supervisor.Exit
 }
 
 func (s *inProcSandbox) Start(_ context.Context) (net.Conn, error) {
 	supConn, guestConn := net.Pipe()
-	s.done = make(chan supervisor.Exit, 1)
+	s.done = make(chan struct{})
 	go func() { //nolint:contextcheck // guest.RunConn takes no context
 		err := guest.RunConn(guestConn, s.runDir)
 		_ = guestConn.Close()
-		s.done <- supervisor.Exit{Err: err}
+		s.exit = supervisor.Exit{Err: err}
+		close(s.done)
 	}()
 	return supConn, nil
 }
 func (s *inProcSandbox) Stop(_ context.Context, _ time.Duration) error { return nil }
 func (s *inProcSandbox) Kill() error                                   { return nil }
 func (s *inProcSandbox) Destroy() error                                { return nil }
-func (s *inProcSandbox) Wait() supervisor.Exit                         { return <-s.done }
+func (s *inProcSandbox) Wait() supervisor.Exit {
+	<-s.done
+	return s.exit
+}
 
 func TestSupervisorBridgeWalledSFTPAndExec(t *testing.T) {
 	th := hosttest.New(t)

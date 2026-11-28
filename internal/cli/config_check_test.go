@@ -429,13 +429,13 @@ func TestConfigCheckPackageManagerSettings(t *testing.T) {
 		t.Fatalf("findings = %+v, want package_level_invalid (line 2) and release_age_invalid (line 5)", rep.Findings)
 	}
 
-	writeConfigFiles(t, "[sandbox]\npackage_managers = \"strict\"\n\n[sandbox.env]\nGOPROXY = \"https://corp.example/go\"\n\n[network]\nmin_release_age = \"7d\"\nmodel_budget = 2000000\nupload_budget = \"16M\"\n", "")
+	writeConfigFiles(t, "[sandbox]\npackage_managers = \"strict\"\npull_max = \"1G\"\n\n[sandbox.env]\nGOPROXY = \"https://corp.example/go\"\n\n[network]\nmin_release_age = \"7d\"\nmodel_budget = 2000000\nupload_budget = \"16M\"\n", "")
 	out, _, code = runConfigCheckMain(t, "config", "check", "--json")
 	if code != 0 {
 		t.Fatalf("valid package/budget config failed: code=%d\n%s", code, out)
 	}
 
-	writeConfigFiles(t, "[network]\nmodel_budget = -50\nupload_budget = \"nope\"\n", "")
+	writeConfigFiles(t, "[sandbox]\npull_max = \"nope\"\n\n[network]\nmodel_budget = -50\nupload_budget = \"nope\"\n", "")
 	out, _, code = runConfigCheckMain(t, "config", "check", "--json")
 	if code != 1 {
 		t.Fatalf("invalid budget config code = %d, want 1\n%s", code, out)
@@ -444,16 +444,19 @@ func TestConfigCheckPackageManagerSettings(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &budgetRep); err != nil {
 		t.Fatalf("decode budget report: %v\n%s", err, out)
 	}
-	var sawModel, sawUpload bool
+	var sawModel, sawUpload, sawPullMax bool
 	for _, f := range budgetRep.Findings {
-		if f.Code == "model_budget_invalid" && f.Line == 2 {
+		if f.Code == "pull_max_invalid" && f.Line == 2 {
+			sawPullMax = true
+		}
+		if f.Code == "model_budget_invalid" && f.Line == 5 {
 			sawModel = true
 		}
-		if f.Code == "upload_budget_invalid" && f.Line == 3 {
+		if f.Code == "upload_budget_invalid" && f.Line == 6 {
 			sawUpload = true
 		}
 	}
-	if !sawModel || !sawUpload {
-		t.Fatalf("budget findings = %+v, want model_budget_invalid (line 2) and upload_budget_invalid (line 3)", budgetRep.Findings)
+	if !sawPullMax || !sawModel || !sawUpload {
+		t.Fatalf("budget findings = %+v, want pull_max_invalid (line 2), model_budget_invalid (line 5) and upload_budget_invalid (line 6)", budgetRep.Findings)
 	}
 }

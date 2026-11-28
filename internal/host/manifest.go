@@ -99,6 +99,11 @@ type Manifest struct {
 	SandboxOf string `json:"sandbox_of,omitempty"`
 	// Task is the short task description given at session start, if any.
 	Task string `json:"task,omitempty"`
+	// SeedHeads records the trusted base commit OID of each seeded workspace
+	// or worktree when the session started (isolation spec 6.10).
+	SeedHeads map[string]string `json:"seed_heads,omitempty"`
+	// Pulled records commit OIDs already pulled to the user's laptop (spec 6.10).
+	Pulled []string `json:"pulled,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -294,7 +299,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
 		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true, "usage": true,
 		"host_name": true, "sandbox_name": true, "copy_in": true, "copies_pending": true, "seed_repos": true,
-		"sandbox_of": true, "task": true}
+		"sandbox_of": true, "task": true, "seed_heads": true, "pulled": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)
