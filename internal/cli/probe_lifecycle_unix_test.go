@@ -11,11 +11,11 @@ import (
 	"reflect"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/muesli/cancelreader"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 
 	"github.com/iamlakshya/simstim/internal/client"
@@ -111,7 +111,7 @@ func TestTerminalProbeReportsRawFailureAndClosesItsReader(t *testing.T) {
 		// The factory returns a reader, but the subsequent raw-mode syscall
 		// fails. No physical Read has started, so replacing this owned test
 		// descriptor cannot race a terminal read.
-		if err := syscall.Dup2(int(plain.Fd()), int(f.Fd())); err != nil {
+		if err := unix.Dup2(int(plain.Fd()), int(f.Fd())); err != nil {
 			return nil, err
 		}
 		return preparedConsoleReader{

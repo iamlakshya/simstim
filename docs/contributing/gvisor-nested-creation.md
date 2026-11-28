@@ -10,8 +10,7 @@ This is creation custody. The fixed controller route also binds the original
 protected code suite and sealed public layout to C's actual execution. Its
 outside witness consumer checks current code, command vector, birth,
 namespaces, socket, final filesystem result and aggregate. The same original
-host operation gates the late guest stream. [The production
-route](gvisor-controller-production.md) describes those calls. Native and
-hardware acceptance remain separate.
+host operation gates the late guest stream. [The production route](gvisor-controller-production.md)
+describes those calls. Native and hardware acceptance remain separate.
 
 Focused test sources cover malformed native pidfd ancestry, substituted process birth and parent chains, missing or copied original owners, and setup data in creation messages. They do not replace the original nested creation, cancellation, parent-death, malformed rights, raw-entry, systrap and hardware checks.

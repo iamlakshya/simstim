@@ -18,6 +18,7 @@ The integration stack grew this branch to about 450,000 lines of mostly custom G
 ## Decision
 
 Option 2. If a well-known, maintained open-source library or tool meets a requirement, we use it. We build from scratch only when no available tool can meet the requirement, and one thing at a time. The parts chosen per area are in [reuse](../../research/reuse.md):
+
 - the process wall and the jails: bubblewrap
 - sessions: systemd user units
 - egress: goproxy, and a model gateway route with no TLS interception on the daily path

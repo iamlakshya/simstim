@@ -13,6 +13,8 @@ extend-ignore-re = [
   "\\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\\b",
   # Quotes from sources keep their own spelling.
   "\"[^\"\\n]{4,}\"",
+  # Cosign's own CLI subcommand.
+  "\\bcosign initialize\\b",
 ]
 
 [default.extend-words]

@@ -25,6 +25,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- The terminal probe lifecycle test now uses `unix.Dup2` so `go vet` works on `linux/arm64`. The CLI specification keeps the current cancellation exceptions and `host destroy` prompt row alongside the planned C7 behaviour, and contributor documentation passes Markdown lint, spelling and link checks.
 - The setup example uses the documented host name, and the guide index no longer repeats a page.
 - The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
 
