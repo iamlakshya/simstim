@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 53 |
-| To do | 46 |
+| Done | 54 |
+| To do | 45 |
 | **All** | **99** |
 
 ## Current focus
@@ -105,7 +105,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P3.4 | 3 | Later | Done | The guest init on a microvm |
 | P3.5 | 3 | Later | Done | The agents disk |
 | P3.6 | 3 | Later | Done | Lifecycle on a microvm |
-| P3.7 | 3 | Later | To do | The microvm probe, the kernel list and Lima |
+| P3.7 | 3 | Later | Done | The microvm probe, the kernel list and Lima |
 | P3.8 | 3 | Later | To do | Conformance, measurements and release |
 | P4.2 | 4 | Later | To do | Run verified bytes only |
 | P4.3 | 4 | Later | To do | Reproducible kernel and tools image |
