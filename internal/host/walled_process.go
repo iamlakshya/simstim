@@ -236,7 +236,12 @@ func mapAgentMounts(resolvedBin, searchPath string, agent agents.Agent) (guestAr
 	if err != nil {
 		realBin = resolvedBin
 	}
+	// Resolve the home folder as the binary is resolved, so a home behind a
+	// symlink (such as /home -> /var/home) still matches the binary's path.
 	home, _ := os.UserHomeDir()
+	if real, rerr := filepath.EvalSymlinks(home); home != "" && rerr == nil {
+		home = real
+	}
 	cleanHome := filepath.Clean(home)
 	mounted := map[string]string{} // hostSrc -> guestDest
 	idx := 0
@@ -250,19 +255,8 @@ func mapAgentMounts(resolvedBin, searchPath string, agent agents.Agent) (guestAr
 		return dest
 	}
 
-	// Mount any existing InstallDirs of the agent read-only under /opt/agents/.
 	if home != "" {
-		for _, rel := range agent.InstallDirs {
-			hostDir := filepath.Clean(filepath.Join(home, rel))
-			if hostDir == cleanHome {
-				continue
-			}
-			if fi, serr := os.Stat(hostDir); serr == nil && fi.IsDir() {
-				dest := fmt.Sprintf("/opt/agents/install-%d", idx)
-				idx++
-				addMount(hostDir, dest)
-			}
-		}
+		mountInstallDirs(cleanHome, agent.InstallDirs, &idx, addMount)
 	}
 
 	guestArg0 = realBin
@@ -305,6 +299,26 @@ func mapAgentMounts(resolvedBin, searchPath string, agent agents.Agent) (guestAr
 		}
 	}
 	return guestArg0, mounts, pathDirs
+}
+
+// mountInstallDirs mounts the agent's install folders that exist under home
+// read-only under /opt/agents/.
+func mountInstallDirs(home string, rels []string, idx *int, addMount func(src, dest string) string) {
+	for _, rel := range rels {
+		hostDir := filepath.Clean(filepath.Join(home, rel))
+		if real, err := filepath.EvalSymlinks(hostDir); err == nil {
+			hostDir = real
+		}
+		// An install folder that is, or links to, the home folder would put
+		// all of home in the sandbox.
+		if hostDir == home {
+			continue
+		}
+		if fi, err := os.Stat(hostDir); err == nil && fi.IsDir() {
+			addMount(hostDir, fmt.Sprintf("/opt/agents/install-%d", *idx))
+			*idx++
+		}
+	}
 }
 
 func mapInsideExisting(path string, mounted map[string]string) (string, bool) {

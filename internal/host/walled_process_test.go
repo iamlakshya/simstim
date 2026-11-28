@@ -50,13 +50,13 @@ func TestMapAgentMountsClaudeSymlinkAlias(t *testing.T) {
 	}
 	var sawInstall, sawAlias bool
 	for _, m := range mounts {
-		if m.Dest == "/opt/agents/install-0" && m.Source == filepath.Join(home, ".local", "share", "claude") && m.ReadOnly {
+		if m.Dest == "/opt/agents/install-0" && m.Source == resolved(t, filepath.Join(home, ".local", "share", "claude")) && m.ReadOnly {
 			sawInstall = true
 		}
-		if m.Dest == "/opt/agents/bin/claude" && m.Source == realBin && m.ReadOnly {
+		if m.Dest == "/opt/agents/bin/claude" && m.Source == resolved(t, realBin) && m.ReadOnly {
 			sawAlias = true
 		}
-		if m.Source == home || m.Dest == home {
+		if m.Source == home || m.Source == resolved(t, home) || m.Dest == home {
 			t.Fatalf("mount leaked host home: %+v", m)
 		}
 	}
@@ -88,7 +88,7 @@ func TestMapAgentMountsToolchainAndShebang(t *testing.T) {
 	if !strings.HasPrefix(guestArg0, "/opt/agents/tool-") || !strings.HasSuffix(guestArg0, "/bin/codex") {
 		t.Fatalf("guestArg0 = %q, want /opt/agents/tool-*/bin/codex", guestArg0)
 	}
-	if len(mounts) != 1 || mounts[0].Source != nodeRoot || !mounts[0].ReadOnly {
+	if len(mounts) != 1 || mounts[0].Source != resolved(t, nodeRoot) || !mounts[0].ReadOnly {
 		t.Fatalf("mounts = %+v, want single RO mount of toolchain root %s", mounts, nodeRoot)
 	}
 	if len(pathDirs) != 1 || !strings.HasSuffix(pathDirs[0], "/bin") {
@@ -166,4 +166,15 @@ func TestProcessWalledEnvAndProbeFailure(t *testing.T) {
 	if !errors.As(err, &pe) || pe.Code != "wall_setup" || pe.Hint == "" {
 		t.Fatalf("err = %#v, want proto.Error{Code:wall_setup, Hint:...}", err)
 	}
+}
+
+// resolved is path with its symlinks resolved, as mapAgentMounts mounts it.
+// On macOS the test's temporary folder is under /var, a link to /private/var.
+func resolved(t *testing.T, path string) string {
+	t.Helper()
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return real
 }
