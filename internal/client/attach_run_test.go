@@ -41,6 +41,7 @@ type attachRun struct {
 	tr    *hosttest.Transport
 	term  *hosttest.Terminal
 	state client.AttachState
+	wall  string
 }
 
 func newAttachRun(t *testing.T) *attachRun {
@@ -57,7 +58,7 @@ func newAttachRun(t *testing.T) *attachRun {
 // session starts a session that runs a shell script.
 func (r *attachRun) session(script string) string {
 	r.t.Helper()
-	s, err := host.New(host.NewArgs{Name: "s", Cwd: "~", Argv: []string{"/bin/sh", "-c", script}, Cols: 80, Rows: 24})
+	s, err := host.New(host.NewArgs{Name: "s", Cwd: "~", Argv: []string{"/bin/sh", "-c", script}, Cols: 80, Rows: 24, Wall: r.wall})
 	if err != nil {
 		r.t.Fatal(err)
 	}
@@ -103,6 +104,12 @@ func waitFile(t *testing.T, path, want string) []byte {
 }
 
 func TestAttachIsByteExact(t *testing.T) { checkByteExact(t, newAttachRun(t), nil) }
+
+func TestAttachWalledPlainIsByteExact(t *testing.T) {
+	r := newAttachRun(t)
+	r.wall = "plain"
+	checkByteExact(t, r, nil)
+}
 
 // checkByteExact attaches to a session that prints every byte value and
 // records every key, and checks that both reach the other end unchanged.

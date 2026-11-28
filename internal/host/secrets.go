@@ -186,6 +186,13 @@ func missingSecretsNote(names []string, restored bool) string {
 // agent, and records any that are missing. The caller has not started the
 // agent yet, so it needs no lock.
 func (h *Holder) secretsBeforeStart(restored bool) {
+	if h.isGuest() {
+		h.secretEnv = h.guest.secretEnv
+		h.notes = append(h.notes, h.guest.notes...)
+		h.guest.secretEnv = nil
+		h.guest.notes = nil
+		return
+	}
 	want := h.m.Secrets
 	h.m.MissingSecrets = nil
 	if len(want) == 0 {

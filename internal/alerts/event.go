@@ -28,14 +28,15 @@ const (
 	Memory     = "memory"      // the session is close to its memory cap
 	Started    = "started"     // the session started
 	Restored   = "restored"    // the session started again after a host restart
+	LinkSilent = "link_silent" // the guest init stopped sending heartbeats
 	Test       = "test"        // sent by the test command only
 )
 
 // Kinds lists the events a config may name.
-var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored}
+var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored, LinkSilent}
 
 // DefaultEvents are sent when a config names none.
-var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory}
+var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory, LinkSilent}
 
 // Version is the version of the event's JSON. It changes only when a field
 // changes meaning or goes away; new fields may appear at any time.
@@ -124,6 +125,8 @@ func summary(ev Event) string {
 		s = name + " started on " + ev.Host
 	case Restored:
 		s = name + " was restored on " + ev.Host + " after a restart"
+	case LinkSilent:
+		s = on + " stopped answering on its link"
 	case Test:
 		return "Test alert from " + ev.Host
 	default:

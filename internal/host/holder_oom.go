@@ -45,7 +45,7 @@ const oomChildReason = api.ReasonChildOOM
 // count when a new kill needs a snapshot of the unit's processes, or 0. The
 // caller holds h.mu.
 func (h *Holder) checkOOM(kills int64) (snap int64) {
-	if h.reaped {
+	if h.isGuest() || h.reaped {
 		return 0
 	}
 	noted := h.oomNoted
@@ -90,6 +90,9 @@ func (h *Holder) reap() (newKills bool, snap int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.reaped = true
+	if h.isGuest() {
+		return false, 0
+	}
 	n := readOOMKills(h.id)
 	snap = h.newSnapshot(n)
 	if n <= h.oomSeen {

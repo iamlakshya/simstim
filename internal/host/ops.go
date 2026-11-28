@@ -80,6 +80,9 @@ func expandHome(p string) string {
 
 // New starts a session and returns its row.
 func New(a NewArgs) (_ *SessionInfo, err error) {
+	if a.Wall != "" && a.Wall != "none" {
+		return newWalled(a)
+	}
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
@@ -159,26 +162,7 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	m.Secrets = secrets
 	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
 	m.RunHook = m.SetupHook
-	if len(a.Argv) > 0 {
-		// A restore or a resume runs the user's own command again, unless
-		// the agent resumes its own session by ID (resumeArgv).
-		m.Agent.Command = slices.Clone(argv)
-	}
-	if known {
-		m.Agent.ResumeArgv = agent.Resume
-		m.Agent.ContinueArgv = agent.Continue
-		m.Agent.Hooks = hooks
-		if inline {
-			m.Agent.Inline = agent.Inline.Args
-		}
-		// The agent gets the ID only through its command. A command of the
-		// user's own passes it only with the {session_uuid} placeholder, and
-		// a resume by an ID that the agent never got would find nothing.
-		if agent.IDCapture == "choose" && passesID(argv, sessionUUID) {
-			m.Agent.AgentSessionID = sessionUUID
-			m.Agent.IDSource = "chosen"
-		}
-	}
+	fillAgentManifest(m, a.Argv, argv, agent, known, inline, hooks, sessionUUID)
 	return startSession(m, a.Secrets)
 }
 
@@ -277,7 +261,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 		return nil, err
 	}
 	logSkippedCopies(id, m.Git)
-	if err := startHolder(m); err != nil {
+	if err := startSessionProc(m); err != nil {
 		return nil, UserError("start_failed", err.Error(), "Check the session log with the host doctor.")
 	}
 	if err := deliverSecrets(id, secrets); err != nil {
@@ -310,7 +294,7 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 			st.Reason = "the session's holder stopped"
 		}
 	}
-	return SessionInfo{
+	info := SessionInfo{
 		ID: m.ID, Name: m.Name, Agent: m.Agent.Kind, Cwd: m.Cwd,
 		State: st.State, Source: st.Source, Since: st.Since, Reason: st.Reason, ExitCode: st.ExitCode, Signal: st.Signal, OOM: st.OOM,
 		CreatedAt: m.CreatedAt, LastActivityAt: m.LastActivityAt, LastAttachedAt: m.LastAttachedAt,
@@ -319,6 +303,8 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
 		DebugUntil: debugUntil(m, alive),
 	}
+	fillWallInfo(&info, m)
+	return info
 }
 
 // debugUntil is when the session's debug stops by itself, while it is on.
@@ -456,6 +442,9 @@ func deleteSession(id string, res *DeleteResult) error {
 	}
 	if err := os.RemoveAll(paths.SessionDir(id)); err != nil {
 		return fmt.Errorf("remove the files of session %s: %w", id, err)
+	}
+	if isWalled(m) {
+		_ = os.RemoveAll(paths.GuestRuntimeDir(id))
 	}
 	res.Deleted = true
 	return nil

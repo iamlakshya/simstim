@@ -181,5 +181,6 @@ func (h *Holder) keepAgentID(id, source string, now time.Time) bool {
 	h.m.Agent.AgentSessionID = id
 	h.m.Agent.IDSource = "hook"
 	h.m.Agent.IDHistory = append(h.m.Agent.IDHistory, IDEvent{ID: id, Source: source, At: now})
+	h.emitGuestAgentID(id, source)
 	return true
 }

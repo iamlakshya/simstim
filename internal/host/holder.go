@@ -20,7 +20,6 @@ import (
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/diag"
-	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/ring"
 	"github.com/iamlakshya/simstim/internal/version"
@@ -118,15 +117,17 @@ type Holder struct {
 	notes     []string
 	// The debug trace (holder_trace.go), on while a traced client is attached.
 	dbg holderDebug
+	// guest is non-nil when the holder runs inside a wall under guest init.
+	guest *guestConfig
 }
 
 // RunHolder runs the holder for session id until the session is killed.
 func RunHolder(id string) error {
-	m, err := LoadManifest(id)
+	g, m, err := loadHolderManifest(id)
 	if err != nil {
-		return fmt.Errorf("load manifest: %w", err)
+		return err
 	}
-	lf, err := openHolderLog(paths.HolderLog(id), holderLogMax)
+	lf, err := openHolderLog(holderLogPath(id, g), holderLogMax)
 	if err != nil {
 		return err
 	}
@@ -139,24 +140,27 @@ func RunHolder(id string) error {
 		ring:     ring.New(RingSize),
 		clients:  map[*hclient]struct{}{},
 		readDone: make(chan struct{}),
+		guest:    g,
 	}
 	h.dbg.lines = lines
 	// A holder that starts again, as after a reboot, starts with debug off.
 	m.DebugUntil = nil
-	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version)
+	h.log.Info("holder starting", "session", id, "helper", brand.HostBinary, "version", version.Version, "guest", g != nil)
 	restored := wasRestored(m)
 	if err := h.listen(); err != nil {
 		h.log.Error("listen failed", "err", err)
+		h.emitGuestStart(err)
 		return err
 	}
 	h.secretsBeforeStart(restored)
 	if err := h.start(); err != nil {
 		h.log.Error("agent did not start", "err", err)
+		h.emitGuestStart(err)
 		h.mu.Lock()
 		code := 127
 		h.m.Status = Status{State: StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: err.Error()}
 		h.mu.Unlock()
-		_ = h.m.Save()
+		_ = h.save(h.m, true)
 		h.closeSockets()
 		return err
 	}
@@ -164,6 +168,7 @@ func RunHolder(id string) error {
 	h.startVT()
 	go h.acceptLoop(h.ln, false)
 	go h.acceptLoop(h.hookLn, true)
+	h.emitGuestStart(nil)
 	go h.readLoop()
 	go h.waitLoop()
 	go h.tick()
@@ -210,20 +215,24 @@ func (h *Holder) start() error {
 		h.scr = newScreenModel(cols, rows)
 	}
 	h.cmd = cmd
-	// Make the agent, not the holder, the first choice of the OOM killer.
-	_ = os.WriteFile(fmt.Sprintf("/proc/%d/oom_score_adj", cmd.Process.Pid), []byte("500"), 0)
-	h.oomSeen = readOOMKills(h.id)
-	h.oomNoted, h.oomSnapped = h.oomSeen, h.oomSeen
-	h.startMemory()
+	if !h.isGuest() {
+		// Make the agent, not the holder, the first choice of the OOM killer.
+		_ = os.WriteFile(fmt.Sprintf("/proc/%d/oom_score_adj", cmd.Process.Pid), []byte("500"), 0)
+		h.oomSeen = readOOMKills(h.id)
+		h.oomNoted, h.oomSnapped = h.oomSeen, h.oomSeen
+		h.startMemory()
+	}
 
 	h.mu.Lock()
 	now := time.Now().UTC()
-	if u := ownUnit(h.id); u != "" {
-		m.Run.Unit = u
+	if !h.isGuest() {
+		if u := ownUnit(h.id); u != "" {
+			m.Run.Unit = u
+		}
 	}
 	m.Run.HolderPID = os.Getpid()
 	m.Run.AgentPID = cmd.Process.Pid
-	m.Run.Socket = paths.Socket(h.id)
+	m.Run.Socket = h.socketPath()
 	m.Run.BootID = BootID()
 	m.Run.StartedAt = now
 	if exe, err := os.Executable(); err == nil {
@@ -232,8 +241,9 @@ func (h *Holder) start() error {
 	m.HostVersion = version.Version
 	m.Status = Status{State: StateWorking, Since: now, Source: "start"}
 	h.lastOut = time.Now()
+	mCopy := *m
 	h.mu.Unlock()
-	if err := m.Save(); err != nil {
+	if err := h.save(&mCopy, false); err != nil {
 		h.log.Warn("manifest not saved", "err", err)
 	}
 	// The program and the count of its arguments only: an argument can hold
@@ -300,6 +310,7 @@ func (h *Holder) output(data []byte) {
 	})
 	h.dirty = true
 	h.mu.Unlock()
+	h.guestActivity()
 	lt.read(len(data), feed)
 }
 
@@ -359,6 +370,7 @@ func (h *Holder) waitLoop() {
 	// Save a copy: other goroutines change the manifest under the lock.
 	m := *h.m
 	h.mu.Unlock()
+	h.emitGuestEnded(ended)
 	_ = h.save(&m, false)
 }
 
@@ -441,6 +453,7 @@ func (h *Holder) updateStatus() {
 		}
 		h.dirty = true
 	}
+	h.emitGuestStatus()
 	if h.al.agent != agentPrev {
 		// Alerts follow the agent's own state, so its turns and questions
 		// count while the memory warning shows too.

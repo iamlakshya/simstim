@@ -120,11 +120,14 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	}
 	dropUnusableID(m)
 	m.Agent.Argv = argv
-	m.Env = withHookSocket(m.Env, m.ID)
+	if !isWalled(m) {
+		m.Env = withHookSocket(m.Env, m.ID)
+	}
 	m.RunHook = resumeHook(m)
 	m.Run.BootID = BootID()
-	// The old processes are gone. The new holder records its own.
+	// The old processes are gone. The new holder or supervisor records its own.
 	m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
+	m.Guest = nil
 	m.Limits.MemoryMax = sessionMemoryMax(m.Limits.MemoryAsked)
 	// To the nanosecond: the holder compares it with the last start, which
 	// can be in the same second. The other label goes: after a restore
@@ -137,7 +140,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	if err := m.Save(); err != nil {
 		return argv, why, err
 	}
-	if err := launchHolder(m); err != nil {
+	if err := startSessionProc(m); err != nil {
 		return argv, why, err
 	}
 	if err := deliverSecrets(m.ID, a.secrets); err != nil {

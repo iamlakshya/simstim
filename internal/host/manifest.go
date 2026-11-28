@@ -68,8 +68,35 @@ type Manifest struct {
 	// DebugUntil is when the session's debug stops by itself, while
 	// `debug start` has it on (holder_debug.go).
 	DebugUntil *time.Time `json:"debug_until,omitempty"`
+	// Wall is set for sessions that run under a supervisor and guest init.
+	Wall *WallRecord `json:"wall,omitempty"`
+	// Guest holds the latest claims reported by the guest inside the wall.
+	// Every string is cleaned with api.CleanText before it is kept.
+	Guest *GuestClaims `json:"guest,omitempty"`
 
 	extra map[string]json.RawMessage
+}
+
+// WallRecord records the wall a session runs in, written by the trusted side.
+type WallRecord struct {
+	Level          string    `json:"level"`
+	Driver         string    `json:"driver"`
+	Version        string    `json:"version,omitempty"`
+	Floor          string    `json:"floor,omitempty"`
+	DowngradedFrom string    `json:"downgraded_from,omitempty"`
+	Reason         string    `json:"reason,omitempty"`
+	At             time.Time `json:"at,omitempty"`
+}
+
+// GuestClaims holds the latest reports from the guest inside the wall.
+type GuestClaims struct {
+	State      string     `json:"state,omitempty"`
+	Source     string     `json:"source,omitempty"`
+	Reason     string     `json:"reason,omitempty"`
+	FullScreen bool       `json:"full_screen,omitempty"`
+	Since      time.Time  `json:"since,omitempty"`
+	Ports      []api.Port `json:"ports,omitempty"`
+	UpdatedAt  time.Time  `json:"updated_at,omitempty"`
 }
 
 // AgentInfo is the agent part of a manifest.
@@ -143,6 +170,9 @@ type Status struct {
 	Reason   string    `json:"reason,omitempty"`
 	// FullScreen is true while the program draws on the alternate screen.
 	FullScreen bool `json:"full_screen,omitempty"`
+	// Claimed is true when State, Source and Reason come from the guest
+	// inside a wall rather than from the trusted side.
+	Claimed bool `json:"claimed,omitempty"`
 }
 
 // Restart is the respawn policy (v2).
@@ -165,7 +195,8 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"last_activity_at": true, "last_attached_at": true, "host_version": true, "holder_binary": true,
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
-		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true}
+		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
+		"wall": true, "guest": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)
@@ -201,25 +232,41 @@ func (m Manifest) MarshalJSON() ([]byte, error) {
 
 // LoadManifest reads one session's manifest.
 func LoadManifest(id string) (*Manifest, error) {
-	b, err := os.ReadFile(paths.Manifest(id))
+	return LoadManifestPath(paths.Manifest(id))
+}
+
+// LoadManifestPath reads a session manifest from path.
+func LoadManifestPath(path string) (*Manifest, error) {
+	clean := filepath.Clean(path)
+	root, err := os.OpenRoot(filepath.Dir(clean))
 	if err != nil {
-		return nil, fmt.Errorf("read the manifest of session %s: %w", id, err)
+		return nil, fmt.Errorf("read the manifest %s: %w", path, err)
+	}
+	defer root.Close()
+	b, err := root.ReadFile(filepath.Base(clean))
+	if err != nil {
+		return nil, fmt.Errorf("read the manifest %s: %w", path, err)
 	}
 	var m Manifest
 	if err := json.Unmarshal(b, &m); err != nil {
-		return nil, fmt.Errorf("read the manifest of session %s: %w", id, err)
+		return nil, fmt.Errorf("read the manifest %s: %w", path, err)
 	}
 	return &m, nil
 }
 
 // Save writes the manifest atomically.
 func (m *Manifest) Save() error {
+	return m.SaveTo(paths.Manifest(m.ID))
+}
+
+// SaveTo writes the manifest atomically to path.
+func (m *Manifest) SaveTo(path string) error {
 	m.UpdatedAt = time.Now().UTC()
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
-	dir := paths.SessionDir(m.ID)
+	dir := filepath.Dir(path)
 	if err := paths.EnsurePrivateDir(dir); err != nil {
 		return err
 	}
@@ -238,7 +285,7 @@ func (m *Manifest) Save() error {
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
 	tmp.Close()
-	if err := os.Rename(tmp.Name(), filepath.Join(dir, "manifest.json")); err != nil {
+	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("save the manifest of session %s: %w", m.ID, err)
 	}
 	// Make the rename itself durable, so a shutdown right after cannot lose it.

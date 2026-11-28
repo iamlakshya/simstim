@@ -1,18 +1,24 @@
 package host
 
 import (
+	"bufio"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"hash"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/version"
 )
 
 // MaxUpload is the largest file a client may upload.
@@ -54,15 +60,28 @@ type upload struct {
 	f       *os.File
 	n       int64
 	h       hash.Hash
+	// For walled sessions, the upload streams through the supervisor socket
+	// instead of writing directly to paths.PasteDir on the host.
+	supMu     sync.Mutex
+	supConn   net.Conn
+	supW      *proto.Writer
+	supR      *bufio.Reader
+	supFailed atomic.Bool
 	// idle reclaims the upload when no frame of it comes for uploadIdle.
 	idle *time.Timer
 }
 
-// drop closes the upload's file and removes it.
+// drop closes the upload's file or supervisor stream and removes any temp file.
 func (u *upload) drop() {
 	u.idle.Stop()
-	_ = u.f.Close()
-	_ = os.Remove(u.f.Name())
+	if u.supConn != nil {
+		_ = u.supConn.Close()
+		return
+	}
+	if u.f != nil {
+		_ = u.f.Close()
+		_ = os.Remove(u.f.Name())
+	}
 }
 
 // reclaimUploadsAt drops every upload that has begun and not ended. When
@@ -132,6 +151,10 @@ func (b *bridge) uploadBegin(p []byte) {
 	// A client sends one upload at a time: one that began before and never
 	// ended, its client gave up.
 	b.reclaimUploads()
+	if m, err := LoadManifest(u.Session); err == nil && isWalled(m) {
+		b.uploadBeginWalled(u, p)
+		return
+	}
 	dir := paths.PasteDir(u.Session)
 	if err := paths.EnsurePrivateDir(dir); err != nil {
 		fail(err)
@@ -162,18 +185,36 @@ func (b *bridge) uploadChunk(p []byte) {
 		return
 	}
 	b.umu.Lock()
-	defer b.umu.Unlock()
 	u := b.uploads[id]
 	if u == nil {
+		b.umu.Unlock()
 		return
 	}
 	u.idle.Reset(time.Duration(uploadIdle.Load()))
 	u.n += int64(len(data))
 	if u.n > MaxUpload {
+		b.umu.Unlock()
+		return
+	}
+	if u.supW != nil {
+		// Release b.umu before writing to the supervisor socket so reclaimUpload
+		// and bridge shutdown can never deadlock behind a stalled guest upload.
+		b.umu.Unlock()
+		if u.supFailed.Load() {
+			return
+		}
+		u.supMu.Lock()
+		_ = u.supConn.SetWriteDeadline(time.Now().Add(15 * time.Second))
+		if err := u.supW.Write(proto.TUploadChunk, p); err != nil {
+			u.supFailed.Store(true)
+			_ = u.supConn.Close()
+		}
+		u.supMu.Unlock()
 		return
 	}
 	_, _ = u.f.Write(data)
 	_, _ = u.h.Write(data)
+	b.umu.Unlock()
 }
 
 func (b *bridge) uploadEnd(p []byte) {
@@ -187,6 +228,10 @@ func (b *bridge) uploadEnd(p []byte) {
 	b.umu.Unlock()
 	if u == nil {
 		b.reply(e.ID, nil, UserError("upload", "unknown upload", ""))
+		return
+	}
+	if u.supW != nil {
+		b.uploadEndWalled(u, e, p)
 		return
 	}
 	runAfterUploadUntracked()
@@ -210,4 +255,97 @@ func (b *bridge) uploadEnd(p []byte) {
 	b.uploadsWG.Done()
 	b.note("upload", int(u.n))
 	b.reply(e.ID, proto.UploadResult{Path: final}, nil)
+}
+
+func (b *bridge) uploadBeginWalled(u proto.UploadBegin, raw []byte) {
+	fail := func(err error) { b.reply(u.ID, nil, err) }
+	d := net.Dialer{Timeout: 3 * time.Second}
+	conn, err := d.DialContext(context.Background(), "unix", paths.Socket(u.Session))
+	if err != nil {
+		fail(UserError("upload", "session "+u.Session+" is not running", "Start or wake the session first."))
+		return
+	}
+	sw := proto.NewWriter(conn)
+	sr := bufio.NewReaderSize(conn, 64<<10)
+	_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+	if err := sw.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "bridge"}); err != nil {
+		_ = conn.Close()
+		fail(err)
+		return
+	}
+	if f, err := proto.Read(sr); err != nil || f.Type != proto.THello {
+		_ = conn.Close()
+		fail(errors.New("the session's supervisor did not answer"))
+		return
+	}
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	if err := sw.Write(proto.TUploadBegin, raw); err != nil {
+		_ = conn.Close()
+		fail(err)
+		return
+	}
+	_ = conn.SetDeadline(time.Time{})
+	b.umu.Lock()
+	if b.uploadsDone {
+		b.umu.Unlock()
+		_ = conn.Close()
+		return
+	}
+	up := &upload{session: u.Session, name: safeName(u.Name), size: u.Size, supConn: conn, supW: sw, supR: sr}
+	b.uploads[u.ID] = up
+	b.uploadsWG.Add(1)
+	up.idle = time.AfterFunc(time.Duration(uploadIdle.Load()), func() { b.reclaimUpload(u.ID, up) })
+	b.umu.Unlock()
+}
+
+func (b *bridge) uploadEndWalled(u *upload, e proto.UploadEnd, raw []byte) {
+	runAfterUploadUntracked()
+	u.idle.Stop()
+	defer func() {
+		_ = u.supConn.Close()
+		b.uploadsWG.Done()
+	}()
+	if u.supFailed.Load() {
+		b.reply(e.ID, nil, UserError("upload", "the guest upload timed out or closed", "Try again."))
+		return
+	}
+	u.supMu.Lock()
+	_ = u.supConn.SetDeadline(time.Now().Add(15 * time.Second))
+	writeErr := u.supW.Write(proto.TUploadEnd, raw)
+	u.supMu.Unlock()
+	if writeErr != nil {
+		b.reply(e.ID, nil, writeErr)
+		return
+	}
+	for {
+		f, err := proto.Read(u.supR)
+		if err != nil {
+			b.reply(e.ID, nil, UserError("upload", "the supervisor closed the upload", "Try again."))
+			return
+		}
+		if f.Type != proto.TResponse {
+			continue
+		}
+		var resp proto.Response
+		if err := json.Unmarshal(f.Payload, &resp); err != nil {
+			b.reply(e.ID, nil, err)
+			return
+		}
+		if !resp.OK {
+			if resp.Error != nil {
+				b.reply(e.ID, nil, resp.Error)
+			} else {
+				b.reply(e.ID, nil, UserError("upload", "the upload failed", "Try again."))
+			}
+			return
+		}
+		var res proto.UploadResult
+		if err := json.Unmarshal(resp.Result, &res); err != nil {
+			b.reply(e.ID, nil, err)
+			return
+		}
+		b.note("upload", int(u.n))
+		b.reply(e.ID, res, nil)
+		return
+	}
 }

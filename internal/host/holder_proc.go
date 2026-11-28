@@ -55,6 +55,7 @@ func (h *Holder) stop(reason string, system bool) {
 	m := *h.m
 	h.mu.Unlock()
 	_ = h.save(&m, true)
+	h.closeGuestEvents()
 	h.closeSockets()
 	os.Exit(0)
 }
@@ -69,6 +70,13 @@ func (h *Holder) save(m *Manifest, last bool) error {
 		return nil
 	}
 	h.closed = last
+	if h.isGuest() {
+		// Never write the environment (which may include exposed secrets) to
+		// the guest manifest file (decision 0032).
+		cp := *m
+		cp.Env = nil
+		return cp.SaveTo(h.guest.manifestPath)
+	}
 	return m.Save()
 }
 

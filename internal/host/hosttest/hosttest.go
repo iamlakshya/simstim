@@ -27,8 +27,10 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
 
@@ -41,6 +43,12 @@ func Main(m *testing.M) {
 		switch os.Args[1] {
 		case "holder":
 			if err := host.RunHolder(os.Args[2]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		case "supervise":
+			if err := supervisor.Run(os.Args[2]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -62,6 +70,13 @@ func Main(m *testing.M) {
 	// ssh, serves the bridge.
 	if len(os.Args) >= 2 && os.Args[1] == "bridge" {
 		if err := host.RunBridge(host.BridgeInput(os.Stdin, os.Args[2:]), os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "wall-init" {
+		if err := guest.Run(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -277,7 +292,12 @@ func (h *Host) cleanup() {
 			continue
 		}
 		if h.t.Failed() {
-			h.t.Logf("holder log of %s:\n%s", id, h.HolderLog(id))
+			if log := h.HolderLog(id); log != "" {
+				h.t.Logf("holder log of %s:\n%s", id, log)
+			}
+			if b, err := os.ReadFile(paths.SupervisorLog(id)); err == nil && len(b) > 0 {
+				h.t.Logf("supervisor log of %s:\n%s", id, b)
+			}
 		}
 		pid := m.Run.HolderPID
 		if p := livePID(id); p > 0 {

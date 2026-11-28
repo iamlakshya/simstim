@@ -13,8 +13,10 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/proto"
+	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/version"
 )
 
@@ -44,17 +46,19 @@ var commands = map[string]func(args []string) error{
 		host.EndBridge()
 		return err
 	},
-	"idle":    runIdle,
-	"holder":  runHolder,
-	"ls":      runLs,
-	"new":     runNew,
-	"stop":    runStop,
-	"rm":      runRm,
-	"doctor":  runDoctor,
-	"hook":    runHook,
-	"restore": runRestore,
-	"prune":   runPrune,
-	"keytest": func([]string) error { return host.KeyTest() },
+	"idle":      runIdle,
+	"holder":    runHolder,
+	"supervise": runSupervise,
+	"wall-init": runWallInit,
+	"ls":        runLs,
+	"new":       runNew,
+	"stop":      runStop,
+	"rm":        runRm,
+	"doctor":    runDoctor,
+	"hook":      runHook,
+	"restore":   runRestore,
+	"prune":     runPrune,
+	"keytest":   func([]string) error { return host.KeyTest() },
 	// The helper runs git in a child of its own, and the client runs
 	// repo.info over SSH. Not for people, so left out of the usage.
 	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
@@ -104,6 +108,17 @@ func runHolder(args []string) error {
 	return host.RunHolder(args[0])
 }
 
+func runSupervise(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: %s supervise <id>", brand.HostBinary)
+	}
+	return supervisor.Run(args[0])
+}
+
+func runWallInit([]string) error {
+	return guest.Run()
+}
+
 func runLs(args []string) error {
 	list, err := host.List()
 	if err != nil {
@@ -148,6 +163,9 @@ func newArgs(args []string) (host.NewArgs, error) {
 		case "--name":
 			i++
 			a.Name = arg(args, i)
+		case "--wall":
+			i++
+			a.Wall = arg(args, i)
 		case "--setup":
 			a.Setup = api.SetupRun
 		case "--no-setup":

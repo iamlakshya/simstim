@@ -136,7 +136,7 @@ func (h *Holder) serveLimited(c *hclient, f proto.Frame) bool {
 // folder, and turns the peer check on when the holder runs in the unit that
 // launchHolder started for it.
 func (h *Holder) listen() error {
-	sock, hook := paths.Socket(h.id), paths.HookSocket(h.id)
+	sock, hook := h.socketPath(), h.hookSocketPath()
 	for _, dir := range []string{filepath.Dir(filepath.Dir(sock)), filepath.Dir(sock), filepath.Dir(hook)} {
 		if err := paths.EnsurePrivateDir(dir); err != nil {
 			return err
@@ -152,7 +152,9 @@ func (h *Holder) listen() error {
 		return err
 	}
 	h.ln, h.hookLn = ln, hookLn
-	h.peerCheck = inOwnUnit(h.id)
+	if !h.isGuest() {
+		h.peerCheck = inOwnUnit(h.id)
+	}
 	h.log.Info("sockets open", "peer_check", h.peerCheck)
 	return nil
 }
@@ -180,6 +182,6 @@ func (h *Holder) closeSockets() {
 			ln.Close()
 		}
 	}
-	os.Remove(paths.Socket(h.id))
-	os.Remove(paths.HookSocket(h.id))
+	os.Remove(h.socketPath())
+	os.Remove(h.hookSocketPath())
 }

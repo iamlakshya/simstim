@@ -23,7 +23,7 @@ import (
 )
 
 // Features this host helper offers. Clients check them before using a feature.
-var Features = []string{"attach.replay", "upload", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace"}
+var Features = []string{"attach.replay", "upload", "put", "peek", "setup", "rename", "send", "hooks", "restore", "ports", "worktree", "folders", "alerts", "trace"}
 
 type bridge struct {
 	w *proto.Writer

@@ -243,6 +243,7 @@ func (h *Holder) resize(c *hclient, rz proto.Resize, force bool) {
 	if !leader || exited {
 		return
 	}
+	h.emitGuestResize(rz.Cols, rz.Rows)
 	h.noteClamp(asked, rz)
 	h.log.Debug("resize", diag.CatKey, diag.CatAttach, "cols", rz.Cols, "rows", rz.Rows, "force", force)
 	_ = pty.Setsize(h.ptmx, &pty.Winsize{Cols: clampCols(rz.Cols), Rows: clampRows(rz.Rows), X: clamp16(rz.XPx), Y: clamp16(rz.YPx)})

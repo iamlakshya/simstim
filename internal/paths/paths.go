@@ -58,6 +58,18 @@ func PasteDir(id string) string { return filepath.Join(SessionDir(id), "paste") 
 // HolderLog is the log of one session's holder.
 func HolderLog(id string) string { return filepath.Join(SessionDir(id), "holder.log") }
 
+// SupervisorLog is the log of one walled session's supervisor.
+func SupervisorLog(id string) string { return filepath.Join(SessionDir(id), "supervisor.log") }
+
+// AuditLog is the append-only JSON-lines audit log of one walled session.
+func AuditLog(id string) string { return filepath.Join(SessionDir(id), "audit.jsonl") }
+
+// WorkDir is the workspace folder of one walled session.
+func WorkDir(id string) string { return filepath.Join(SessionDir(id), "work") }
+
+// SessionStateDir holds the agent state folders kept across starts of a walled session.
+func SessionStateDir(id string) string { return filepath.Join(SessionDir(id), "state") }
+
 // DebugTrace is the debug trace of one session's holder, one JSON object a
 // line. It turns over to the same name with ".1" added.
 func DebugTrace(id string) string { return filepath.Join(SessionDir(id), "debug.jsonl") }
@@ -89,6 +101,10 @@ func Socket(id string) string { return filepath.Join(RuntimeDir(), "s", id+".soc
 // path has the same length as Socket's, so that it fits wherever the session
 // socket fits: Linux allows 107 bytes, macOS 103.
 func HookSocket(id string) string { return filepath.Join(RuntimeDir(), "h", id+".sock") }
+
+// GuestRuntimeDir is the short private folder where an unwalled test driver
+// places a guest's local sockets, so they fit inside the Unix socket path limit.
+func GuestRuntimeDir(id string) string { return filepath.Join(RuntimeDir(), "g", id) }
 
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }

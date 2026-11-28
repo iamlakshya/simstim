@@ -131,6 +131,9 @@ type memRead struct {
 // startMemory finds the unit's cgroup folder and its "max" count, when
 // the agent starts.
 func (h *Holder) startMemory() {
+	if h.isGuest() {
+		return
+	}
 	h.mem.dir = unitCgroupDir(h.id)
 	if h.mem.dir != "" {
 		h.mem.hits = readKeyed(filepath.Join(h.mem.dir, "memory.events"))["max"]
@@ -217,8 +220,9 @@ func (w *memWatch) growth(r memRead) float64 {
 // checkMemory starts and ends the warning's episodes from one tick's read,
 // and sends the memory alert when a warning starts. The caller holds h.mu.
 func (h *Holder) checkMemory(r memRead) {
-	if h.reaped {
-		// The agent has ended, and waitLoop sets the session's end.
+	if h.isGuest() || h.reaped {
+		// The agent has ended, and waitLoop sets the session's end; in guest
+		// mode, the supervisor outside the wall owns unit memory checks.
 		return
 	}
 	w := &h.mem

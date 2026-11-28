@@ -260,7 +260,7 @@ func (d *Dispatcher) queue(ev Event, set *Settings, sinks []sink) string {
 	if d.closed {
 		return ""
 	}
-	end := ev.ends()
+	end := ev.ends() || ev.Event == LinkSilent
 	if last, ok := d.sent[ev.Event]; ok && !end && now.Sub(last) < sessionGap {
 		return "this session sent one " + ev.Event + " in the last minute"
 	}

@@ -63,6 +63,19 @@ type NewArgs struct {
 	// SetupHashes holds, by repository, the setup hash that the user
 	// trusted. The scripts run only while their content has that hash.
 	SetupHashes map[string]string `json:"setup_hashes,omitempty"`
+	// Wall names the isolation wall for this session: "", "none", or a driver
+	// such as "plain" (the test-only supervisor driver).
+	Wall string `json:"wall,omitempty"`
+}
+
+// WallInfo is a session's wall, in its row.
+type WallInfo struct {
+	Level          string `json:"level"`
+	Driver         string `json:"driver"`
+	Version        string `json:"version,omitempty"`
+	Floor          string `json:"floor,omitempty"`
+	DowngradedFrom string `json:"downgraded_from,omitempty"`
+	Preset         string `json:"preset,omitempty"`
 }
 
 // SessionInfo is one row of the session list.
@@ -100,6 +113,12 @@ type SessionInfo struct {
 	// DebugUntil is when the session's debug stops by itself, while
 	// `debug start` has it on.
 	DebugUntil *time.Time `json:"debug_until,omitempty"`
+	// Wall describes the sandbox wall of a walled session, or nil for an
+	// unwalled session.
+	Wall *WallInfo `json:"wall,omitempty"`
+	// Claimed is true when State, Source and Reason come from the guest
+	// inside the wall rather than from the trusted side.
+	Claimed bool `json:"claimed,omitempty"`
 }
 
 // ResumeArgs asks a host to start the agent of a session again, in the same

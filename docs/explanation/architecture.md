@@ -35,6 +35,8 @@ Installed by the client into `~/.local/share/simstim/bin/<version>/`, with a `cu
 | `bridge` | Speaks framed RPC on stdin and stdout to one client. Connects to holder sockets. Runs `ls`, `watch`, `new`, `kill` and uploads for that client. | One client channel |
 | `new` | Resolves the environment, writes the manifest, starts a holder as a systemd user service | Seconds |
 | `holder <id>` (internal) | Owns one session's PTY, ring, socket, manifest and status | The session |
+| `supervise <id>` (internal) | Trusted supervisor of a walled session: owns the sandbox, the trusted manifest, the audit log, alerts, unit memory tracking and the session socket, and relays checked frames over `internal/link` | The session |
+| `wall-init` (internal) | Guest init inside a wall: speaks `internal/link` on fd 3, starts the holder in guest mode, relays `holder` streams byte-for-byte, accepts `put` uploads, sends heartbeats and reaps orphans as PID 1 | The sandbox |
 | `simstim-vt` (internal) | The shadow terminal: a static Zig program on libghostty-vt (source in `vt/`). A child of the holder, fed every output byte; it makes snapshots for new clients and answers terminal queries while no client is attached. Restarted on a crash from the ring. | The session |
 | `attach <id>` | Raw fallback: bridges a plain `ssh -t` to one holder, for any SSH client | One attach |
 | `ls --json`, `watch --json` | Reads manifests and probes holders in parallel. `watch` streams status events as NDJSON. | Seconds, or one client |
@@ -79,6 +81,17 @@ Agent knowledge is data in `internal/agents`, shipped with the host helper. Ther
 | screen rules | A TOML file per agent in `internal/agents/rules` |
 
 Codex's launch, resume and continue commands include `--no-daemon`, so its work stays inside the session. Its resume command puts `--` before the session ID, so the ID cannot be read as a flag. There is no separate `quirks` field. The current agent table is in [the generated reference](../reference/agents.md).
+
+### 2.5 Walled sessions: supervisor, guest init and holder guest mode
+
+A walled session splits the helper into a trusted side outside the wall and an untrusted side inside it ([0029](../contributing/decisions/0029-a-sandbox-per-session.md), [0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)):
+
+- **Supervisor (`simstim-host supervise <id>`):** runs outside the wall as the main process of the session's systemd unit. It owns the sandbox, the trusted manifest, the append-only audit log (`audit.jsonl`), alerts, unit memory warnings and out-of-memory checks, and serves `paths.Socket(id)` alone. It opens no network port and no listener that the guest can connect to.
+- **Link (`internal/link`):** joins the supervisor and guest init over an inherited Unix socket pair (fd 3 in the guest). It carries `ctl` (control requests, heartbeats and guest events), `holder` (connections to the guest holder) and `put` (uploaded paste files) streams with per-stream flow control.
+- **Guest init (`simstim-host wall-init`):** runs inside the wall. It starts `simstim-host holder <id>` in guest mode, passes startup metadata and any secret values in memory over stdin (never written to disk), relays `holder` streams byte-for-byte to the guest holder's local socket, stores verified paste uploads on `put` streams, sends a heartbeat every 5 s and reaps orphaned children when running as PID 1.
+- **Holder guest mode:** reads its guest socket paths from the environment, skips systemd and host alert delivery, and reports status, agent alerts, agent session IDs, resizes and agent exit to guest init over fd 3. Its PTY, 8 MiB ring, shadow terminal, replay by offset and screen rules stay unchanged inside the wall.
+- **Byte-exact framing and claims:** on attached `holder` streams, the supervisor checks frame types and control-frame sizes and closes the connection on any disallowed type. It never parses or alters `TOutput` or `TSnapshot` payloads. Guest reports on `ctl` are size-capped, rate-limited, cleaned with `CleanText` and recorded as claims (`claimed: true`); the trusted side decides session exit, out-of-memory kills and memory warnings.
+- **Environment:** a walled session starts from a fixed base (`USER=agent`, `LOGNAME=agent`, `LANG=C.UTF-8`, a private `HOME`, terminal variables and a narrow `PATH`), never from the host's login environment. Only the test-only `plain` driver uses this path so far, so ordinary sessions do not change.
 
 ## 3. Flows
 
@@ -278,7 +291,7 @@ The contract has its own page: [the fidelity contract](fidelity.md).
 | Path | Contents |
 | --- | --- |
 | `~/.local/share/simstim/bin/<version>/` and `current` | `simstim-host` and `simstim-vt` |
-| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), `holder.log` (turned over at 1 MiB), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
+| `~/.local/state/simstim/sessions/<id>/` | `manifest.json`, `paste/` (0700), `holder.log` (turned over at 1 MiB), `supervisor.log` and `audit.jsonl` (0600, walled sessions), and while debug is on, `debug.jsonl` and `debug/` (0700) with profiles and saved windows ([debug a session](../how-to/debug-a-session.md)) |
 | `~/.local/state/simstim/debug/` | The bridges' debug files, while a client with debug on is connected (0700) |
 | `$XDG_RUNTIME_DIR/simstim/s/<id>.sock` | Holder sockets, 0600. Falls back to `/tmp/simstim-<uid>` (0700, owner checked) without linger. |
 | `$XDG_RUNTIME_DIR/simstim/h/<id>.sock` | Hook sockets, 0600, in a 0700 folder. Each path is as long as its session socket's, so it fits wherever that fits. The agent's environment names its own as `SIMSTIM_HOOK_SOCK`. |
