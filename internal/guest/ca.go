@@ -141,14 +141,35 @@ func validatePublicCertPEM(raw string) ([]byte, error) {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes}), nil
 }
 
+// readSystemCABundle returns the CERTIFICATE blocks of the first system
+// bundle that has any, re-encoded as PEM. Anything else in the file, such as
+// macOS's text descriptions or a stray key, never reaches the sandbox.
 func readSystemCABundle(candidates []string) []byte {
 	for _, p := range candidates {
 		data, err := os.ReadFile(p)
-		if err == nil && len(bytes.TrimSpace(data)) > 0 {
-			return data
+		if err != nil {
+			continue
+		}
+		if certs := certificateBlocks(data); len(certs) > 0 {
+			return certs
 		}
 	}
 	return nil
+}
+
+// certificateBlocks keeps only the PEM blocks of type CERTIFICATE in data.
+func certificateBlocks(data []byte) []byte {
+	var out bytes.Buffer
+	for {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			return out.Bytes()
+		}
+		if block.Type == "CERTIFICATE" && len(block.Headers) == 0 {
+			_ = pem.Encode(&out, &pem.Block{Type: "CERTIFICATE", Bytes: block.Bytes})
+		}
+	}
 }
 
 func writeAtomicRootFile(root *os.Root, name string, data []byte, perm os.FileMode) error {

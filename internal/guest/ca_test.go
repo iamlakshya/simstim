@@ -2,6 +2,7 @@ package guest
 
 import (
 	"bytes"
+	"encoding/pem"
 	"os"
 	"strings"
 	"testing"
@@ -41,8 +42,20 @@ func TestWriteSessionCAAndEnvVars(t *testing.T) {
 	if !bytes.Contains(bundleBytes, bytes.TrimSpace(caBytes)) {
 		t.Fatal("ca-bundle.pem does not contain session CA certificate")
 	}
-	if bytes.Contains(bytes.ToUpper(bundleBytes), []byte("PRIVATE KEY")) {
-		t.Fatal("ca-bundle.pem must never contain PRIVATE KEY")
+	// Only CERTIFICATE blocks: the system bundle may hold text, such as the
+	// "Private Key Usage Period" extension name on macOS, but no key block.
+	for rest := bundleBytes; ; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			t.Fatalf("ca-bundle.pem holds a %s block", block.Type)
+		}
+	}
+	if bytes.Contains(bundleBytes, []byte("Private Key Usage Period")) {
+		t.Fatal("ca-bundle.pem kept the system bundle's text; want PEM blocks only")
 	}
 
 	// Verify agent CAEnv wiring for Claude Code and Codex.
