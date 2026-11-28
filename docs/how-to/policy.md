@@ -37,10 +37,30 @@ network.deny = ["evil.example"]
 - **Any deny beats any allow.** A deny rule overrides `network.allow`, live session grants, agent hosts and presets.
 - **Locks stay fixed.** A host in `[lock]` cannot be opened by a live grant or a policy reload.
 - **Ports.** An `allow` entry without a port allows port 443. Write `host:port` to allow another port. A `deny` entry without a port denies every port on that host.
+- **Method and path rules.** Prefix an allow, deny or lock rule with an HTTP method (`GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`) or add a canonical path pattern (`*` for one segment, `**` for any depth, or a trailing `/` for a prefix):
+  - `allow = ["GET api.example.com/v1/*", "POST api.example.com/v1/items"]`
+  - `deny = ["DELETE api.example.com/v1/**"]`
+  - Any host covered by a method or path rule is intercepted over HTTPS so the proxy enforces the rule on each canonical request.
 - **Wildcards.** `*.example.com` matches subdomains such as `api.example.com`, never the apex `example.com`. Broad wildcards on a public or shared suffix (such as `*.com`, `*.co.uk`, `*.vercel.app` or `*.github.io`) are refused in allow rules; name a specific host such as `app.vercel.app` instead.
 - **Unknown hosts.** With `unknown = "deny"` (the default), any unmatched host gets an HTTP 403 whose body names the grant command. With `unknown = "allow"`, unmatched public hosts pass and are logged as `allow-unknown`.
 
 Live commands (`policy allow`, `policy deny` and `policy ls`) are wired on top of this engine in task P1.8.
+
+## Interception, registries and splice-only hosts
+
+Most allowed hosts are spliced as raw TCP bytes after the port-443 TLS SNI check. The egress process terminates TLS only for hosts that need HTTP-level enforcement ([decision 0038](../contributing/decisions/0038-tls-interception-on-the-trusted-side.md)):
+
+- **Package registries (`internal/egress/rules/registries.toml`):** `registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `upload.pypi.org`, `proxy.golang.org`, `sum.golang.org`, `crates.io`, `index.crates.io`, `static.crates.io` and `rubygems.org` allow `GET` and `HEAD` only by default. Writes such as `npm publish` (`PUT`), unpublish, dist-tag updates, PyPI uploads and `cargo publish` fail with HTTP 403 and a `Try:` hint unless an explicit method/path rule allows them.
+- **Object stores (`internal/egress/rules/object_stores.toml`):** `*.s3.amazonaws.com`, `s3.amazonaws.com`, `storage.googleapis.com` and `*.blob.core.windows.net` are restricted to `GET` and `HEAD` whenever a grant allows the host, unless an explicit method/path rule allows writes.
+- **Method and path rules:** any host referenced by a method- or path-scoped rule in `allow`, `deny`, `lock` or a live grant is intercepted.
+- **Splice-only list (`internal/egress/rules/splice.toml`):** hosts whose clients pin certificates or require mTLS (such as `mtls.googleapis.com`, `*.mtls.googleapis.com`, `controlplane.tailscale.com`, `gdmf.apple.com` and `mesu.apple.com`) are never intercepted and never receive a secret.
+- **Model APIs stay on the gateway:** model hosts still travel over plain-HTTP `/gw/<route>` routes without TLS interception ([decision 0057](../contributing/decisions/0057-model-gateway-route.md)).
+
+For intercepted hosts:
+
+- **Per-session in-memory CA:** the egress process generates a fresh ECDSA P-256 CA at each start, keeps its private key only in memory (never in any file or over fd 3) and wipes the key on exit ([decision 0032](../contributing/decisions/0032-secret-values-in-memory-only.md)). Guest init writes the public certificate to `/run/simstim/ca.pem` and a combined system-plus-session bundle to `/run/simstim/ca-bundle.pem`, setting `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `GIT_SSL_CAINFO`, `CURL_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS` (the CA alone) and any agent-specific `CAEnv` variables (such as `CODEX_CA_CERTIFICATE` for Codex).
+- **HTTP/2 over ALPN and verified upstream TLS:** every intercepted host advertises `h2` and `http/1.1` through ALPN, and forwards requests through one shared `http.Transport` with TLS 1.2+ and full system-root certificate verification.
+- **Canonical request checks:** before matching rules or forwarding upstream, the egress process checks ClientHello SNI and refuses ECH, refuses HTTP/1.1 smuggling vectors (duplicate `Host`, both `Content-Length` and `Transfer-Encoding`, multiple `Content-Length`, obsolete line folding, bare `LF`/`CR`, unsupported `Transfer-Encoding` and nested `CONNECT`), refuses any `Host`, HTTP/2 `:authority` or absolute target that differs from SNI, caps queries at 8 KiB, rejects traversal and control characters in paths, and bounds `gzip`/`deflate` decoding to 64 MiB. Intercepted requests log `"mode": "intercept"` with redacted canonical paths and no query strings.
 
 ## Refused addresses and TLS checks
 

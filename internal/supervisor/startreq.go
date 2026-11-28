@@ -9,8 +9,11 @@ import (
 )
 
 func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
-	var pkgLevel, minAge, proxyURL, boundSecretEnv, subscriptionRoute string
+	var pkgLevel, minAge, proxyURL, caCertPEM, boundSecretEnv, subscriptionRoute string
 	var userEnv, boundPlaceholders, cacheDirs, keep []string
+	if s.egress != nil {
+		caCertPEM = s.egress.CACertPEM()
+	}
 	if s.m.Wall != nil {
 		pkgLevel = s.m.Wall.PackageManagers
 		minAge = s.m.Wall.MinReleaseAge
@@ -54,6 +57,7 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 		UserEnv:           userEnv,
 		CacheDirs:         cacheDirs,
 		ProxyURL:          proxyURL,
+		CACertPEM:         caCertPEM,
 		BoundSecretEnv:    boundSecretEnv,
 		SubscriptionRoute: subscriptionRoute,
 		BoundPlaceholders: boundPlaceholders,

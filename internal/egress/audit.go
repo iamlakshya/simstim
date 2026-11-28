@@ -20,7 +20,7 @@ type AuditEvent struct {
 	Kind        string      `json:"kind"` // "net" or "dns"
 	Host        string      `json:"host"`
 	Port        int         `json:"port,omitempty"`
-	Mode        string      `json:"mode,omitempty"` // "splice", "http", "gateway", "dns"
+	Mode        string      `json:"mode,omitempty"` // "splice", "intercept", "http", "gateway", "dns"
 	Method      string      `json:"method,omitempty"`
 	Path        string      `json:"path,omitempty"`
 	Status      int         `json:"status,omitempty"`

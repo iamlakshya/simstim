@@ -79,6 +79,7 @@ type StartReq struct {
 	UserEnv           []string `json:"user_env,omitempty"`
 	CacheDirs         []string `json:"cache_dirs,omitempty"`
 	ProxyURL          string   `json:"proxy_url,omitempty"`
+	CACertPEM         string   `json:"ca_cert_pem,omitempty"`
 	BoundSecretEnv    string   `json:"bound_secret_env,omitempty"`
 	BoundPlaceholders []string `json:"bound_placeholders,omitempty"`
 	SubscriptionRoute string   `json:"subscription_route,omitempty"`

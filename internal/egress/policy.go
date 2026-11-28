@@ -23,7 +23,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
-//go:embed rules/presets.toml rules/ranges.toml
+//go:embed rules/presets.toml rules/ranges.toml rules/splice.toml rules/registries.toml rules/object_stores.toml
 var rulesFS embed.FS
 
 // Preset names the built-in network preset of a walled session.
@@ -54,6 +54,8 @@ type Mode string
 const (
 	// ModeSplice forwards raw TCP bytes after the SNI check on port 443.
 	ModeSplice Mode = "splice"
+	// ModeIntercept terminates TLS with the per-session CA to enforce HTTP method/path and class rules.
+	ModeIntercept Mode = "intercept"
 	// ModeHTTP forwards an absolute-form plain HTTP proxy request.
 	ModeHTTP Mode = "http"
 	// ModeGateway proxies a plain-HTTP model API route over verified upstream TLS.
@@ -153,6 +155,8 @@ type policySnapshot struct {
 	grants       []rule // live grants added at runtime
 	agentRules   []rule
 	presetList   []rule
+	spliceOnly   []rule
+	classes      []hostClass
 	gatewayHosts map[string]struct{}
 	modelTools   map[string]map[string]bool
 	modelBudget  int64
@@ -215,6 +219,10 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 	if err != nil {
 		return nil, err
 	}
+	ruleSets, err := builtinRules()
+	if err != nil {
+		return nil, err
+	}
 
 	lockInputs := append(append([]string(nil), cfg.Lock.Deny...), cfg.Lock.Network.Deny...)
 	locks, err := parseRules(lockInputs, true)
@@ -253,6 +261,8 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 		grants:       append([]rule(nil), grants...),
 		agentRules:   agentRules,
 		presetList:   presets[preset],
+		spliceOnly:   ruleSets.spliceOnly,
+		classes:      ruleSets.classes,
 		gatewayHosts: gwHosts,
 		modelTools:   modelTools,
 		modelBudget:  cfg.Network.ModelBudget,
@@ -368,32 +378,36 @@ func (e *Engine) Decide(req Request) Decision {
 		return Decision{Action: ActionDeny, Rule: "invalid", Why: fmt.Sprintf("invalid port %d", req.Port)}
 	}
 	s := e.snap.Load()
-	if r, ok := matchRule(s.locks, host, req.Port); ok {
+	if r, ok := matchWholeHostRule(s.locks, host, req.Port); ok {
 		return Decision{Action: ActionDeny, Rule: "lock:" + r.raw, Why: "denied by lock"}
 	}
-	if r, ok := matchRule(s.denies, host, req.Port); ok {
+	if r, ok := matchWholeHostRule(s.denies, host, req.Port); ok {
 		return Decision{Action: ActionDeny, Rule: "deny:" + r.raw, Why: "denied by policy"}
 	}
 	if s.isGatewayHost(host) {
 		return Decision{Action: ActionDeny, Rule: "gateway:" + host, Why: gatewayDirectDenyHint(host)}
 	}
+	mode := ModeSplice
+	if intercept, _ := e.ShouldIntercept(host, req.Port); intercept {
+		mode = ModeIntercept
+	}
 	if r, ok := matchRule(s.allows, host, req.Port); ok {
-		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "allow:" + r.raw}
+		return Decision{Action: ActionAllow, Mode: mode, Rule: "allow:" + r.raw}
 	}
 	if r, ok := matchRule(s.grants, host, req.Port); ok {
-		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "grant:" + r.raw}
+		return Decision{Action: ActionAllow, Mode: mode, Rule: "grant:" + r.raw}
 	}
 	if _, ok := matchRule(s.agentRules, host, req.Port); ok {
-		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "agent:" + s.agent}
+		return Decision{Action: ActionAllow, Mode: mode, Rule: "agent:" + s.agent}
 	}
 	if s.preset == PresetOpen {
-		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "preset:open"}
+		return Decision{Action: ActionAllow, Mode: mode, Rule: "preset:open"}
 	}
 	if _, ok := matchRule(s.presetList, host, req.Port); ok {
-		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "preset:" + string(s.preset)}
+		return Decision{Action: ActionAllow, Mode: mode, Rule: "preset:" + string(s.preset)}
 	}
 	if s.unknown == UnknownAllow {
-		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "unknown:allow", Why: "allowed by unknown=allow"}
+		return Decision{Action: ActionAllow, Mode: mode, Rule: "unknown:allow", Why: "allowed by unknown=allow"}
 	}
 	if s.unknown == UnknownAsk {
 		return Decision{Action: ActionDeny, Rule: "unknown:ask", Why: e.DenyHint(host, req.Port)}
@@ -452,10 +466,10 @@ func (e *Engine) AllowExplicitIP(addr netip.Addr, port int) bool {
 	clean := addr.WithZone("").Unmap()
 	host := clean.String()
 	s := e.snap.Load()
-	if _, ok := matchRule(s.locks, host, port); ok {
+	if _, ok := matchWholeHostRule(s.locks, host, port); ok {
 		return false
 	}
-	if _, ok := matchRule(s.denies, host, port); ok {
+	if _, ok := matchWholeHostRule(s.denies, host, port); ok {
 		return false
 	}
 	for _, list := range [][]rule{s.allows, s.grants} {

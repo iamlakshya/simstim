@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -62,19 +61,23 @@ func (s *Server) HandleTransparent(ctx context.Context, clientConn net.Conn, raw
 	}
 
 	var replay []byte
-	if port == 443 {
+	if port == 443 || dec.Mode == ModeIntercept {
 		ch, b, peekErr := PeekClientHello(ctx, clientConn, s.sniTimeout)
 		if peekErr == nil {
 			peekErr = CheckClientHello(ch, normHost)
 		}
 		if peekErr != nil {
 			s.emitAudit(AuditEvent{
-				Kind: "net", Host: normHost, Port: port, Mode: string(ModeSplice),
+				Kind: "net", Host: normHost, Port: port, Mode: string(dec.Mode),
 				Status: http.StatusForbidden, Rule: "sni", Decision: string(ActionDeny), Why: peekErr.Error(),
 			})
 			return
 		}
 		replay = b
+		if dec.Mode == ModeIntercept {
+			s.serveInterceptTransparent(ctx, clientConn, replay, normHost, port, addrs)
+			return
+		}
 	}
 
 	upstream, _, err := s.Dialer.DialChecked(ctx, addrs, port)
@@ -165,17 +168,6 @@ func parseURLHostPort(hostport, scheme string) (string, int, error) {
 	}
 	norm, err := normalizeHost(hostport)
 	return norm, port, err
-}
-
-func checkHostHeaderMatch(reqHost, urlHost string, urlPort int, scheme string) error {
-	if strings.TrimSpace(reqHost) == "" {
-		return nil
-	}
-	hdrHost, hdrPort, err := parseURLHostPort(reqHost, scheme)
-	if err != nil || hdrHost != urlHost || hdrPort != urlPort {
-		return fmt.Errorf("egress: Host header %q does not match request URL %s:%d. Try: send a consistent Host header", reqHost, urlHost, urlPort)
-	}
-	return nil
 }
 
 func errHTTPStatus(err error) (int, string) {

@@ -1,0 +1,28 @@
+# Hosts whose clients pin their TLS certificate or require mutual TLS (spec 7.2).
+# These hosts are always spliced after the SNI check, never intercepted, and
+# never receive a bound secret. Each entry cites its source.
+
+[[entries]]
+host = "mtls.googleapis.com"
+reason = "Google Cloud mTLS endpoint requires client certificate authentication."
+source = "https://cloud.google.com/beyondcorp-enterprise/docs/securing-resources-with-cba"
+
+[[entries]]
+host = "*.mtls.googleapis.com"
+reason = "Google Cloud regional and service mTLS endpoints require client certificate authentication."
+source = "https://cloud.google.com/beyondcorp-enterprise/docs/securing-resources-with-cba"
+
+[[entries]]
+host = "controlplane.tailscale.com"
+reason = "Tailscale clients verify control plane keys directly and do not accept a proxy CA."
+source = "https://tailscale.com/kb/1082/firewall-ports"
+
+[[entries]]
+host = "gdmf.apple.com"
+reason = "Apple software lookup clients pin Apple's certificate chain."
+source = "https://support.apple.com/en-us/101555"
+
+[[entries]]
+host = "mesu.apple.com"
+reason = "Apple software catalogue clients pin Apple's certificate chain."
+source = "https://support.apple.com/en-us/101555"

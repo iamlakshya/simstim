@@ -81,6 +81,8 @@ type Agent struct {
 	// disable background self-updaters when binaries come read-only from the
 	// host or agents disk; question 21).
 	SandboxEnv map[string]string `json:"-"`
+	// CAEnv names variables that point the agent at the session's CA file (spec 8.6).
+	CAEnv []string `json:"ca_env,omitempty"`
 	// Secrets binds the agent's credential variables to hosts and headers (spec 8.6).
 	Secrets []SecretBinding `json:"secrets,omitempty"`
 	// ModelGateway configures the plain-HTTP gateway route that keeps model
@@ -201,6 +203,7 @@ var Table = []Agent{
 			"claude.com",
 			"sso.claude.com",
 		},
+		CAEnv:        []string{"NODE_EXTRA_CA_CERTS"},
 		Secrets:      claudeSecrets,
 		SandboxEnv:   map[string]string{"DISABLE_AUTOUPDATER": "1"},
 		ModelGateway: claudeGateway,
@@ -267,6 +270,7 @@ var Table = []Agent{
 			"chatgpt.com",
 			"auth.openai.com",
 		},
+		CAEnv:               []string{"CODEX_CA_CERTIFICATE", "SSL_CERT_FILE"},
 		Secrets:             codexSecrets,
 		SandboxEnv:          map[string]string{"NO_UPDATE_NOTIFIER": "1"},
 		ModelGateway:        codexGateway,
@@ -318,6 +322,7 @@ var Table = []Agent{
 		IDCapture:    "choose",
 		Support:      BestEffort, // consumer plans moved to Antigravity CLI
 		ProjectFiles: []string{".gemini/**", "GEMINI.md"},
+		CAEnv:        []string{"NODE_EXTRA_CA_CERTS"},
 		Setup: &Setup{
 			Install: "npm install -g @google/gemini-cli",
 			Source:  "https://github.com/google-gemini/gemini-cli#readme",
@@ -370,6 +375,7 @@ var Table = []Agent{
 		IDCapture:    "none",
 		Support:      BestEffort,
 		ProjectFiles: []string{".aider.conf.yml", ".aiderignore"},
+		CAEnv:        []string{"SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"},
 		Setup: &Setup{
 			// Aider has no login of its own: it uses the model provider's API key.
 			Install:  "curl -LsSf https://aider.chat/install.sh | sh",

@@ -1,0 +1,22 @@
+# Object stores intercepted and restricted to GET and HEAD when a grant allows
+# them at all (spec 7.2). Writes (PUT, POST, DELETE) get HTTP 403 unless an
+# explicit method/path allow rule grants them.
+
+name = "object_store"
+methods = ["GET", "HEAD"]
+
+[[entries]]
+host = "*.s3.amazonaws.com"
+source = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+
+[[entries]]
+host = "s3.amazonaws.com"
+source = "https://docs.aws.amazon.com/AmazonS3/latest/userguide/VirtualHosting.html"
+
+[[entries]]
+host = "storage.googleapis.com"
+source = "https://cloud.google.com/storage/docs/request-endpoints"
+
+[[entries]]
+host = "*.blob.core.windows.net"
+source = "https://learn.microsoft.com/en-us/rest/api/storageservices/blob-service-rest-api"

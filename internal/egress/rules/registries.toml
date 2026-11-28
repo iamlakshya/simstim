@@ -1,0 +1,46 @@
+# Package registries intercepted and restricted to GET and HEAD by default
+# (spec 7.2). Writes (publish, unpublish, yank, dist-tag, token minting) get
+# HTTP 403 unless an explicit method/path allow rule grants them.
+
+name = "registry"
+methods = ["GET", "HEAD"]
+
+[[entries]]
+host = "registry.npmjs.org"
+source = "https://docs.npmjs.com/cli/v12/using-npm/registry"
+
+[[entries]]
+host = "pypi.org"
+source = "https://docs.pypi.org/api/"
+
+[[entries]]
+host = "files.pythonhosted.org"
+source = "https://docs.pypi.org/api/"
+
+[[entries]]
+host = "upload.pypi.org"
+source = "https://docs.pypi.org/api/"
+
+[[entries]]
+host = "proxy.golang.org"
+source = "https://go.dev/ref/mod"
+
+[[entries]]
+host = "sum.golang.org"
+source = "https://go.dev/ref/mod"
+
+[[entries]]
+host = "crates.io"
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[entries]]
+host = "index.crates.io"
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[entries]]
+host = "static.crates.io"
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[entries]]
+host = "rubygems.org"
+source = "https://guides.rubygems.org/"

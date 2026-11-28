@@ -139,6 +139,10 @@ func (r *runner) prepareSessionEnv(a StartReq, first bool) ([]string, *proto.Err
 		if err != nil {
 			return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the agent's model gateway configuration."}
 		}
+		agentEnv, err = applyStartCA(r.runDir, r.opts.MicroVM, a, agentEnv)
+		if err != nil {
+			return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the session CA certificate configuration."}
+		}
 		if r.opts.MicroVM {
 			agentEnv = ensureAgentsPath(agentEnv, r.agentsBinDir())
 		}
@@ -163,6 +167,10 @@ func (r *runner) prepareSessionEnv(a StartReq, first bool) ([]string, *proto.Err
 	agentEnv, err := applyStartGateway(a, agentEnv)
 	if err != nil {
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the agent's model gateway configuration."}
+	}
+	agentEnv, err = applyStartCA(r.runDir, r.opts.MicroVM, a, agentEnv)
+	if err != nil {
+		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the session CA certificate configuration."}
 	}
 	if r.opts.MicroVM {
 		agentEnv = ensureAgentsPath(agentEnv, r.agentsBinDir())

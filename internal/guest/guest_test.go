@@ -81,8 +81,9 @@ func TestGuestProxyAndDNSStubEndToEnd(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- egress.RunOnConn(ctx, "guest-test", egConn, &egress.ServerOptions{
-			Addrs:  ap,
-			Dialer: sd,
+			Addrs:       ap,
+			Dialer:      sd,
+			UpstreamTLS: &tls.Config{RootCAs: pool},
 		})
 	}()
 	cli, err := egress.NewClient(ctx, supConn, egress.StartArgs{
@@ -114,12 +115,17 @@ func TestGuestProxyAndDNSStubEndToEnd(t *testing.T) {
 	go gd.Serve(ctx)
 	defer func() { _ = gd.Close() }()
 
-	// 1. HTTPS CONNECT through guest.Proxy reaches allowed registry.npmjs.org.
+	// 1. HTTPS CONNECT through guest.Proxy reaches allowed registry.npmjs.org
+	// intercepted with the session CA.
+	guestPool := pool.Clone()
+	if !guestPool.AppendCertsFromPEM([]byte(cli.CACertPEM())) {
+		t.Fatal("failed to parse session CA cert PEM")
+	}
 	proxyURL, _ := url.Parse("http://" + gp.Addr().String())
 	hc := &http.Client{
 		Transport: &http.Transport{
 			Proxy:           http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{RootCAs: pool},
+			TLSClientConfig: &tls.Config{RootCAs: guestPool},
 		},
 		Timeout: 5 * time.Second,
 	}

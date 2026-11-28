@@ -18,10 +18,11 @@ import (
 // of their socket pair. It sends init and live policy updates on ctl, receives
 // audit events, and opens egress and dns streams for guest flows.
 type Client struct {
-	sess   *link.Session
-	ctl    *link.Stream
-	writer *proto.Writer
-	audit  AuditSink
+	sess      *link.Session
+	ctl       *link.Stream
+	writer    *proto.Writer
+	audit     AuditSink
+	caCertPEM string
 
 	nextID  atomic.Uint64
 	mu      sync.Mutex
@@ -51,11 +52,27 @@ func NewClient(ctx context.Context, conn net.Conn, args StartArgs, auditSink Aud
 	}
 	go c.readLoop(bufio.NewReader(ctl))
 
-	if _, err := c.call(ctx, "init", args); err != nil {
+	raw, err := c.call(ctx, "init", args)
+	if err != nil {
 		_ = c.Close()
 		return nil, err
 	}
+	if len(raw) > 0 {
+		var res InitResult
+		if err := json.Unmarshal(raw, &res); err == nil {
+			c.caCertPEM = res.CACertPEM
+		}
+	}
 	return c, nil
+}
+
+// CACertPEM returns the session's public CA certificate PEM received at init.
+// It never contains private key material.
+func (c *Client) CACertPEM() string {
+	if c == nil {
+		return ""
+	}
+	return c.caCertPEM
 }
 
 func (c *Client) readLoop(r *bufio.Reader) {

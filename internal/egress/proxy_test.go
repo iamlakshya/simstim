@@ -150,7 +150,7 @@ func proxyClientOverEgress(cli *Client, pool *x509.CertPool) *http.Client {
 }
 
 func TestEndToEndConnectAndHTTPThroughLink(t *testing.T) {
-	tlsSrv, pool := selfSignedTLSServer(t, "registry.npmjs.org", "live.example")
+	tlsSrv, pool := selfSignedTLSServer(t, "github.com", "live.example")
 	plainSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("plain:" + r.URL.Path))
 	}))
@@ -159,11 +159,11 @@ func TestEndToEndConnectAndHTTPThroughLink(t *testing.T) {
 	fakePub := ip4(93, 184, 216, 34)
 	hostOwn := ip4(203, 0, 113, 9)
 	res := &countingResolver{ips: map[string][]netip.Addr{
-		"registry.npmjs.org": {fakePub},
-		"live.example":       {fakePub},
-		"plain.example":      {fakePub},
-		"imds.example":       {ip4(169, 254, 169, 254)},
-		"hostown.example":    {hostOwn},
+		"github.com":      {fakePub},
+		"live.example":    {fakePub},
+		"plain.example":   {fakePub},
+		"imds.example":    {ip4(169, 254, 169, 254)},
+		"hostown.example": {hostOwn},
 	}}
 	var upstreamDials atomic.Int32
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -198,10 +198,10 @@ deny = ["locked.example"]
 
 	hc := proxyClientOverEgress(cli, pool)
 
-	// 1. Balanced preset allows HTTPS CONNECT to registry.npmjs.org with SNI check.
-	resp, err := hc.Get("https://registry.npmjs.org/left-pad")
+	// 1. Balanced preset allows spliced HTTPS CONNECT to github.com with SNI check.
+	resp, err := hc.Get("https://github.com/left-pad")
 	if err != nil {
-		t.Fatalf("GET https://registry.npmjs.org: %v", err)
+		t.Fatalf("GET https://github.com: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
 	_ = resp.Body.Close()
@@ -210,7 +210,7 @@ deny = ["locked.example"]
 	}
 	hc.CloseIdleConnections()
 	ev := rec.waitFor(t, func(e AuditEvent) bool {
-		return e.Host == "registry.npmjs.org" && e.Decision == "allow"
+		return e.Host == "github.com" && e.Decision == "allow"
 	})
 	if ev.Mode != "splice" || ev.Up == 0 || ev.Down == 0 || ev.Rule != "preset:balanced" {
 		t.Errorf("audit event for splice = %+v", ev)
@@ -262,7 +262,7 @@ deny = ["locked.example"]
 		raw  []byte
 	}{
 		{"mismatched SNI", buildTestClientHello(t, "evil.example", 0, nil)},
-		{"ECH ClientHello", buildTestClientHello(t, "registry.npmjs.org", extEncryptedClientHello, []byte{0, 0, 1, 0, 1, 0, 0, 0, 0, 0})},
+		{"ECH ClientHello", buildTestClientHello(t, "github.com", extEncryptedClientHello, []byte{0, 0, 1, 0, 1, 0, 0, 0, 0, 0})},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := upstreamDials.Load()
@@ -270,7 +270,7 @@ deny = ["locked.example"]
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _ = io.WriteString(s, "CONNECT registry.npmjs.org:443 HTTP/1.1\r\nHost: registry.npmjs.org:443\r\n\r\n")
+			_, _ = io.WriteString(s, "CONNECT github.com:443 HTTP/1.1\r\nHost: github.com:443\r\n\r\n")
 			br := bufio.NewReader(s)
 			r, err := http.ReadResponse(br, &http.Request{Method: http.MethodConnect})
 			if err != nil {
@@ -343,9 +343,9 @@ deny = ["locked.example"]
 }
 
 func TestTransparentFlowWithSyntheticDNS(t *testing.T) {
-	tlsSrv, pool := selfSignedTLSServer(t, "registry.npmjs.org")
+	tlsSrv, pool := selfSignedTLSServer(t, "github.com")
 	fakePub := ip4(93, 184, 216, 34)
-	res := &countingResolver{ips: map[string][]netip.Addr{"registry.npmjs.org": {fakePub}}}
+	res := &countingResolver{ips: map[string][]netip.Addr{"github.com": {fakePub}}}
 	dial := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, network, tlsSrv.Listener.Addr().String())
 	}
@@ -355,12 +355,12 @@ func TestTransparentFlowWithSyntheticDNS(t *testing.T) {
 		DNSMode:    DNSModeSynthetic,
 	}, res, dial, nil)
 
-	// Resolve registry.npmjs.org over a KindDNS stream to get its synthetic IP.
+	// Resolve github.com over a KindDNS stream to get its synthetic IP.
 	dnsStream, err := cli.OpenDNS(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	q := buildTestDNSQuery(t, 42, "registry.npmjs.org.", 1 /* TypeA */)
+	q := buildTestDNSQuery(t, 42, "github.com.", 1 /* TypeA */)
 	hdr := []byte{byte(len(q) >> 8), byte(len(q))}
 	_, _ = dnsStream.Write(hdr)
 	_, _ = dnsStream.Write(q)
@@ -386,11 +386,11 @@ func TestTransparentFlowWithSyntheticDNS(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = st.Close() }()
-	tlsConn := tls.Client(st, &tls.Config{ServerName: "registry.npmjs.org", RootCAs: pool})
+	tlsConn := tls.Client(st, &tls.Config{ServerName: "github.com", RootCAs: pool})
 	if err := tlsConn.Handshake(); err != nil {
 		t.Fatalf("transparent TLS handshake: %v", err)
 	}
-	_, _ = io.WriteString(tlsConn, "GET /synth HTTP/1.1\r\nHost: registry.npmjs.org\r\nConnection: close\r\n\r\n")
+	_, _ = io.WriteString(tlsConn, "GET /synth HTTP/1.1\r\nHost: github.com\r\nConnection: close\r\n\r\n")
 	resp, err := http.ReadResponse(bufio.NewReader(tlsConn), nil)
 	if err != nil {
 		t.Fatalf("read transparent HTTP response: %v", err)

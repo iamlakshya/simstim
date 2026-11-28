@@ -314,8 +314,9 @@ func TestGuestProxyDefaultPolicyAllowsPackageRegistries(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- egress.RunOnConn(ctx, "pkg-registries", egConn, &egress.ServerOptions{
-			Addrs:  ap,
-			Dialer: sd,
+			Addrs:       ap,
+			Dialer:      sd,
+			UpstreamTLS: &tls.Config{RootCAs: pool},
 		})
 	}()
 	// Empty policy uses the default preset ("balanced").
@@ -338,11 +339,15 @@ func TestGuestProxyDefaultPolicyAllowsPackageRegistries(t *testing.T) {
 	go gp.Serve(ctx)
 	defer func() { _ = gp.Close() }()
 
+	guestPool := pool.Clone()
+	if !guestPool.AppendCertsFromPEM([]byte(cli.CACertPEM())) {
+		t.Fatal("failed to parse session CA cert PEM")
+	}
 	proxyURL, _ := url.Parse("http://" + gp.Addr().String())
 	hc := &http.Client{
 		Transport: &http.Transport{
 			Proxy:           http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{RootCAs: pool},
+			TLSClientConfig: &tls.Config{RootCAs: guestPool},
 		},
 		Timeout: 5 * time.Second,
 	}

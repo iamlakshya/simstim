@@ -67,6 +67,12 @@ type AllowToolsArgs struct {
 	Tools []string `json:"tools"`
 }
 
+// InitResult is returned by the "init" ctl request. It carries only the public
+// session CA certificate PEM, never private key material (decision 0032).
+type InitResult struct {
+	CACertPEM string `json:"ca_cert_pem,omitempty"`
+}
+
 // StatusResult is returned by the "status" ctl request.
 type StatusResult struct {
 	Session  string `json:"session"`
@@ -213,6 +219,8 @@ func handleInit(r *bufio.Reader, w *proto.Writer, id string, baseOpts *ServerOpt
 		opts.Addrs = baseOpts.Addrs
 		opts.Dialer = baseOpts.Dialer
 		opts.UploadBudget = baseOpts.UploadBudget
+		opts.CA = baseOpts.CA
+		opts.UpstreamTLS = baseOpts.UpstreamTLS
 		opts.SNITimeout = baseOpts.SNITimeout
 		opts.NonproxyHandler = baseOpts.NonproxyHandler
 		opts.GatewayTLS = baseOpts.GatewayTLS
@@ -232,7 +240,9 @@ func handleInit(r *bufio.Reader, w *proto.Writer, id string, baseOpts *ServerOpt
 		})
 		return nil, err
 	}
-	if err := w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true}); err != nil {
+	initRes, _ := json.Marshal(InitResult{CACertPEM: srv.CA.CertPEM()})
+	if err := w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: initRes}); err != nil {
+		srv.Close()
 		return nil, fmt.Errorf("egress: write init response: %w", err)
 	}
 	return srv, nil
@@ -393,6 +403,9 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 	case "usage":
 		res, _ := json.Marshal(srv.Usage.SnapshotWithBudget(srv.Engine.ModelBudget()))
 		return proto.Response{ID: req.ID, OK: true, Result: res}
+	case "ca.cert":
+		res, _ := json.Marshal(InitResult{CACertPEM: srv.CA.CertPEM()})
+		return proto.Response{ID: req.ID, OK: true, Result: res}
 	case "status":
 		d, _ := processDumpable()
 		res, _ := json.Marshal(StatusResult{Session: id, Dumpable: d})
@@ -400,7 +413,7 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 	default:
 		return proto.Response{
 			ID:    req.ID,
-			Error: &proto.Error{Code: "unknown_op", Message: fmt.Sprintf("unknown ctl op %q", req.Op), Hint: "use policy.allow, policy.deny, policy.reload, policy.allow_tools, secrets.arm, usage or status"},
+			Error: &proto.Error{Code: "unknown_op", Message: fmt.Sprintf("unknown ctl op %q", req.Op), Hint: "use policy.allow, policy.deny, policy.reload, policy.allow_tools, secrets.arm, usage, ca.cert or status"},
 		}
 	}
 }

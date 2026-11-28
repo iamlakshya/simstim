@@ -4,10 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"net/netip"
 	"time"
 
@@ -23,6 +23,8 @@ type ServerOptions struct {
 	Secrets         *SecretStore
 	Usage           *UsageTracker
 	UploadBudget    *UploadBudget
+	CA              *SessionCA  // optional override; nil generates a fresh per-session CA in memory
+	UpstreamTLS     *tls.Config // optional test override; production uses verified system roots
 	GatewayRoutes   []GatewayRouteConfig
 	GatewayTLS      *tls.Config // optional test override; production uses verified system roots
 	Audit           AuditSink
@@ -42,12 +44,14 @@ type Server struct {
 	Secrets      *SecretStore
 	Usage        *UsageTracker
 	UploadBudget *UploadBudget
+	CA           *SessionCA
 	Gateway      *Gateway
 	DNS          *DNSHandler
 
-	audit      AuditSink
-	sniTimeout time.Duration
-	proxy      *goproxy.ProxyHttpServer
+	audit          AuditSink
+	sniTimeout     time.Duration
+	proxy          *goproxy.ProxyHttpServer
+	interceptProxy *httputil.ReverseProxy
 }
 
 type noopLogger struct{}
@@ -88,6 +92,14 @@ func NewServer(opts ServerOptions) (*Server, error) {
 	if uploadBudget == nil {
 		uploadBudget = NewUploadBudget(opts.Engine.UploadBudget())
 	}
+	ca := opts.CA
+	if ca == nil {
+		var err error
+		ca, err = NewSessionCA()
+		if err != nil {
+			return nil, err
+		}
+	}
 	sniTimeout := opts.SNITimeout
 	if sniTimeout <= 0 {
 		sniTimeout = defaultSNITimeout
@@ -101,6 +113,7 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		Secrets:      secrets,
 		Usage:        usage,
 		UploadBudget: uploadBudget,
+		CA:           ca,
 		audit:        opts.Audit,
 		sniTimeout:   sniTimeout,
 	}
@@ -133,26 +146,43 @@ func NewServer(opts ServerOptions) (*Server, error) {
 		s.Gateway = gw
 		nonproxy = gw
 	}
-	s.proxy = s.buildProxy(nonproxy)
+	s.proxy = s.buildProxy(nonproxy, opts.UpstreamTLS)
+	s.interceptProxy = s.buildInterceptProxy(s.proxy.Tr)
 	return s, nil
 }
 
-// Close wipes any in-memory bound credentials held by the server.
+// Close wipes any in-memory bound credentials and per-session CA keys held by
+// the server.
 func (s *Server) Close() {
-	if s != nil && s.Secrets != nil {
+	if s == nil {
+		return
+	}
+	if s.Secrets != nil {
 		s.Secrets.Close()
+	}
+	if s.CA != nil {
+		s.CA.Close()
 	}
 }
 
-func (s *Server) buildProxy(nonproxy http.Handler) *goproxy.ProxyHttpServer {
+func (s *Server) buildProxy(nonproxy http.Handler, upstreamTLS *tls.Config) *goproxy.ProxyHttpServer {
 	p := goproxy.NewProxyHttpServer()
 	p.Logger = noopLogger{}
+	p.AllowHTTP2 = true
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if upstreamTLS != nil {
+		tlsCfg = upstreamTLS.Clone()
+		if tlsCfg.MinVersion < tls.VersionTLS12 {
+			tlsCfg.MinVersion = tls.VersionTLS12
+		}
+		tlsCfg.InsecureSkipVerify = false
+	}
 	// Replace goproxy's default Transport (which skips TLS verification and
 	// reads host proxy env vars) with our safe single-lookup Transport.
 	p.Tr = &http.Transport{
 		DialContext:           s.Dialer.DialContext,
 		Proxy:                 nil,
-		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		TLSClientConfig:       tlsCfg,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          64,
 		IdleConnTimeout:       90 * time.Second,
@@ -245,6 +275,15 @@ func (s *Server) handleConnect(host string, ctx *goproxy.ProxyCtx) (*goproxy.Con
 		return goproxy.RejectConnect, host
 	}
 
+	if dec.Mode == ModeIntercept {
+		return &goproxy.ConnectAction{
+			Action: goproxy.ConnectHijack,
+			Hijack: func(req *http.Request, clientConn net.Conn, _ *goproxy.ProxyCtx) {
+				s.hijackInterceptConnect(req.Context(), clientConn, normHost, port, addrs)
+			},
+		}, host
+	}
+
 	return &goproxy.ConnectAction{
 		Action: goproxy.ConnectHijack,
 		Hijack: func(req *http.Request, clientConn net.Conn, _ *goproxy.ProxyCtx) {
@@ -330,138 +369,4 @@ func (s *Server) hijackConnect(ctx context.Context, clientConn net.Conn, host st
 		Status: http.StatusOK, Up: up, Down: down,
 		Rule: dec.Rule, Decision: auditDecision(dec),
 	})
-}
-
-type httpAuditMeta struct {
-	host     string
-	port     int
-	method   string
-	path     string
-	rule     string
-	decision string
-	upReader *uploadBudgetReader
-}
-
-func (s *Server) handleHTTPRequest(r *http.Request, ctx *goproxy.ProxyCtx) (*http.Request, *http.Response) {
-	if r.URL.Scheme != "http" && r.URL.Scheme != "https" {
-		err := fmt.Errorf("egress: unsupported proxy scheme %q. Try: use http or https", r.URL.Scheme)
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: r.URL.Host, Mode: string(ModeHTTP), Method: r.Method,
-			Path: s.Redactor.Path(r.URL.Path), Status: http.StatusForbidden,
-			Rule: "invalid", Decision: string(ActionDeny), Why: err.Error(),
-		})
-		return r, textResponse(r, http.StatusForbidden, err.Error()+"\n")
-	}
-	normHost, port, err := parseURLHostPort(r.URL.Host, r.URL.Scheme)
-	if err != nil {
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: r.URL.Host, Mode: string(ModeHTTP), Method: r.Method,
-			Path: s.Redactor.Path(r.URL.Path), Status: http.StatusBadRequest,
-			Rule: "invalid", Decision: string(ActionDeny), Why: err.Error(),
-		})
-		return r, textResponse(r, http.StatusBadRequest, err.Error()+"\n")
-	}
-	if err := checkHostHeaderMatch(r.Host, normHost, port, r.URL.Scheme); err != nil {
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: normHost, Port: port, Mode: string(ModeHTTP), Method: r.Method,
-			Path: s.Redactor.Path(r.URL.Path), Status: http.StatusBadRequest,
-			Rule: "host_mismatch", Decision: string(ActionDeny), Why: err.Error(),
-		})
-		return r, textResponse(r, http.StatusBadRequest, err.Error()+"\n")
-	}
-
-	redactedPath := s.Redactor.Path(r.URL.Path)
-	dec := s.Engine.Decide(Request{
-		Host: normHost, Port: port, Method: r.Method, Path: r.URL.Path, Header: r.Header,
-	})
-	if dec.Action != ActionAllow {
-		body := s.denyBody(normHost, port, dec)
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: normHost, Port: port, Mode: string(ModeHTTP), Method: r.Method,
-			Path: redactedPath, Status: http.StatusForbidden, Rule: dec.Rule,
-			Decision: string(ActionDeny), Why: dec.Why,
-		})
-		return r, textResponse(r, http.StatusForbidden, body+"\n")
-	}
-
-	if used, limit, ok := s.checkUploadBudget(normHost); !ok {
-		body := uploadBudgetMessage(s.Engine.Session(), normHost, used, limit)
-		s.auditUploadBudget(normHost, port, string(ModeHTTP), r.Method, redactedPath, 0, 0, used, limit)
-		return r, textResponse(r, http.StatusForbidden, body+"\n")
-	}
-
-	addrs, err := s.Dialer.ResolveAndCheck(r.Context(), normHost, port)
-	if err != nil {
-		status, decision := errHTTPStatus(err)
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: normHost, Port: port, Mode: string(ModeHTTP), Method: r.Method,
-			Path: redactedPath, Status: status, Rule: "range", Decision: decision, Why: err.Error(),
-		})
-		return r, textResponse(r, status, err.Error()+"\n")
-	}
-
-	var upReader *uploadBudgetReader
-	if r.Body != nil && s.UploadBudget != nil && s.UploadBudget.Limit() > 0 {
-		upReader = &uploadBudgetReader{rc: r.Body, budget: s.UploadBudget, host: normHost}
-		r.Body = upReader
-	}
-	r = r.WithContext(withCheckedAddrs(r.Context(), addrs))
-	ctx.UserData = httpAuditMeta{
-		host: normHost, port: port, method: r.Method, path: redactedPath,
-		rule: dec.Rule, decision: auditDecision(dec), upReader: upReader,
-	}
-	return r, nil
-}
-
-func (s *Server) handleHTTPResponse(resp *http.Response, ctx *goproxy.ProxyCtx) *http.Response {
-	meta, ok := ctx.UserData.(httpAuditMeta)
-	if !ok {
-		return resp
-	}
-	if resp == nil {
-		if meta.upReader != nil && (meta.upReader.exceeded || errors.Is(ctx.Error, errUploadBudgetExceeded)) {
-			body := uploadBudgetMessage(s.Engine.Session(), meta.host, meta.upReader.used, meta.upReader.limit)
-			s.auditUploadBudget(meta.host, meta.port, string(ModeHTTP), meta.method, meta.path, meta.upReader.uploaded, 0, meta.upReader.used, meta.upReader.limit)
-			return textResponse(ctx.Req, http.StatusForbidden, body+"\n")
-		}
-		why := "upstream error"
-		if ctx.Error != nil {
-			why = ctx.Error.Error()
-		}
-		status, decision := http.StatusBadGateway, "error"
-		if ctx.Error != nil {
-			status, decision = errHTTPStatus(ctx.Error)
-		}
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: meta.host, Port: meta.port, Mode: string(ModeHTTP),
-			Method: meta.method, Path: meta.path, Status: status,
-			Rule: meta.rule, Decision: decision, Why: why,
-		})
-		return textResponse(ctx.Req, status, why+"\n")
-	}
-	var upBytes int64
-	if meta.upReader != nil && meta.upReader.uploaded > 0 {
-		upBytes = meta.upReader.uploaded
-	} else if ctx.Req != nil && ctx.Req.ContentLength > 0 {
-		upBytes = ctx.Req.ContentLength
-	}
-	if resp.Body == nil {
-		s.emitAudit(AuditEvent{
-			Kind: "net", Host: meta.host, Port: meta.port, Mode: string(ModeHTTP),
-			Method: meta.method, Path: meta.path, Status: resp.StatusCode,
-			Up: upBytes, Rule: meta.rule, Decision: meta.decision,
-		})
-		return resp
-	}
-	resp.Body = &auditReadCloser{
-		ReadCloser: resp.Body,
-		onDone: func(down int64) {
-			s.emitAudit(AuditEvent{
-				Kind: "net", Host: meta.host, Port: meta.port, Mode: string(ModeHTTP),
-				Method: meta.method, Path: meta.path, Status: resp.StatusCode,
-				Up: upBytes, Down: down, Rule: meta.rule, Decision: meta.decision,
-			})
-		},
-	}
-	return resp
 }
