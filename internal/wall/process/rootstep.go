@@ -15,29 +15,6 @@ func AppArmorFallbackCmd() string {
 	return aptInstallAndProfileCmd(false, false)
 }
 
-// UbuntuProvisionScript returns a root shell script that installs bubblewrap
-// and loads Ubuntu's distribution bubblewrap AppArmor profile, reusing the
-// exact same packages and profile paths as H7's one-time sudo step.
-func UbuntuProvisionScript() string {
-	pkgs := strings.Join(aptInstallAndProfilePackages(true, false), " ")
-	return strings.Join([]string{
-		"#!/bin/sh",
-		"set -eux",
-		"export DEBIAN_FRONTEND=noninteractive",
-		"apt-get update && apt-get install -y " + pkgs,
-		fmt.Sprintf("if [ ! -f %s ] && [ ! -f %s ] && [ -f %s ]; then", appArmorBwrapRestrict, appArmorBwrapPlain, appArmorBwrapExtra),
-		fmt.Sprintf("  install -m 0644 %s %s", appArmorBwrapExtra, appArmorBwrapRestrict),
-		"fi",
-		"if [ -d /sys/kernel/security/apparmor ]; then",
-		fmt.Sprintf("  if [ -f %s ]; then", appArmorBwrapRestrict),
-		"    apparmor_parser -r " + appArmorBwrapRestrict,
-		fmt.Sprintf("  elif [ -f %s ]; then", appArmorBwrapPlain),
-		"    apparmor_parser -r " + appArmorBwrapPlain,
-		"  fi",
-		"fi",
-	}, "\n") + "\n"
-}
-
 func missingBwrapFix(osInfo osReleaseInfo, lookPath func(string) (string, error), appArmorRestrict, hasProfile, hasExtraProfile bool) string {
 	if appArmorRestrict && !hasProfile {
 		if isAptDistro(osInfo, lookPath) {
@@ -78,7 +55,7 @@ func appArmorBwrapDiagnosis(st probeState, lookPath func(string) (string, error)
 	}
 }
 
-func aptInstallAndProfilePackages(needBwrap, hasExtraProfile bool) []string {
+func aptInstallAndProfileCmd(needBwrap, hasExtraProfile bool) string {
 	var pkgs []string
 	if needBwrap {
 		pkgs = append(pkgs, "bubblewrap")
@@ -86,11 +63,6 @@ func aptInstallAndProfilePackages(needBwrap, hasExtraProfile bool) []string {
 	if !hasExtraProfile {
 		pkgs = append(pkgs, "apparmor-profiles", "apparmor-utils")
 	}
-	return pkgs
-}
-
-func aptInstallAndProfileCmd(needBwrap, hasExtraProfile bool) string {
-	pkgs := aptInstallAndProfilePackages(needBwrap, hasExtraProfile)
 	var steps []string
 	if len(pkgs) > 0 {
 		steps = append(steps, "apt-get update && apt-get install -y "+strings.Join(pkgs, " "))
