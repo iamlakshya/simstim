@@ -2,6 +2,7 @@ package host
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -31,12 +32,14 @@ func startSessionProc(m *Manifest) error {
 func fillWallInfo(info *SessionInfo, m *Manifest) {
 	if m.Wall != nil {
 		info.Wall = &api.WallInfo{
-			Level:          m.Wall.Level,
-			Driver:         m.Wall.Driver,
-			Version:        m.Wall.Version,
-			Floor:          m.Wall.Floor,
-			DowngradedFrom: m.Wall.DowngradedFrom,
-			Preset:         m.Wall.Preset,
+			Level:           m.Wall.Level,
+			Driver:          m.Wall.Driver,
+			Version:         m.Wall.Version,
+			Floor:           m.Wall.Floor,
+			DowngradedFrom:  m.Wall.DowngradedFrom,
+			Preset:          m.Wall.Preset,
+			PackageManagers: m.Wall.PackageManagers,
+			MinReleaseAge:   m.Wall.MinReleaseAge,
 		}
 	}
 	info.Claimed = m.Status.Claimed && info.Alive && info.State != StateLost
@@ -86,6 +89,14 @@ func newWalled(a NewArgs) (_ *SessionInfo, err error) {
 func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
+	}
+	pkgLevel, err := api.ParsePackageManagers(a.PackageManagers)
+	if err != nil {
+		return nil, UserError("package_level_invalid", api.PackageLevelMessage(a.PackageManagers), api.PackageLevelHint)
+	}
+	_, minAge, err := api.ParseMinReleaseAge(a.MinReleaseAge)
+	if err != nil {
+		return nil, UserError("release_age_invalid", api.ReleaseAgeMessage(a.MinReleaseAge), api.ReleaseAgeHint)
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -162,10 +173,13 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
 		Wall: &WallRecord{
-			Level:   "none",
-			Driver:  "plain",
-			Version: version.Version,
-			At:      now,
+			Level:           "none",
+			Driver:          "plain",
+			Version:         version.Version,
+			At:              now,
+			PackageManagers: pkgLevel,
+			MinReleaseAge:   minAge,
+			SandboxEnv:      maps.Clone(a.SandboxEnv),
 		},
 	}
 	m.Git = gi

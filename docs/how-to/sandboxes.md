@@ -86,3 +86,37 @@ If `bubblewrap` is already installed on Ubuntu 24.04, `host doctor` prints one `
 On Fedora or RHEL, run `sudo dnf install bubblewrap`. On Arch, run `sudo pacman -S bubblewrap`. On Alpine, run `sudo apk add bubblewrap`. On openSUSE, run `sudo zypper install bubblewrap`.
 
 After installing `bubblewrap` or loading the AppArmor profile, run `simstim host doctor my-vps` again. Each sandbox probe probes the host afresh and refreshes `~/.local/state/simstim/walls.json`.
+
+## Package managers
+
+By default, a sandbox points npm, pnpm, Yarn, Bun, pip, uv, cargo and Go at the session's egress proxy (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, `NODE_USE_ENV_PROXY`, `npm_config_proxy`, `npm_config_https_proxy` and `CARGO_HTTP_PROXY`), and the default `balanced` network preset allows their registries (`registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `proxy.golang.org`, `sum.golang.org`, `crates.io`, `index.crates.io` and `static.crates.io`) on port 443. No registry mirror runs on the host.
+
+Guest init also applies defensive package-manager settings to reduce the risk of a fresh poisoned release or an install script running code during dependency resolution. These settings are defence in depth only: guest root and the agent itself can unset environment variables or edit files inside `/home/agent`.
+
+### Levels and release age
+
+Set `sandbox.package_managers` and `network.min_release_age` in `config.toml`:
+
+```toml
+[sandbox]
+package_managers = "guarded" # guarded | strict | off
+
+[network]
+min_release_age = "7d" # whole days from 0d to 365d
+```
+
+- **`guarded` (default):** skips dependency install scripts for npm, pnpm, Yarn and Bun; sets a minimum release age of `network.min_release_age` (7 days by default) for npm, pnpm, Yarn, Bun, pip and uv; and sets `GOTOOLCHAIN=local`, `GOPROXY=https://proxy.golang.org`, `GOSUMDB=sum.golang.org` and `GOVCS=*:off` for Go (without setting `GOFLAGS`). `cargo` has no stable release-age or build-script off switch.
+- **`strict`:** everything in `guarded`, plus `PIP_ONLY_BINARY=:all:` and `UV_NO_BUILD=1` so pip and uv install prebuilt wheels only and refuse source builds. Note that a pip requirements file can still ask for `--no-binary`.
+- **`off`:** guest init writes no defensive package-manager variables or home files. Proxy variables stay in place so installs still reach allowed registries through the egress proxy.
+
+Set `network.min_release_age = "0d"` to keep script blocking and Go settings while turning off the release-age cutoff. Changes apply on the next session start.
+
+### Loosening one tool
+
+To override one variable for a tool (for example, to allow a private Go module proxy or temporarily allow npm install scripts), set it under `[sandbox.env]` in `config.toml`. Any name in `sandbox.env` replaces the value written by guest init:
+
+```toml
+[sandbox.env]
+GOPROXY = "https://proxy.corp.example,https://proxy.golang.org"
+GOPRIVATE = "corp.example/*"
+```

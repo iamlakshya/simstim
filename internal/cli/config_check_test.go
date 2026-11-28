@@ -399,3 +399,39 @@ func TestGoldenConfigCheck(t *testing.T) {
 		t.Errorf("config check output differs from %s:\n%s", golden, got)
 	}
 }
+
+func TestConfigCheckPackageManagerSettings(t *testing.T) {
+	hosttest.New(t)
+	writeConfigFiles(t, "[sandbox]\npackage_managers = \"on\"\n\n[network]\nmin_release_age = \"90m\"\n", "")
+
+	out, _, code := runConfigCheckMain(t, "config", "check", "--json")
+	if code != 1 {
+		t.Fatalf("code = %d, want 1\n%s", code, out)
+	}
+	checkJSON(t, "config check --json package errors", out, false)
+	var rep configReport
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out)
+	}
+	if rep.OK {
+		t.Fatalf("expected OK=false: %+v", rep)
+	}
+	var sawLevel, sawAge bool
+	for _, f := range rep.Findings {
+		if f.Code == "package_level_invalid" && f.Line == 2 {
+			sawLevel = true
+		}
+		if f.Code == "release_age_invalid" && f.Line == 5 {
+			sawAge = true
+		}
+	}
+	if !sawLevel || !sawAge {
+		t.Fatalf("findings = %+v, want package_level_invalid (line 2) and release_age_invalid (line 5)", rep.Findings)
+	}
+
+	writeConfigFiles(t, "[sandbox]\npackage_managers = \"strict\"\n\n[sandbox.env]\nGOPROXY = \"https://corp.example/go\"\n\n[network]\nmin_release_age = \"7d\"\n", "")
+	out, _, code = runConfigCheckMain(t, "config", "check", "--json")
+	if code != 0 {
+		t.Fatalf("valid package config failed: code=%d\n%s", code, out)
+	}
+}

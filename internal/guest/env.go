@@ -9,7 +9,9 @@ import (
 // ProxyEnv returns the proxy environment variables for a walled session
 // pointing at proxyURL (for example "http://127.0.0.1:3128"). It sets the
 // standard upper- and lower-case proxy variables, NO_PROXY for loopback,
-// NODE_USE_ENV_PROXY=1 for Node's fetch (P1.7), and any extra agent ProxyEnv.
+// NODE_USE_ENV_PROXY=1 for Node's fetch (P1.7), package-manager proxy
+// variables from pkgsettings.toml (npm, cargo; pip and go read HTTP_PROXY and
+// HTTPS_PROXY directly), and any extra agent ProxyEnv.
 func ProxyEnv(proxyURL string, agent agents.Agent) map[string]string {
 	env := map[string]string{
 		"HTTP_PROXY":         proxyURL,
@@ -22,6 +24,7 @@ func ProxyEnv(proxyURL string, agent agents.Agent) map[string]string {
 		"no_proxy":           "localhost,127.0.0.1,::1",
 		"NODE_USE_ENV_PROXY": "1",
 	}
+	maps.Copy(env, packageProxyEnv(proxyURL))
 	maps.Copy(env, agent.ProxyEnv)
 	return env
 }

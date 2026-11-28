@@ -18,6 +18,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/iamlakshya/simstim/internal/agents"
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -98,15 +99,17 @@ type Config struct {
 
 // SandboxConfig holds sandbox-level policy fields used by the egress process.
 type SandboxConfig struct {
-	Preset Preset `toml:"preset"`
+	Preset          Preset `toml:"preset"`
+	PackageManagers string `toml:"package_managers"`
 }
 
 // NetworkConfig holds the session's allowlist, denylist and unknown action.
 type NetworkConfig struct {
-	Allow      []string            `toml:"allow"`
-	Deny       []string            `toml:"deny"`
-	Unknown    UnknownAction       `toml:"unknown"`
-	ModelTools map[string][]string `toml:"model_tools"`
+	Allow         []string            `toml:"allow"`
+	Deny          []string            `toml:"deny"`
+	Unknown       UnknownAction       `toml:"unknown"`
+	ModelTools    map[string][]string `toml:"model_tools"`
+	MinReleaseAge string              `toml:"min_release_age"`
 }
 
 // LockConfig holds denies that no live session grant can override.
@@ -136,56 +139,6 @@ func ParsePolicy(data []byte) (Config, error) {
 		return Config{}, fmt.Errorf("egress: unknown policy key %q. Try: remove it or check %s config check", strings.Join(keys, ", "), brand.Name)
 	}
 	return cfg, nil
-}
-
-type presetsFile struct {
-	Presets map[string]presetEntry `toml:"presets"`
-}
-
-type presetEntry struct {
-	AllowAllPublic bool         `toml:"allow_all_public"`
-	Entries        []presetHost `toml:"entries"`
-}
-
-type presetHost struct {
-	Host   string `toml:"host"`
-	Source string `toml:"source"`
-}
-
-var (
-	loadPresetsOnce sync.Once
-	loadedPresets   map[Preset][]rule
-	errLoadPresets  error
-)
-
-func builtinPresets() (map[Preset][]rule, error) {
-	loadPresetsOnce.Do(func() {
-		raw, err := rulesFS.ReadFile("rules/presets.toml")
-		if err != nil {
-			errLoadPresets = fmt.Errorf("egress: read embedded presets: %w", err)
-			return
-		}
-		var pf presetsFile
-		if _, err := toml.Decode(string(raw), &pf); err != nil {
-			errLoadPresets = fmt.Errorf("egress: decode embedded presets: %w", err)
-			return
-		}
-		out := make(map[Preset][]rule, len(pf.Presets))
-		for name, pe := range pf.Presets {
-			rules := make([]rule, 0, len(pe.Entries))
-			for _, e := range pe.Entries {
-				r, err := parseRule(e.Host, false)
-				if err != nil {
-					errLoadPresets = fmt.Errorf("egress: preset %q entry %q: %w", name, e.Host, err)
-					return
-				}
-				rules = append(rules, r)
-			}
-			out[Preset(name)] = rules
-		}
-		loadedPresets = out
-	})
-	return loadedPresets, errLoadPresets
 }
 
 type policySnapshot struct {
@@ -240,6 +193,12 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 	case UnknownDeny, UnknownAllow:
 	default:
 		return nil, fmt.Errorf("egress: unknown network.unknown action %q. Try: use deny or allow", unknown)
+	}
+	if _, err := api.ParsePackageManagers(cfg.Sandbox.PackageManagers); err != nil {
+		return nil, fmt.Errorf("egress: %w", err)
+	}
+	if _, _, err := api.ParseMinReleaseAge(cfg.Network.MinReleaseAge); err != nil {
+		return nil, fmt.Errorf("egress: %w", err)
 	}
 
 	presets, err := builtinPresets()

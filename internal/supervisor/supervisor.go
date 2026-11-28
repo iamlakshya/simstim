@@ -290,22 +290,7 @@ func (s *Supervisor) bootSandbox(secretEnv, notes []string, restored bool) error
 	go s.ctlReadLoop()
 	go s.linkAcceptLoop()
 
-	startReq := guest.StartReq{
-		Session:  s.id,
-		Name:     s.m.Name,
-		Agent:    s.m.Agent.Kind,
-		Argv:     s.m.Agent.Argv,
-		Env:      s.m.Env,
-		Secrets:  secretEnv,
-		Cwd:      s.m.Cwd,
-		Term:     s.m.Term.Term,
-		Cols:     s.m.Term.Cols,
-		Rows:     s.m.Term.Rows,
-		RunHook:  s.m.RunHook,
-		Notes:    notes,
-		AgentID:  s.m.Agent.AgentSessionID,
-		IDSource: s.m.Agent.IDSource,
-	}
+	startReq := s.buildStartReq(secretEnv, notes)
 	resp, err := s.ctlCall(ctx, "start", startReq)
 	// Clear in-memory secret copies as soon as start has been sent.
 	clear(secretEnv)

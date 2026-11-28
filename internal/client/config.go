@@ -16,6 +16,7 @@ import (
 
 	tomlv2 "github.com/pelletier/go-toml/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
@@ -95,7 +96,23 @@ type Settings struct {
 		// PDF only, the default) or "any". The paste guard still refuses
 		// private files and clipboard-written paths in either mode.
 		Paste string `toml:"paste"`
+		// PackageManagers controls the settings that guest init writes for
+		// package managers inside a sandbox: "guarded" (minimum release age,
+		// no dependency install scripts for npm, pnpm, Yarn and Bun, and Go
+		// proxy settings), "strict" (also blocks pip and uv source builds), or
+		// "off".
+		PackageManagers string `toml:"package_managers"`
+		// Env sets extra environment variables inside a sandbox. A name set
+		// here replaces the guest init's value for that name.
+		Env map[string]string `toml:"env"`
 	} `toml:"sandbox"`
+	// Network holds defaults for sandbox network policy.
+	Network struct {
+		// MinReleaseAge sets the minimum release age for package managers
+		// inside a sandbox, as a whole number of days from "0d" to "365d".
+		// "0d" turns the age check off.
+		MinReleaseAge string `toml:"min_release_age"`
+	} `toml:"network"`
 	// Keymap rebinds launcher commands by name ("session: delete"). A value is
 	// a key, a list of keys, or "" to unbind. `config keymap` lists the names.
 	Keymap map[string]any `toml:"keymap"`
@@ -120,6 +137,8 @@ func DefaultSettings() Settings {
 	s.Attach.Scrollback = "keep"
 	s.Sessions.MemoryMax = "auto"
 	s.Sandbox.Paste = "images-and-pdf"
+	s.Sandbox.PackageManagers = api.DefaultPackageManagers
+	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
 	return s
 }
 
@@ -389,6 +408,12 @@ func LoadSettingsChecked() (Settings, string) {
 	}
 	if s.Sandbox.Paste == "" {
 		s.Sandbox.Paste = d.Sandbox.Paste
+	}
+	if s.Sandbox.PackageManagers == "" {
+		s.Sandbox.PackageManagers = d.Sandbox.PackageManagers
+	}
+	if s.Network.MinReleaseAge == "" {
+		s.Network.MinReleaseAge = d.Network.MinReleaseAge
 	}
 	return s, ""
 }

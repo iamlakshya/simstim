@@ -312,7 +312,11 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	manifestPath := filepath.Join(r.runDir, "manifest-"+a.Session+".json")
 	logPath := filepath.Join(r.runDir, "holder-"+a.Session+".log")
 
-	agentEnv := withEnvVar(a.Env, brand.Env("HOOK_SOCK"), hookPath)
+	agentEnv, err := applyStartPackageSettings(a, a.Env)
+	if err != nil {
+		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check sandbox.package_managers and network.min_release_age."}
+	}
+	agentEnv = withEnvVar(agentEnv, brand.Env("HOOK_SOCK"), hookPath)
 	agentEnv = withEnvVar(agentEnv, brand.Env("SESSION"), a.Session)
 
 	m := host.Manifest{

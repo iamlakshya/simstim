@@ -222,6 +222,7 @@ func validateSettings(abbrev string, s client.Settings, ins *client.TOMLInspecti
 			addBad(ins.Pos("sessions", "memory_max"), "sessions.memory_max: "+err.Error(), nil)
 		}
 	}
+	out = append(out, validatePackageSettings(abbrev, s, ins)...)
 	out = append(out, validateKeymap(abbrev, s.Keymap, ins)...)
 	out = append(out, validateSecrets(abbrev, s.Secrets, ins)...)
 	return out

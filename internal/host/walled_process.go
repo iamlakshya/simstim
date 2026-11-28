@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/agents"
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -39,6 +40,14 @@ func newProcessWalled(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
+	}
+	pkgLevel, err := api.ParsePackageManagers(a.PackageManagers)
+	if err != nil {
+		return nil, UserError("package_level_invalid", api.PackageLevelMessage(a.PackageManagers), api.PackageLevelHint)
+	}
+	_, minAge, err := api.ParseMinReleaseAge(a.MinReleaseAge)
+	if err != nil {
+		return nil, UserError("release_age_invalid", api.ReleaseAgeMessage(a.MinReleaseAge), api.ReleaseAgeHint)
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -91,15 +100,18 @@ func newProcessWalled(a NewArgs) (_ *SessionInfo, err error) {
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
 		Wall: &WallRecord{
-			Level:          "process",
-			Driver:         process.DriverName,
-			Version:        bwrapVer,
-			Preset:         string(egress.PresetLocked),
-			WorkspaceHost:  wsHost,
-			WorkspaceGuest: wsGuest,
-			StateDirs:      slices.Clone(agent.StateDirs),
-			ExtraRO:        extraRO,
-			At:             now,
+			Level:           "process",
+			Driver:          process.DriverName,
+			Version:         bwrapVer,
+			Preset:          string(egress.PresetBalanced),
+			WorkspaceHost:   wsHost,
+			WorkspaceGuest:  wsGuest,
+			StateDirs:       slices.Clone(agent.StateDirs),
+			ExtraRO:         extraRO,
+			At:              now,
+			PackageManagers: pkgLevel,
+			MinReleaseAge:   minAge,
+			SandboxEnv:      maps.Clone(a.SandboxEnv),
 		},
 	}
 	m.Git = gi
@@ -424,23 +436,26 @@ func processWalledEnv(a NewArgs, id string, extraPathDirs []string, agent agents
 		pathDirs = appendUnique(pathDirs, d)
 	}
 	vars := map[string]string{
-		"HOME":               process.GuestHome,
-		"USER":               "agent",
-		"LOGNAME":            "agent",
-		"LANG":               "C.UTF-8",
-		"PATH":               strings.Join(pathDirs, string(os.PathListSeparator)),
-		"TERM":               term,
-		"COLORTERM":          colorterm,
-		brand.Env("SESSION"): id,
-		"HTTP_PROXY":         process.GuestProxyURL,
-		"HTTPS_PROXY":        process.GuestProxyURL,
-		"ALL_PROXY":          process.GuestProxyURL,
-		"http_proxy":         process.GuestProxyURL,
-		"https_proxy":        process.GuestProxyURL,
-		"all_proxy":          process.GuestProxyURL,
-		"NO_PROXY":           "localhost,127.0.0.1,::1",
-		"no_proxy":           "localhost,127.0.0.1,::1",
-		"NODE_USE_ENV_PROXY": "1",
+		"HOME":                   process.GuestHome,
+		"USER":                   "agent",
+		"LOGNAME":                "agent",
+		"LANG":                   "C.UTF-8",
+		"PATH":                   strings.Join(pathDirs, string(os.PathListSeparator)),
+		"TERM":                   term,
+		"COLORTERM":              colorterm,
+		brand.Env("SESSION"):     id,
+		"HTTP_PROXY":             process.GuestProxyURL,
+		"HTTPS_PROXY":            process.GuestProxyURL,
+		"ALL_PROXY":              process.GuestProxyURL,
+		"http_proxy":             process.GuestProxyURL,
+		"https_proxy":            process.GuestProxyURL,
+		"all_proxy":              process.GuestProxyURL,
+		"NO_PROXY":               "localhost,127.0.0.1,::1",
+		"no_proxy":               "localhost,127.0.0.1,::1",
+		"NODE_USE_ENV_PROXY":     "1",
+		"npm_config_proxy":       process.GuestProxyURL,
+		"npm_config_https_proxy": process.GuestProxyURL,
+		"CARGO_HTTP_PROXY":       process.GuestProxyURL,
 	}
 	maps.Copy(vars, agent.ProxyEnv)
 	if a.TermProgram != "" {

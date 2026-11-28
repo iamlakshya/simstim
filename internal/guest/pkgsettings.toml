@@ -1,0 +1,128 @@
+# Guest package manager settings (isolation spec 7.10, build facts section 3).
+# Every entry is data with its upstream documentation source.
+# Placeholders:
+#   {proxy_url}      guest loopback egress proxy URL (e.g. http://127.0.0.1:3128)
+#   {days}           network.min_release_age as whole days (omitted when 0d)
+#   {minutes}        days * 1440 (omitted when 0d)
+#   {seconds}        days * 86400 (omitted when 0d)
+#   {cutoff_rfc3339} UTC RFC 3339 timestamp N days before session start (omitted when 0d)
+
+[defaults]
+level = "guarded"
+min_release_age = "7d"
+
+# Tool-specific proxy variables added alongside HTTP_PROXY / HTTPS_PROXY / ALL_PROXY /
+# NO_PROXY / NODE_USE_ENV_PROXY so repository files (.npmrc, .cargo/config.toml) cannot
+# divert package manager fetches away from the guest egress proxy.
+[[proxy_env]]
+tool = "npm"
+key = "npm_config_proxy"
+value = "{proxy_url}"
+source = "https://docs.npmjs.com/cli/v12/using-npm/config"
+
+[[proxy_env]]
+tool = "npm"
+key = "npm_config_https_proxy"
+value = "{proxy_url}"
+source = "https://docs.npmjs.com/cli/v12/using-npm/config"
+
+[[proxy_env]]
+tool = "cargo"
+key = "CARGO_HTTP_PROXY"
+value = "{proxy_url}"
+source = "https://doc.rust-lang.org/cargo/reference/config.html"
+
+# Defensive package manager settings applied by guest init according to
+# sandbox.package_managers ("guarded", "strict", or "off") and network.min_release_age.
+
+[[tools]]
+name = "npm"
+source = "https://docs.npmjs.com/cli/v12/using-npm/config"
+notes = "npm reads environment variables before any npmrc file, so a repository .npmrc cannot undo these settings."
+env = [
+  { key = "npm_config_ignore_scripts", value = "true" },
+]
+age_env = [
+  { key = "npm_config_min_release_age", value = "{days}" },
+]
+
+[[tools]]
+name = "pnpm"
+source = "https://pnpm.io/settings/dependency-resolution"
+notes = "pnpm 11 ignores npm_config_* and reads global settings from ~/.config/pnpm/config.yaml; a repository pnpm-workspace.yaml takes precedence over this file."
+file_path = ".config/pnpm/config.yaml"
+file_lines = [
+  "ignoreScripts: true",
+]
+file_age_lines = [
+  "minimumReleaseAge: {minutes}",
+]
+
+[[tools]]
+name = "yarn"
+source = "https://yarnpkg.com/configuration/yarnrc"
+notes = "Yarn Berry (4.10+) reads YARN_* environment variables ahead of .yarnrc.yml; plain minutes avoid the day-suffix bug (yarnpkg/berry#6991)."
+env = [
+  { key = "YARN_ENABLE_SCRIPTS", value = "false" },
+]
+age_env = [
+  { key = "YARN_NPM_MINIMAL_AGE_GATE", value = "{minutes}" },
+]
+
+[[tools]]
+name = "bun"
+source = "https://bun.com/docs/runtime/bunfig"
+notes = "Bun 1.3+ reads ~/.bunfig.toml as global config; a project bunfig.toml overrides ~/.bunfig.toml."
+file_path = ".bunfig.toml"
+file_lines = [
+  "[install]",
+  "ignoreScripts = true",
+]
+file_age_lines = [
+  "minimumReleaseAge = {seconds}",
+]
+
+[[tools]]
+name = "pip"
+source = "https://pip.pypa.io/en/stable/cli/pip_install/"
+notes = "pip 26.0 accepts only ISO 8601 timestamps for --uploaded-prior-to (P<N>D arrived in 26.1), so an RFC 3339 UTC timestamp works on both 26.0 and 26.1+ and is ignored by older pip."
+age_env = [
+  { key = "PIP_UPLOADED_PRIOR_TO", value = "{cutoff_rfc3339}" },
+]
+strict_env = [
+  { key = "PIP_ONLY_BINARY", value = ":all:" },
+]
+
+[[tools]]
+name = "uv"
+source = "https://docs.astral.sh/uv/reference/environment/"
+notes = "A fixed RFC 3339 UTC timestamp avoids uv's duration bug in UV_EXCLUDE_NEWER (astral-sh/uv#18829)."
+age_env = [
+  { key = "UV_EXCLUDE_NEWER", value = "{cutoff_rfc3339}" },
+]
+strict_env = [
+  { key = "UV_NO_BUILD", value = "1" },
+]
+
+[[tools]]
+name = "go"
+source = "https://go.dev/ref/mod"
+notes = "Go 1.16+ defaults to -mod=readonly, so GOFLAGS is not set. Strip bypass variables unless set in sandbox.env."
+env = [
+  { key = "GOTOOLCHAIN", value = "local" },
+  { key = "GOPROXY", value = "https://proxy.golang.org" },
+  { key = "GOSUMDB", value = "sum.golang.org" },
+  { key = "GOVCS", value = "*:off" },
+]
+strip_env = [
+  "GOPRIVATE",
+  "GONOPROXY",
+  "GONOSUMDB",
+  "GOINSECURE",
+  "GOFLAGS",
+]
+
+[[tools]]
+name = "cargo"
+source = "https://doc.rust-lang.org/nightly/cargo/reference/unstable.html"
+notes = "cargo has no stable release-age or build-script disable setting; only its egress proxy variable is set."

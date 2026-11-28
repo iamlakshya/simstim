@@ -299,3 +299,52 @@ func TestEngineConcurrentAccess(t *testing.T) {
 	}()
 	wg.Wait()
 }
+
+func TestDefaultPolicyAllowsPackageRegistriesAndValidatesPackageFields(t *testing.T) {
+	eng, err := NewEngine(Config{Session: "devbox/pkg"})
+	if err != nil {
+		t.Fatalf("NewEngine(default): %v", err)
+	}
+	for _, host := range []string{
+		"registry.npmjs.org",
+		"pypi.org",
+		"files.pythonhosted.org",
+		"proxy.golang.org",
+		"sum.golang.org",
+		"crates.io",
+		"index.crates.io",
+		"static.crates.io",
+	} {
+		if dec := eng.Decide(Request{Host: host, Port: 443}); dec.Action != ActionAllow {
+			t.Errorf("default balanced policy denied %s:443: %+v", host, dec)
+		}
+		if dec := eng.Decide(Request{Host: host, Port: 80}); dec.Action != ActionDeny {
+			t.Errorf("default balanced policy allowed %s:80: %+v", host, dec)
+		}
+	}
+	if dec := eng.Decide(Request{Host: "evil.example", Port: 443}); dec.Action != ActionDeny {
+		t.Errorf("default balanced policy allowed evil.example:443: %+v", dec)
+	}
+
+	validTOML := `
+[sandbox]
+preset = "balanced"
+package_managers = "strict"
+
+[network]
+min_release_age = "7d"
+`
+	cfg, err := ParsePolicy([]byte(validTOML))
+	if err != nil {
+		t.Fatalf("ParsePolicy(valid package fields): %v", err)
+	}
+	if _, err := NewEngine(cfg); err != nil {
+		t.Fatalf("NewEngine(valid package fields): %v", err)
+	}
+	if _, err := NewEngine(Config{Sandbox: SandboxConfig{PackageManagers: "on"}}); err == nil {
+		t.Error("expected error for invalid sandbox.package_managers")
+	}
+	if _, err := NewEngine(Config{Network: NetworkConfig{MinReleaseAge: "90m"}}); err == nil {
+		t.Error("expected error for invalid network.min_release_age")
+	}
+}

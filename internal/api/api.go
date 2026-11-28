@@ -66,16 +66,27 @@ type NewArgs struct {
 	// Wall names the isolation wall for this session: "", "none", or a driver
 	// such as "plain" (the test-only supervisor driver).
 	Wall string `json:"wall,omitempty"`
+	// PackageManagers picks the guest package manager guard level ("guarded",
+	// "strict", or "off") for walled sessions (isolation spec 7.10).
+	PackageManagers string `json:"package_managers,omitempty"`
+	// MinReleaseAge sets the minimum package release age ("0d" to "365d") for
+	// walled sessions (isolation spec 7.10).
+	MinReleaseAge string `json:"min_release_age,omitempty"`
+	// SandboxEnv sets extra environment variables for walled sessions; any
+	// name here overrides values written by guest init.
+	SandboxEnv map[string]string `json:"sandbox_env,omitempty"`
 }
 
 // WallInfo is a session's wall, in its row.
 type WallInfo struct {
-	Level          string `json:"level"`
-	Driver         string `json:"driver"`
-	Version        string `json:"version,omitempty"`
-	Floor          string `json:"floor,omitempty"`
-	DowngradedFrom string `json:"downgraded_from,omitempty"`
-	Preset         string `json:"preset,omitempty"`
+	Level           string `json:"level"`
+	Driver          string `json:"driver"`
+	Version         string `json:"version,omitempty"`
+	Floor           string `json:"floor,omitempty"`
+	DowngradedFrom  string `json:"downgraded_from,omitempty"`
+	Preset          string `json:"preset,omitempty"`
+	PackageManagers string `json:"package_managers,omitempty"`
+	MinReleaseAge   string `json:"min_release_age,omitempty"`
 }
 
 // SessionInfo is one row of the session list.

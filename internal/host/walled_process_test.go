@@ -143,6 +143,9 @@ func TestProcessWalledEnvAndProbeFailure(t *testing.T) {
 		"HTTP_PROXY=" + process.GuestProxyURL,
 		"HTTPS_PROXY=" + process.GuestProxyURL,
 		"NODE_USE_ENV_PROXY=1",
+		"npm_config_proxy=" + process.GuestProxyURL,
+		"npm_config_https_proxy=" + process.GuestProxyURL,
+		"CARGO_HTTP_PROXY=" + process.GuestProxyURL,
 		"PATH=/opt/agents/bin:/usr/local/bin:/usr/bin:/bin",
 	} {
 		if !strings.Contains(joined, want) {

@@ -93,21 +93,24 @@ type WallMount struct {
 
 // WallRecord records the wall a session runs in, written by the trusted side.
 type WallRecord struct {
-	Level          string      `json:"level"`
-	Driver         string      `json:"driver"`
-	Version        string      `json:"version,omitempty"`
-	Floor          string      `json:"floor,omitempty"`
-	DowngradedFrom string      `json:"downgraded_from,omitempty"`
-	Preset         string      `json:"preset,omitempty"`
-	Reason         string      `json:"reason,omitempty"`
-	At             time.Time   `json:"at,omitempty"`
-	WorkspaceHost  string      `json:"workspace_host,omitempty"`
-	WorkspaceGuest string      `json:"workspace_guest,omitempty"`
-	StateDirs      []string    `json:"state_dirs,omitempty"`
-	ExtraRO        []WallMount `json:"extra_ro,omitempty"`
-	ExtraRW        []WallMount `json:"extra_rw,omitempty"`
-	ShareNet       bool        `json:"share_net,omitempty"`
-	PolicyTOML     string      `json:"policy_toml,omitempty"`
+	Level           string            `json:"level"`
+	Driver          string            `json:"driver"`
+	Version         string            `json:"version,omitempty"`
+	Floor           string            `json:"floor,omitempty"`
+	DowngradedFrom  string            `json:"downgraded_from,omitempty"`
+	Preset          string            `json:"preset,omitempty"`
+	Reason          string            `json:"reason,omitempty"`
+	At              time.Time         `json:"at,omitempty"`
+	WorkspaceHost   string            `json:"workspace_host,omitempty"`
+	WorkspaceGuest  string            `json:"workspace_guest,omitempty"`
+	StateDirs       []string          `json:"state_dirs,omitempty"`
+	ExtraRO         []WallMount       `json:"extra_ro,omitempty"`
+	ExtraRW         []WallMount       `json:"extra_rw,omitempty"`
+	ShareNet        bool              `json:"share_net,omitempty"`
+	PolicyTOML      string            `json:"policy_toml,omitempty"`
+	PackageManagers string            `json:"package_managers,omitempty"`
+	MinReleaseAge   string            `json:"min_release_age,omitempty"`
+	SandboxEnv      map[string]string `json:"sandbox_env,omitempty"`
 }
 
 // GuestClaims holds the latest reports from the guest inside the wall.

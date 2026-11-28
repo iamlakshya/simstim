@@ -51,6 +51,10 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	a, err = withPackageSettings(a)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.RequireSecrets(a); err != nil {
 		return nil, err
 	}

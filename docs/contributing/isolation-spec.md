@@ -1175,16 +1175,16 @@ The settings of `guarded`, with N the age in days ([build facts](../research/bui
 | Tool | Age | Scripts | Written as | Can a repository undo it? |
 | --- | --- | --- | --- | --- |
 | npm 11.10.0 or later | `min-release-age`, N days | `ignore-scripts=true` | `npm_config_min_release_age=N`, `npm_config_ignore_scripts=true` | No: the environment wins over every npmrc file |
-| pnpm 10.16 or later | `minimumReleaseAge`, N × 1440 minutes | `ignoreScripts: true` | `~/.config/pnpm/config.yaml`. pnpm 11 ignores `npm_config_*`, and reads the age only from that file or `pnpm-workspace.yaml`. | UNVERIFIED: a repository's `pnpm-workspace.yaml` may win. P2.8 checks it. |
-| Yarn 4.10 or later (Berry, UNVERIFIED) | `npmMinimalAgeGate`, N × 1440 as a plain number of minutes | `enableScripts: false` | `YARN_NPM_MINIMAL_AGE_GATE`, `YARN_ENABLE_SCRIPTS=false` | UNVERIFIED. P2.8 checks it. |
-| Bun 1.3 or later (UNVERIFIED) | `[install] minimumReleaseAge`, N × 86400 seconds | `[install] ignoreScripts = true` | `~/.bunfig.toml` | UNVERIFIED: a project `bunfig.toml` may win. P2.8 checks it. |
-| pip 26.1 or later (inferred, UNVERIFIED) | `--uploaded-prior-to`, `P<N>D` | none in `guarded` | `PIP_UPLOADED_PRIOR_TO=P<N>D` | No |
+| pnpm 10.16 or later | `minimumReleaseAge`, N × 1440 minutes | `ignoreScripts: true` | `~/.config/pnpm/config.yaml`. pnpm 11 ignores `npm_config_*` and reads global settings from that file. | Yes: a repository's `pnpm-workspace.yaml` overrides `~/.config/pnpm/config.yaml` (pnpm 11 also reads `pnpm_config_*` variables ahead of `pnpm-workspace.yaml`). |
+| Yarn 4.10 or later (Berry) | `npmMinimalAgeGate`, N × 1440 as a plain number of minutes | `enableScripts: false` | `YARN_NPM_MINIMAL_AGE_GATE`, `YARN_ENABLE_SCRIPTS=false` | No: `YARN_*` environment variables outrank `.yarnrc.yml`. |
+| Bun 1.3 or later | `[install] minimumReleaseAge`, N × 86400 seconds | `[install] ignoreScripts = true` | `~/.bunfig.toml` | Yes for `minimumReleaseAge`: a project `bunfig.toml` overrides `~/.bunfig.toml`. `npm_config_ignore_scripts=true` overrides `ignoreScripts` in `bunfig.toml`. |
+| pip 26.0 or later | `--uploaded-prior-to`, the time N days before the start, in RFC 3339 | none in `guarded` | `PIP_UPLOADED_PRIOR_TO=<time>` | No |
 | uv 0.9.17 or later | `exclude-newer`, the time N days before the start, in RFC 3339 | none in `guarded` | `UV_EXCLUDE_NEWER=<time>`. A fixed time avoids the bug of a duration in that variable ([uv 18829](https://github.com/astral-sh/uv/issues/18829)). | No |
 | cargo | none: no stable setting exists | none: `build.rs` and procedural macros always run | nothing | Only the gate of 7.11 covers crates |
 | Go | none: no setting exists | none: the go command runs no module code | `GOTOOLCHAIN=local`, `GOPROXY=https://proxy.golang.org`, `GOSUMDB=sum.golang.org`, `GOVCS=*:off` | No: `go.mod` cannot set these |
 
-- uv's fixed time moves forward only at a restart, so a long-running sandbox is stricter, never looser.
-- What pip before 26.1 does with `PIP_UPLOADED_PRIOR_TO=P<N>D` is UNVERIFIED, because 26.0 may not take the form `P<N>D`. P2.8 checks it, and leaves the variable out for such a pip if it fails.
+- Both `PIP_UPLOADED_PRIOR_TO` and `UV_EXCLUDE_NEWER` use a fixed RFC 3339 UTC timestamp (`now - N days`). It moves forward only at a restart, so a long-running sandbox is stricter, never looser.
+- pip 26.0 introduced `--uploaded-prior-to` with absolute ISO 8601 timestamps only; ISO 8601 durations (`P<N>D`) arrived in pip 26.1. Writing an RFC 3339 UTC timestamp works on both pip 26.0 and pip 26.1+ without probing pip, and older pip ignores unknown `PIP_*` environment variables.
 - A pip requirements file can still ask for `--no-binary` under `strict`, and the docs say so.
 
 **Go.** Since Go 1.16 the go command acts as if `-mod=readonly` were set, so the guest sets no `GOFLAGS`. `GOTOOLCHAIN=local` stops the go command from downloading and running the toolchain that a `go.mod` asks for. A module that needs a newer Go then fails with a message that names `GOTOOLCHAIN`. `GOPROXY` without `,direct`, and `GOVCS=*:off`, keep every module fetch on the proxy, where the gate of 7.11 sees it. The guest init passes none of `GOPRIVATE`, `GONOPROXY`, `GONOSUMDB`, `GOINSECURE` and `GOFLAGS`. So private modules fail unless the user sets `GOPRIVATE`, `GOPROXY` and `GOVCS` in `sandbox.env`.

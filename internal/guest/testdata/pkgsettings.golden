@@ -1,0 +1,120 @@
+=== level=guarded age=0d ===
+strip_env: GOFLAGS,GOINSECURE,GONOPROXY,GONOSUMDB,GOPRIVATE
+env GOPROXY=https://proxy.golang.org
+env GOSUMDB=sum.golang.org
+env GOTOOLCHAIN=local
+env GOVCS=*:off
+env YARN_ENABLE_SCRIPTS=false
+env npm_config_ignore_scripts=true
+--- file .bunfig.toml ---
+[install]
+ignoreScripts = true
+--- file .config/pnpm/config.yaml ---
+ignoreScripts: true
+
+=== level=guarded age=1d ===
+strip_env: GOFLAGS,GOINSECURE,GONOPROXY,GONOSUMDB,GOPRIVATE
+env GOPROXY=https://proxy.golang.org
+env GOSUMDB=sum.golang.org
+env GOTOOLCHAIN=local
+env GOVCS=*:off
+env PIP_UPLOADED_PRIOR_TO=2026-11-27T12:00:00Z
+env UV_EXCLUDE_NEWER=2026-11-27T12:00:00Z
+env YARN_ENABLE_SCRIPTS=false
+env YARN_NPM_MINIMAL_AGE_GATE=1440
+env npm_config_ignore_scripts=true
+env npm_config_min_release_age=1
+--- file .bunfig.toml ---
+[install]
+ignoreScripts = true
+minimumReleaseAge = 86400
+--- file .config/pnpm/config.yaml ---
+ignoreScripts: true
+minimumReleaseAge: 1440
+
+=== level=guarded age=7d ===
+strip_env: GOFLAGS,GOINSECURE,GONOPROXY,GONOSUMDB,GOPRIVATE
+env GOPROXY=https://proxy.golang.org
+env GOSUMDB=sum.golang.org
+env GOTOOLCHAIN=local
+env GOVCS=*:off
+env PIP_UPLOADED_PRIOR_TO=2026-11-21T12:00:00Z
+env UV_EXCLUDE_NEWER=2026-11-21T12:00:00Z
+env YARN_ENABLE_SCRIPTS=false
+env YARN_NPM_MINIMAL_AGE_GATE=10080
+env npm_config_ignore_scripts=true
+env npm_config_min_release_age=7
+--- file .bunfig.toml ---
+[install]
+ignoreScripts = true
+minimumReleaseAge = 604800
+--- file .config/pnpm/config.yaml ---
+ignoreScripts: true
+minimumReleaseAge: 10080
+
+=== level=strict age=0d ===
+strip_env: GOFLAGS,GOINSECURE,GONOPROXY,GONOSUMDB,GOPRIVATE
+env GOPROXY=https://proxy.golang.org
+env GOSUMDB=sum.golang.org
+env GOTOOLCHAIN=local
+env GOVCS=*:off
+env PIP_ONLY_BINARY=:all:
+env UV_NO_BUILD=1
+env YARN_ENABLE_SCRIPTS=false
+env npm_config_ignore_scripts=true
+--- file .bunfig.toml ---
+[install]
+ignoreScripts = true
+--- file .config/pnpm/config.yaml ---
+ignoreScripts: true
+
+=== level=strict age=1d ===
+strip_env: GOFLAGS,GOINSECURE,GONOPROXY,GONOSUMDB,GOPRIVATE
+env GOPROXY=https://proxy.golang.org
+env GOSUMDB=sum.golang.org
+env GOTOOLCHAIN=local
+env GOVCS=*:off
+env PIP_ONLY_BINARY=:all:
+env PIP_UPLOADED_PRIOR_TO=2026-11-27T12:00:00Z
+env UV_EXCLUDE_NEWER=2026-11-27T12:00:00Z
+env UV_NO_BUILD=1
+env YARN_ENABLE_SCRIPTS=false
+env YARN_NPM_MINIMAL_AGE_GATE=1440
+env npm_config_ignore_scripts=true
+env npm_config_min_release_age=1
+--- file .bunfig.toml ---
+[install]
+ignoreScripts = true
+minimumReleaseAge = 86400
+--- file .config/pnpm/config.yaml ---
+ignoreScripts: true
+minimumReleaseAge: 1440
+
+=== level=strict age=7d ===
+strip_env: GOFLAGS,GOINSECURE,GONOPROXY,GONOSUMDB,GOPRIVATE
+env GOPROXY=https://proxy.golang.org
+env GOSUMDB=sum.golang.org
+env GOTOOLCHAIN=local
+env GOVCS=*:off
+env PIP_ONLY_BINARY=:all:
+env PIP_UPLOADED_PRIOR_TO=2026-11-21T12:00:00Z
+env UV_EXCLUDE_NEWER=2026-11-21T12:00:00Z
+env UV_NO_BUILD=1
+env YARN_ENABLE_SCRIPTS=false
+env YARN_NPM_MINIMAL_AGE_GATE=10080
+env npm_config_ignore_scripts=true
+env npm_config_min_release_age=7
+--- file .bunfig.toml ---
+[install]
+ignoreScripts = true
+minimumReleaseAge = 604800
+--- file .config/pnpm/config.yaml ---
+ignoreScripts: true
+minimumReleaseAge: 10080
+
+=== level=off age=0d ===
+
+=== level=off age=1d ===
+
+=== level=off age=7d ===
+

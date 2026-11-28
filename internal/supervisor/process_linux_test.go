@@ -207,9 +207,12 @@ func TestSupervisorProcessWallEndToEnd(t *testing.T) {
 		}
 	}
 
-	// Cycle 1: verify guest paths, write kept/ephemeral/workspace files, test egress proxy (locked preset -> 403), and direct TCP fail-closed.
+	// Cycle 1: verify guest paths, write kept/ephemeral/workspace files, verify package manager settings, test egress proxy (403 on example.com), and direct TCP fail-closed.
 	cycle1Cmd := strings.Join([]string{
 		`printf 'ENV:%s:%s:%s\n' "$HOME" "$USER" "$(pwd)"`,
+		`printf 'PKG:%s:%s:%s:%s:%s:%s\n' "$npm_config_ignore_scripts" "$npm_config_min_release_age" "$GOTOOLCHAIN" "$GOPROXY" "$GOVCS" "${GOFLAGS:-unset}"`,
+		`grep -q 'minimumReleaseAge: 10080' /home/agent/.config/pnpm/config.yaml && echo PNPM_CFG_OK`,
+		`grep -q 'minimumReleaseAge = 604800' /home/agent/.bunfig.toml && echo BUN_CFG_OK`,
 		`echo WORK_KEPT > /work/myrepo/work.txt`,
 		`echo STATE_KEPT > /home/agent/.claude/projects/kept.txt`,
 		`echo EPHEMERAL > /home/agent/ephemeral.txt`,
@@ -222,6 +225,9 @@ except OSError as e: print("DIRECT:BLOCKED:" + str(e.errno))'`,
 
 	runCycle(cycle1Cmd, []string{
 		"ENV:/home/agent:agent:/work/myrepo",
+		"PKG:true:7:local:https://proxy.golang.org:*:off:unset",
+		"PNPM_CFG_OK",
+		"BUN_CFG_OK",
 		"PROXY:HTTP/1.1 403",
 		"DIRECT:BLOCKED:",
 		"CYCLE1_DONE",
