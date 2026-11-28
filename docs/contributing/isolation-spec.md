@@ -5639,19 +5639,17 @@ With separate accounts, the disk lives in `vms/<id>/`, and the slot launcher's `
 
 ### 21.4 The gvisor wall (P6.1)
 
-The gvisor wall puts gVisor's user-space kernel between a sandbox and the host's kernel. It serves hosts without KVM (11, [question 2](#15-open-questions)). The driver is `internal/wall/gvisor`, named `gvisor`, at the level `gvisor`.
+The gvisor wall puts gVisor's user-space kernel between a sandbox and the host's kernel. It serves hosts without KVM (11, [question 2](#15-open-questions)). The driver is `internal/wall/gvisor`, named `gvisor`, at the level `gvisor` ([decision 0058](decisions/0058-upstream-runsc-gvisor-wall.md)).
 
-**Runtime.** The release pins one `runsc` by SHA-256 in `guest/supply.lock`, and mirrors it. The release manifest names it as an item of kind `gvisor` (14.9.1), and the known-bad list of 20.9 takes the same kind. A host gets it as it gets other runtime files (14.9.3).
+**Runtime.** The release uses unmodified upstream `runsc` releases (`release-20261123.1`), pinned by SHA-256 in `guest/supply.lock` and `internal/wall/gvisor/pins.go` with no patch and no Bazel build. Each upstream `gvisor.tar.bz2` archive (`amd64` and `arm64`) supplies `runsc` and its required `gvisor-bin/` sidecars (`gvisor_sentry`, `gvisor-sentry-prewarmer`, `gvisor-proc-umounter` and `runsc-fd-parking`), all verified by SHA-256 before extraction and before every launch. The release manifest names it as an item of kind `gvisor` (14.9.1), and the known-bad list of 20.9 takes the same kind. A host installs it with `simstim-host wall install gvisor` into `~/.local/share/simstim/artefacts/runtime/gvisor-release-20261123.1/`.
 
 **Namespaces** ([question 88](#15-open-questions)).
 
-- `runsc` runs as uid 0 inside a user namespace and a network namespace that the helper makes. Only the login user's uid maps, to 0.
-- Where Ubuntu restricts user namespaces, the namespace launcher of 14.4 makes them, as it does for the process wall. One root step serves both walls.
-- The driver never uses `--rootless`. That mode refuses `create`, has no save and restore, and calls `unshare(CLONE_NEWUSER)` itself, which the restriction stops.
-- The driver never uses the OCI user-namespace mode. It needs `newuidmap`, which server images lack, and a non-root `runsc` there also makes its own user namespace ([facts](../research/build-facts.md#4-linux-walls)).
-- UNVERIFIED: that `runsc` starts under the launcher's child profile, which denies capabilities (14.4). Step 1 of P6.1 checks it. If it fails, the driver's probe reports gvisor as unavailable on hosts with the restriction, with that reason. It works on other hosts.
+- The OCI bundle uses single-entry OCI user-namespace mappings (`hostID: <login uid> -> containerID: 1000, size: 1` for both UID and GID). A single-entry mapping needs no `newuidmap` (which minimal server images lack), maps files owned by the login user in `/work` and `StateDirs` cleanly to guest uid 1000 (`agent`), and lets `runsc` isolate both the gofer and the Sentry in new user, mount, PID, IPC, UTS, cgroup and network namespaces.
+- The driver never uses `--rootless`. That mode refuses `create`, has no save and restore, and maps host files to uid 0 instead of uid 1000.
+- Verified in P6.1 step 1: `runsc` spawns its gofer and Sentry in new user namespaces with `AmbientCaps` (`CAP_SYS_ADMIN`, `CAP_SYS_CHROOT`, `CAP_SETPCAP` and `CAP_SYS_PTRACE`). Ubuntu's `bwrap-userns-restrict` child profile (`unpriv_bwrap`) enforces `audit deny capability,`, so `runsc` cannot launch under `bwrap` when `kernel.apparmor_restrict_unprivileged_userns = 1`. On Debian 12 and 13 no root step is needed. On Ubuntu 24.04 or later with the restriction enabled, `runsc` needs its own minimal AppArmor 4.0 profile (`/etc/apparmor.d/simstim-runsc`, scoped to the pinned static `runsc` binary with `userns,`), which the probe prints as one `sudo` command in `Fix`.
 
-**Start.** The driver writes an OCI bundle in the session folder, with no hooks. Inside the namespaces, it runs:
+**Start.** The driver writes an OCI 1.0.2 bundle in `<SessionDir>/bundle`, with no hooks, zero capabilities, `noNewPrivileges: true`, and an OCI seccomp profile blocking `unshare`, `mount`, `umount2`, `bpf`, `io_uring_*`, `clone3`, `AF_VSOCK` and `NETLINK_AUDIT`. It runs:
 
 ```text
 runsc --root <SessionDir>/runsc --network=none --directfs=false --ignore-cgroups --host-uds=none \
@@ -5665,7 +5663,7 @@ runsc --root <SessionDir>/runsc --network=none --directfs=false --ignore-cgroups
 - `--pass-fd <fd>:3`: one end of the supervisor's socket pair becomes fd 3 of the guest init. That is the link, as on the process wall. This replaces the research's `--host-uds=open`, which would open host sockets by path.
 - The platform is systrap, the default, which needs no virtualisation.
 
-Each flag exists in `runsc` release-20261102.0 ([facts](../research/build-facts.md#4-linux-walls)). UNVERIFIED: the command line as a whole. Step 1 of P6.1 runs it.
+Verified end to end on `runsc` `release-20261123.1` in P6.1 step 1.
 
 **Files.** The OCI spec gives the files of a process wall (7.1). These are the session's clone, a fresh home, and the host's system folders read-only. They also include the agent's install folders and `/opt/<name>/bin`. `Spec.Image` stays nil in this plan. An image root waits until gVisor fixes the overlay issue of an EROFS root ([gvisor#13529](https://github.com/google/gvisor/issues/13529)), in a task of its own.
 

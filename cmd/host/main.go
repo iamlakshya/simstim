@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/wall"
+	"github.com/iamlakshya/simstim/internal/wall/gvisor"
 )
 
 const usage = `%[1]s keeps agent sessions alive on this host. The client runs it over SSH.
@@ -33,6 +35,7 @@ Usage:
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
   %[1]s wall probe [--json] probe which sandbox walls this host supports
+  %[1]s wall install gvisor download and verify the pinned upstream runsc runtime
   %[1]s keytest             print every key the terminal sends
   %[1]s restore [--all]     start again sessions a restart (or, with --all, a stop or crash) stopped
   %[1]s idle setup <30m|never>   power this VM off when idle (a user timer runs "idle check")
@@ -322,8 +325,22 @@ func runDoctor(args []string) error {
 }
 
 func runWall(args []string) error {
-	if len(args) == 0 || args[0] != "probe" {
-		return fmt.Errorf("usage: %s wall probe [--json]", brand.HostBinary)
+	if len(args) == 0 {
+		return fmt.Errorf("usage: %s wall <probe [--json] | install gvisor>", brand.HostBinary)
+	}
+	if args[0] == "install" {
+		if len(args) != 2 || args[1] != "gvisor" {
+			return fmt.Errorf("usage: %s wall install gvisor", brand.HostBinary)
+		}
+		p, err := gvisor.EnsureRuntime(context.Background(), runtime.GOARCH)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("installed gVisor %s at %s\n", gvisor.PinnedRelease, p)
+		return nil
+	}
+	if args[0] != "probe" {
+		return fmt.Errorf("usage: %s wall <probe [--json] | install gvisor>", brand.HostBinary)
 	}
 	probes := wall.ProbeAll(context.Background())
 	if hasFlag(args[1:], "--json") {

@@ -38,6 +38,10 @@ func newProcessWalled(a NewArgs) (_ *SessionInfo, err error) {
 		}
 		return nil, UserError("wall_setup", reason, fix)
 	}
+	return newSandboxedWalled(a, "process", process.DriverName, bwrapVer)
+}
+
+func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, err error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
@@ -100,9 +104,9 @@ func newProcessWalled(a NewArgs) (_ *SessionInfo, err error) {
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
 		Wall: &WallRecord{
-			Level:           "process",
-			Driver:          process.DriverName,
-			Version:         bwrapVer,
+			Level:           level,
+			Driver:          driver,
+			Version:         ver,
 			Preset:          string(egress.PresetBalanced),
 			WorkspaceHost:   wsHost,
 			WorkspaceGuest:  wsGuest,

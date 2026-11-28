@@ -10,7 +10,7 @@ Each host supports one or more wall levels, from weakest to strongest:
 | --- | --- | --- |
 | `none` | No wall | Any Linux host that runs sessions today |
 | `process` | [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`), Landlock and seccomp | Linux 5.13 or later, `bwrap`, unprivileged user namespaces, Landlock ABI 1 or more, seccomp |
-| `gvisor` | Upstream `runsc` (later phase) | Linux 5.6 or later, `runsc`, unprivileged user namespaces |
+| `gvisor` | Pinned upstream [gVisor](https://gvisor.dev/) `runsc` (systrap) | Linux 5.6 or later (`amd64` or `arm64`), pinned `runsc` runtime, unprivileged user namespaces |
 | `microvm` | Cloud Hypervisor on KVM (later phase) | Linux 6.8 or later, `/dev/kvm` open to your user, pinned runtime |
 
 ## Check what a host supports
@@ -120,3 +120,26 @@ To override one variable for a tool (for example, to allow a private Go module p
 GOPROXY = "https://proxy.corp.example,https://proxy.golang.org"
 GOPRIVATE = "corp.example/*"
 ```
+
+## Use the gVisor wall (`--wall gvisor`)
+
+The gVisor wall runs each session behind upstream gVisor's user-space kernel (the Sentry on the `systrap` platform) without requiring `/dev/kvm`.
+
+1. Download and verify the pinned upstream `runsc` runtime on the host:
+
+```sh
+simstim-host wall install gvisor
+```
+
+This downloads the pinned `release-20261123.1` archive, checks its SHA-256 digest and the digest of `runsc` and its required `gvisor-bin/` sidecars, and stores them under `~/.local/share/simstim/artefacts/runtime/`.
+
+2. On Debian 12 or 13, no root step is needed. On Ubuntu 24.04 or later (where `kernel.apparmor_restrict_unprivileged_userns = 1`), `runsc` needs its own AppArmor profile rather than `bwrap-userns-restrict`, because `bwrap-userns-restrict` denies capabilities that `runsc` uses inside its new user namespace. Run `simstim host doctor my-vps` to get the single `sudo` command that installs and loads `/etc/apparmor.d/simstim-runsc` for the pinned `runsc` binary.
+
+3. Start a session with `--wall gvisor`:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --wall gvisor --dir /path/to/repo
+```
+
+Inside a gVisor wall, the session gets the same workspace, fresh `/home/agent`, filtered `/etc`, `/opt/agents/` mounts, and loopback proxy (`127.0.0.1:3128`) through the host `egress` process as the process wall, with gVisor's Sentry (`--network=none --directfs=false --ignore-cgroups --host-uds=none`) and an OCI seccomp profile between the agent and the host kernel.

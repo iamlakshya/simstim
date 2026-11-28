@@ -53,5 +53,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0055](0055-lean-release-signing.md) | Keep SSH checksum signatures, SBOMs and GitHub attestations; drop cosign keyless signing and the unmaintained SLSA generator (replaces 0017) | Proposed |
 | [0056](0056-bubblewrap-process-wall.md) | Build the process wall with bubblewrap, `go-seccomp-bpf` and `go-landlock` instead of a custom namespace launcher (applies 0053) | Proposed |
 | [0057](0057-model-gateway-route.md) | Route sandboxed model API calls through plain-HTTP `/gw/<route>` paths on the egress process with verified upstream TLS, no TLS interception and no direct `CONNECT` to model hosts | Proposed |
+| [0058](0058-upstream-runsc-gvisor-wall.md) | Build the gVisor wall on pinned upstream `runsc` without patches, with single-entry OCI user namespaces and an Ubuntu AppArmor profile when required (applies 0053) | Proposed |
 
 Write a new record from [the template](template.md).

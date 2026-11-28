@@ -113,8 +113,9 @@ type stopRequest struct {
 }
 
 // Run supervises session id using the wall driver recorded in its manifest
-// ("process" via bubblewrap, or "plain" for the test driver). It returns when
-// the sandbox has ended and the session is stopped, ended or killed.
+// ("process" via bubblewrap, "gvisor" via upstream runsc, or "plain" for the
+// test driver). It returns when the sandbox has ended and the session is
+// stopped, ended or killed.
 func Run(id string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -124,9 +125,15 @@ func Run(id string) error {
 	if err != nil {
 		return fmt.Errorf("load manifest: %w", err)
 	}
-	if m.Wall != nil && m.Wall.Driver == "process" {
-		sb := NewProcessSandbox(id, exe, m)
-		return RunWith(id, sb, Options{EgressExe: exe})
+	if m.Wall != nil {
+		switch m.Wall.Driver {
+		case "process":
+			sb := NewProcessSandbox(id, exe, m)
+			return RunWith(id, sb, Options{EgressExe: exe})
+		case "gvisor":
+			sb := NewGVisorSandbox(id, exe, m)
+			return RunWith(id, sb, Options{EgressExe: exe})
+		}
 	}
 	sb := NewPlainSandbox(id, exe, paths.GuestRuntimeDir(id))
 	return RunWith(id, sb, Options{})

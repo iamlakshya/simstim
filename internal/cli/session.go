@@ -63,7 +63,7 @@ func newCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&o.secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
 	cmd.Flags().BoolVar(&o.setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
 	cmd.Flags().BoolVar(&o.noSetup, "no-setup", false, "do not run the repository's setup script this time")
-	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: none or process")
+	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: none, process or gvisor")
 	addJSON(cmd, &o.asJSON)
 	return cmd
 }
@@ -140,12 +140,12 @@ func parseWallFlag(raw string) (string, error) {
 	}
 	w := strings.ToLower(strings.TrimSpace(raw))
 	switch w {
-	case "none", "process", "plain":
+	case "none", "process", "gvisor", "plain":
 		return w, nil
 	default:
 		return "", &client.UserError{
 			Msg:  fmt.Sprintf("--wall: unknown wall level %q", raw),
-			Hint: "Pass none or process.",
+			Hint: "Pass none, process or gvisor.",
 			Code: "bad_value",
 			Kind: client.KindUsage,
 		}

@@ -334,6 +334,69 @@ func TestPrintSandboxesBlockEdgeCases(t *testing.T) {
 			t.Errorf("hints =\n%s", hints.String())
 		}
 	})
+
+	t.Run("gVisor OK prints version and platform", func(t *testing.T) {
+		var rows, hints bytes.Buffer
+		p := api.CapProbe{
+			OS: "linux",
+			Walls: []api.WallProbe{{
+				Driver:  "gvisor",
+				Level:   api.LevelGVisor,
+				Version: "release-20261123.1",
+				OK:      true,
+				Facts:   map[string]string{"platform": "systrap", "runsc": "/opt/gvisor/runsc"},
+			}},
+		}
+		printGVisorLine(&rows, &hints, p)
+		if !strings.Contains(rows.String(), "✓ gVisor release-20261123.1 (systrap)") {
+			t.Errorf("rows =\n%s", rows.String())
+		}
+		if hints.Len() != 0 {
+			t.Errorf("unexpected hints:\n%s", hints.String())
+		}
+	})
+
+	t.Run("gVisor installed but blocked by AppArmor prints failure and Try sudo fix", func(t *testing.T) {
+		var rows, hints bytes.Buffer
+		fixCmd := `sudo sh -c 'printf "%s" "$1" > "$2" && chmod 0644 "$2" && apparmor_parser -r "$2"' _ 'profile' '/etc/apparmor.d/` + brand.Name + `-runsc'`
+		p := api.CapProbe{
+			OS: "linux",
+			Walls: []api.WallProbe{{
+				Driver: "gvisor",
+				Level:  api.LevelGVisor,
+				OK:     false,
+				Reason: "Ubuntu's AppArmor user-namespace restriction blocks runsc (kernel.apparmor_restrict_unprivileged_userns = 1)",
+				Fix:    fixCmd,
+				Facts:  map[string]string{"platform": "systrap", "runsc": "/opt/gvisor/runsc"},
+			}},
+		}
+		printSandboxesBlock(&rows, &hints, "ubuntu-vps", p, "process")
+		if !strings.Contains(rows.String(), "✕ gVisor: Ubuntu's AppArmor user-namespace restriction blocks runsc") {
+			t.Errorf("rows =\n%s", rows.String())
+		}
+		if !strings.Contains(hints.String(), "Try: "+fixCmd) {
+			t.Errorf("hints =\n%s", hints.String())
+		}
+	})
+
+	t.Run("gVisor not installed stays quiet in Sandboxes block", func(t *testing.T) {
+		var rows, hints bytes.Buffer
+		p := api.CapProbe{
+			OS: "linux",
+			Walls: []api.WallProbe{{
+				Driver: "gvisor",
+				Level:  api.LevelGVisor,
+				OK:     false,
+				Reason: "pinned runsc release-20261123.1 is not installed in the artefact store",
+				Fix:    brand.HostBinary + " wall install gvisor",
+				Facts:  map[string]string{"platform": "systrap"},
+			}},
+		}
+		printGVisorLine(&rows, &hints, p)
+		if rows.Len() != 0 || hints.Len() != 0 {
+			t.Errorf("expected no output when runsc is absent; rows=%q hints=%q", rows.String(), hints.String())
+		}
+	})
 }
 
 func TestPrintHostSandboxSectionErrors(t *testing.T) {

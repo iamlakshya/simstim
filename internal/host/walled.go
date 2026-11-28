@@ -78,11 +78,13 @@ func newWalled(a NewArgs) (_ *SessionInfo, err error) {
 	switch a.Wall {
 	case "process":
 		return newProcessWalled(a)
+	case "gvisor":
+		return newGVisorWalled(a)
 	case "plain":
 		return newPlainWalled(a)
 	default:
 		return nil, UserError("wall_unavailable", fmt.Sprintf("wall %q is not available in this build", a.Wall),
-			"Use --wall process for a bubblewrap sandbox, or --wall none for an unwalled session.")
+			"Use --wall process, --wall gvisor, or --wall none for an unwalled session.")
 	}
 }
 

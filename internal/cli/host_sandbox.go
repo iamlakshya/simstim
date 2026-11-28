@@ -63,6 +63,7 @@ func printSandboxesBlock(rows, hints io.Writer, hostName string, p api.CapProbe,
 	fmt.Fprintf(rows, "Sandboxes on %s:\n", hostName)
 	printSystemSummaryLine(rows, p)
 	printKVMLines(rows, hints, p)
+	printGVisorLine(rows, hints, p)
 	printProcessWallLines(rows, hints, p)
 	printDiskLine(rows, p)
 	now, afterRoot := api.LevelsFor(p, api.RuntimeStatus{})
@@ -144,6 +145,36 @@ func printKVMLines(rows, hints io.Writer, p api.CapProbe) {
 		} else {
 			fmt.Fprintf(hints, "    Try: sudo usermod -aG %s %s (then reboot or restart your login session)\n", qGroup, qUser)
 		}
+	}
+}
+
+func printGVisorLine(rows, hints io.Writer, p api.CapProbe) {
+	for _, w := range p.Walls {
+		if w.Level != api.LevelGVisor {
+			continue
+		}
+		if w.OK {
+			detail := "gVisor"
+			if w.Version != "" {
+				detail += " " + w.Version
+			}
+			if plat := w.Facts["platform"]; plat != "" {
+				detail += " (" + plat + ")"
+			}
+			fmt.Fprintf(rows, "  ✓ %s\n", detail)
+			return
+		}
+		if w.Facts["runsc"] != "" {
+			reason := w.Reason
+			if reason == "" {
+				reason = "not ready"
+			}
+			fmt.Fprintf(rows, "  ✕ gVisor: %s\n", reason)
+			if w.Fix != "" {
+				fmt.Fprintf(hints, "    Try: %s\n", w.Fix)
+			}
+		}
+		return
 	}
 }
 

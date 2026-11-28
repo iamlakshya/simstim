@@ -38,7 +38,7 @@ simstim new my-vps --agent claude --detach --json
 | `--no-setup` | do not run the repository's setup script this time |
 | `--secret <stringArray>` | pass a secret from config.toml's [secrets] into the session's environment (repeatable) |
 | `--setup` | run the repository's setup script this time, whatever your answer for it |
-| `--wall <string>` | sandbox wall level: none or process |
+| `--wall <string>` | sandbox wall level: none, process or gvisor |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command

@@ -21,7 +21,7 @@ func (s *Supervisor) initEgress() error {
 		s.egress = s.opt.Egress
 		return nil
 	}
-	if s.opt.EgressExe == "" || s.m.Wall == nil || s.m.Wall.Driver != "process" || s.m.Wall.ShareNet {
+	if s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor") || s.m.Wall.ShareNet {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

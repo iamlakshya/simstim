@@ -21,6 +21,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/wall"
+	_ "github.com/iamlakshya/simstim/internal/wall/gvisor"  // register the upstream runsc gVisor wall driver
 	_ "github.com/iamlakshya/simstim/internal/wall/process" // register the bubblewrap process wall driver
 )
 
