@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 54 |
-| To do | 45 |
+| Done | 55 |
+| To do | 44 |
 | **All** | **99** |
 
 ## Current focus
@@ -26,6 +26,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 - **Day 1 first.** The first working product is the daily-use path: a Mac client and a Linux server host, a session with Claude Code or Codex, attach and detach, files in and out, then stop and destroy. Later tasks stay in scope and follow it.
 - **Milestone M1, checked on a real Linux host (28 November 2026).** From a Mac client to a Debian 13 host, this works: host add with the sandbox report; sessions at the process wall (bubblewrap with seccomp and Landlock), where the session cannot see the host's home or keys; the egress allowlist, which refuses unknown hosts; Claude Code and Codex reaching their providers only through the model gateway, with the key held outside the sandbox; copying files and folders in and out; stop, resume and remove, with nothing left behind. The last step, a logged-in run with real accounts, waits on the owner's tokens.
 - **The gVisor wall, checked on a real Linux host (28 November 2026).** The host helper installs the pinned upstream runsc. A session at the gvisor level runs on gVisor's own kernel, with the same egress policy and file copying as the process wall. The microVM wall is next.
+- **The microVM wall, checked on a real Linux host (28 November 2026).** One host command installs the pinned Cloud Hypervisor and kernel, and one client command pulls a pinned base image. A microVM session runs on its own kernel, behind the same egress policy, with copying, stop, resume from its kept disk, and removal all working.
 
 ## Every task
 
@@ -60,7 +61,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.9 | 1 | Day 1 | Done | Paste and ports through the supervisor |
 | P1.10 | 1 | Day 1 | Done | Pull through a bundle, with a review |
 | P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
-| P1.16 | 1 | Day 1 | To do | Runs for many sessions |
+| P1.16 | 1 | Day 1 | Done | Runs for many sessions |
 | P2.1 | 2 | Day 1 | Done | DNS policy |
 | P2.3 | 2 | Day 1 | Done | Bound secrets |
 | P2.4 | 2 | Day 1 | Done | The model API guard |
