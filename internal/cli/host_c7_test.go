@@ -20,6 +20,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
+	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/provider"
 )
@@ -457,6 +458,12 @@ func (s *localShellTransport) ReachHint() string { return "check local shell hos
 
 func TestHostShowJSONMatchesSharedDetails(t *testing.T) {
 	newTestHost(t)
+	// Pin free disk space so two separate host show calls (text and --json)
+	// observe the same snapshot even when concurrent tests or the OS change
+	// available blocks on the underlying file system between calls.
+	oldDiskFree := host.DiskFree
+	host.DiskFree = func(string) int64 { return 50 << 30 }
+	t.Cleanup(func() { host.DiskFree = oldDiskFree })
 	newSession(t, "s1", "sleep", "60")
 	newSession(t, "s2", "sleep", "60")
 

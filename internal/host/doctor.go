@@ -24,6 +24,10 @@ type Check = api.Check
 // HostInfo is what the host doctor reports about the host.
 type HostInfo = api.HostInfo
 
+// DiskFree returns the bytes available to the user on the file system of path.
+// Tests may replace it for deterministic host doctor and capability snapshots.
+var DiskFree = diskFree
+
 // Doctor inspects the host.
 func Doctor() HostInfo {
 	hn, _ := os.Hostname()
@@ -44,7 +48,7 @@ func Doctor() HostInfo {
 		}
 	}
 	if h, err := os.UserHomeDir(); err == nil {
-		info.DiskFree = diskFree(h)
+		info.DiskFree = DiskFree(h)
 	}
 	login, err := LoginEnv(15 * time.Second)
 	if err != nil {

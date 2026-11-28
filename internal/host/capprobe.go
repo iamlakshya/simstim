@@ -70,7 +70,7 @@ func CapabilityProbe(releaseURL string) api.CapProbe {
 
 	dataDir := paths.DataDir()
 	diskDir := existingAncestor(dataDir)
-	p.DiskFree = diskFree(diskDir)
+	p.DiskFree = DiskFree(diskDir)
 	p.DiskFS = probeDiskFS(diskDir)
 	p.Reflink = probeReflink(paths.ArtefactsIncomingDir())
 
