@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 55 |
-| To do | 44 |
+| Done | 57 |
+| To do | 42 |
 | **All** | **99** |
 
 ## Current focus
@@ -49,7 +49,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.1 | 1 | Day 1 | Done | Wall levels, the sandbox probe and the floor |
 | H7 | 1 | Day 1 | Done | The root step |
 | P1.2 | 1 | Day 1 | Done | The link |
-| P1.3 | 1 | Day 1 | To do | Jails |
+| P1.3 | 1 | Day 1 | Done | Jails |
 | P1.4 | 1 | Day 1 | Done | The supervisor, the guest init and the holder's guest mode |
 | P1.5 | 1 | Day 1 | Done | The process wall |
 | P1.6 | 1 | Day 1 | Done | The files door |
@@ -69,7 +69,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P2.13 | 2 | Day 1 | To do | SSH keys |
 | P2.16 | 2 | Day 1 | Done | Model usage and budgets |
 | P2.8 | 2 | Day 1 | Done | Package managers in the guest |
-| P2.10 | 2 | Day 1 | To do | Walls by default |
+| P2.10 | 2 | Day 1 | Done | Walls by default |
 | P4.1 | 3 | Day 1 | Done | The release manifest and the check before the bridge |
 | H10 | 3 | Day 1 | To do | Prepare in `host add` |
 | P4.4 | 4 | Day 1 | Done | A signed-tag release gate |
