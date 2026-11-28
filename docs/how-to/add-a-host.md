@@ -25,17 +25,45 @@ The client uses the system `ssh`, so everything in `~/.ssh/config` applies: `Pro
 
 ## A host by address
 
-<!-- test: help (needs a reachable address) -->
+Copy your SSH public key to the host first if it is not already in `~/.ssh/authorized_keys`:
+
+<!-- test: skip (copies an SSH key to a remote machine) -->
 ```sh
-simstim host add box admin@203.0.113.7 --yes
+ssh-copy-id admin@203.0.113.7
 ```
 
-To check the host's SSH key up front, read its fingerprint on the machine with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` and pass `--host-key`:
+Read the host's SSH key fingerprint on that machine with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`, then pass it with `--host-key`:
 
 <!-- test: help (needs a reachable address and fingerprint) -->
 ```sh
 simstim host add box admin@203.0.113.7 --host-key SHA256:3f9a…c1 --yes
 ```
+
+Or add the host directly and let `ssh` ask at the terminal on first use:
+
+<!-- test: help (needs a reachable address) -->
+```sh
+simstim host add box admin@203.0.113.7 --yes
+```
+
+## Trusted hosts
+
+Every host starts untrusted (`trusted = false` in `hosts.toml`). Mark a host trusted only when you control root on it:
+
+<!-- test: help (needs a reachable address) -->
+```sh
+simstim host add box admin@203.0.113.7 --trusted --yes
+```
+
+You can change the flag later with `host set`:
+
+<!-- test: help (needs a saved host) -->
+```sh
+simstim host set box trusted=true
+simstim host set box trusted=false
+```
+
+Raising a host from untrusted to trusted checks its pinned SSH host key and asks you to type the host's name (or pass `--confirm <host>` in a script). Lowering it takes effect at once.
 
 ## Pinned host keys and rekey
 
@@ -87,12 +115,13 @@ simstim host add --local
 6. Saves the host in `hosts.toml` ([configuration](../reference/config.md)).
 7. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
 
-## Check a host
+## Check and update a host
 
 ```sh
 simstim host test my-server
 simstim host show my-server
 simstim host doctor my-server
+simstim host upgrade my-server
 ```
 
-`host show` prints the host's saved settings, sandbox floor and each wall driver's probe. `host doctor` lists what the host has and what is missing: systemd, linger, sandboxes, the agents and the helper. `host doctor --fix` offers to fix what it can ([troubleshoot](troubleshoot.md#let-the-doctor-fix-it)).
+`host show` prints the host's saved settings, trust flag, sandbox floor, live system details and each wall driver's probe without waking the host or installing a helper. `host doctor` lists what the host has and what is missing: systemd, linger, sandboxes, the agents and the helper. `host doctor --fix` offers to fix what it can ([troubleshoot](troubleshoot.md#let-the-doctor-fix-it)). `host upgrade` installs or reinstalls this client's matching helper without pruning helpers used by newer clients.

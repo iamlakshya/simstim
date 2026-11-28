@@ -1,6 +1,6 @@
 # Create a host
 
-`host create` makes a host and sets it up in one step. It starts a VM, a container or a sandbox, installs the helper, and connects. `host destroy` deletes it again. The design and its reasons are in [decision 0013](../contributing/decisions/0013-host-providers.md).
+`host create` makes a host and sets it up in one step. It starts a VM, a container or a sandbox, installs the helper, and connects. `host rm --destroy` deletes it again. The design and its reasons are in [decision 0013](../contributing/decisions/0013-host-providers.md).
 
 | Provider | What you get | How simstim reaches it | Account |
 | --- | --- | --- | --- |
@@ -19,7 +19,7 @@ Creating a host counts as your consent to install the helper on it. `host create
 simstim setup --create lima --name dev --agents claude --yes
 ```
 
-Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the half-made VM or container, so nothing is left behind. After that, the host is saved: `simstim host destroy dev` deletes it. The launcher's setup (`s`) does the same, and Esc stops it.
+Press Ctrl+C while Lima or Docker makes the machine, and the setup deletes the half-made VM or container, so nothing is left behind. After that, the host is saved: `simstim host rm dev --destroy` deletes it. The launcher's setup (`s`) does the same, and Esc stops it.
 
 ## A local VM with Lima
 
@@ -63,7 +63,7 @@ This works only for a VM that uses `vz`. Lima refuses the setting for a VM on QE
 
 <!-- test: skip (it deletes and makes a VM) -->
 ```sh
-simstim host destroy dev
+simstim host rm dev --destroy
 simstim host create lima dev
 ```
 
@@ -76,7 +76,7 @@ Two cases need another step, and `host doctor` names it in its Try line:
 
 - The VM powers itself off after 30 minutes with no client connected and no session working. A systemd user timer runs the check every few minutes; no daemon is added.
 - It needs passwordless sudo, which Lima gives. Without it there is no idle stop, and `host doctor` says so.
-- Change the time with `simstim host idle dev 2h`, or turn it off with `simstim host idle dev never`.
+- Change the time with `simstim host set dev idle=2h`, or turn it off with `simstim host set dev idle=never`.
 - Attach to a session, or run `simstim host start dev`, and the VM boots again. Sessions come back after the restart, and each agent resumes its own conversation.
 - The launcher does not start a stopped host when it opens. It shows the host as stopped instead.
 
@@ -136,13 +136,13 @@ What does not work in a container:
 - `forward` needs SSH, so it does not work.
 - The E2B provider is built from E2B's public API spec and tested against recorded answers. No live E2B account was used to build it.
 
-## Destroy a host
+## Remove or destroy a host
 
 ```sh
-simstim host destroy dev
+simstim host rm dev --destroy
 ```
 
-It asks first. It refuses while a session is working, unless you pass `--force`. It deletes the VM, the container or the sandbox, with its disk, then removes the host from `hosts.toml` and its generated SSH config.
+At a terminal it asks you to type the host's name (or pass `--confirm dev` in a script). It refuses while a session is working, unless you pass `--force`. It deletes the VM, the container or the sandbox, with its disk, then removes the host from `hosts.toml` and its generated SSH config. Running `simstim host rm dev` without `--destroy` at a terminal asks whether to delete the machine too; pressing Enter forgets the host and leaves the machine intact.
 
 ## The commands
 
@@ -152,7 +152,7 @@ It asks first. It refuses while a session is working, unless you pass `--force`.
 | `host start <host>` | Starts or resumes it |
 | `host stop <host>` | Stops a VM or container, or pauses a sandbox |
 | `host status <host>` | Asks the provider whether it runs |
-| `host idle <host> <duration>\|never` | Sets the idle time |
-| `host destroy <host>` | Deletes it and forgets it |
+| `host set <host> idle=<duration>\|never` | Sets the idle time (`host idle` still works and warns) |
+| `host rm <host> --destroy` | Deletes it and forgets it (`host destroy` still works and warns) |
 
 Every flag is in [the command reference](../reference/cli/host_create.md).

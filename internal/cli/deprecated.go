@@ -66,6 +66,14 @@ var oldForms = []oldForm{
 		Old: `"rm" without -y, with input off`, New: "rm -y", Kind: "behaviour", Cmd: "rm",
 		Version: "0.2.0", Code: "rm_needs_yes", From: `without a terminal, "rm" needs -y`,
 	},
+	{
+		Old: "host idle", New: "host set <host> idle=<duration>|never", Kind: "command", Cmd: "host set",
+		Version: "0.2.0", Code: "old_command",
+	},
+	{
+		Old: "host destroy", New: "host rm <host> --destroy", Kind: "command", Cmd: "host rm",
+		Version: "0.2.0", Code: "old_command",
+	},
 }
 
 // The rows that the commands warn with. The release that removes the row
@@ -79,6 +87,9 @@ var (
 	oldFlip = oldRow("flip")
 	// oldRmWithoutYes is rm that deletes with input off and without -y.
 	oldRmWithoutYes = oldRow(`"rm" without -y, with input off`)
+	// oldHostIdle and oldHostDestroy are the old names of host set idle=... and host rm --destroy.
+	oldHostIdle    = oldRow("host idle")
+	oldHostDestroy = oldRow("host destroy")
 )
 
 // oldRow is the row of the old form old.

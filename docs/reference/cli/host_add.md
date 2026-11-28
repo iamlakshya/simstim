@@ -10,7 +10,7 @@ Connect a host: check it, install the helper, prepare it.
 simstim host add [<name>] [<ssh-target>] [flags]
 ```
 
-Connect a host, pin its SSH host key and install the helper. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own. `--host-key` pins the host key with the given SHA256 fingerprint instead of asking OpenSSH.
+Connect a host, pin its SSH host key and install the helper. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own. `--host-key` pins the host key with the given SHA256 fingerprint instead of asking OpenSSH. `--trusted` marks the host as trusted (you control root on it); hosts default to untrusted.
 
 On a Mac, `--local` sets up this Mac as a host in a pinned Lima VM under your own account, started automatically with limactl autostart.
 
@@ -19,7 +19,7 @@ On a Mac, `--local` sets up this Mac as a host in a pinned Lima VM under your ow
 ```sh
 simstim host add my-vps
 simstim host add my-vps dev@203.0.113.10
-simstim host add my-vps dev@203.0.113.10 --host-key SHA256:…
+simstim host add my-vps dev@203.0.113.10 --host-key SHA256:… --trusted
 simstim host add --local
 ```
 
@@ -38,6 +38,7 @@ simstim host add --local
 | `--memory <int>` | `--local`: VM memory in GiB (default: under half of this Mac) |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
 | `--ssh-config <string>` | an extra SSH config file to include |
+| `--trusted` | mark the host as trusted (you control root on it) |
 | `--wake` | start the host through its provider script when it does not answer |
 | `-y`, `--yes` | install the helper without asking, pin an unknown host key on first use, and offer no agents to install |
 

@@ -345,7 +345,7 @@ func TestPrintHostSandboxSectionErrors(t *testing.T) {
 		if !strings.Contains(rows.String(), "too old for sandboxes") {
 			t.Errorf("rows =\n%s", rows.String())
 		}
-		if !strings.Contains(hints.String(), brand.Name+" host add box") {
+		if !strings.Contains(hints.String(), brand.Name+" host upgrade box") {
 			t.Errorf("hints =\n%s", hints.String())
 		}
 	})

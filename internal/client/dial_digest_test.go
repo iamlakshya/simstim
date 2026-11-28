@@ -162,8 +162,8 @@ func TestDialChecksHelperSHA256BeforeBridge(t *testing.T) {
 	if !errors.As(err, &ue) || ue.Code != "digest_mismatch" || ue.Kind != client.KindFailed {
 		t.Fatalf("Dial with tampered helper = %v, want UserError{Code: digest_mismatch, Kind: KindFailed}", err)
 	}
-	if !strings.Contains(ue.Hint, brand.Name+" host add "+h.Name) {
-		t.Fatalf("digest_mismatch hint = %q, want host add hint", ue.Hint)
+	if !strings.Contains(ue.Hint, brand.Name+" host upgrade "+h.Name) {
+		t.Fatalf("digest_mismatch hint = %q, want host upgrade hint", ue.Hint)
 	}
 	if _, statErr := os.Stat(sentinelPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("tampered helper executed! stat(%s) = %v", sentinelPath, statErr)

@@ -102,7 +102,7 @@ func TestHostAddLocalCreatesAndConnects(t *testing.T) {
 	}
 	localMacProvider = func() provider.Provider { return cp }
 
-	out := okSaid(t, "host", "add", "--local", "--label", "place=desk", "--yes")
+	out := okSaid(t, "host", "add", "--local", "--label", "place=desk", "--trusted", "--yes")
 	if !pinnedCalled {
 		t.Error("ensurePinnedLima was not called")
 	}
@@ -116,7 +116,7 @@ func TestHostAddLocalCreatesAndConnects(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FindHost(mac): %v", err)
 	}
-	if h.Machine == nil || h.Machine.Autostart != lima.AutostartBoot || h.Machine.IdleStop != "never" || h.Labels["place"] != "desk" {
+	if h.Machine == nil || h.Machine.Autostart != lima.AutostartBoot || h.Machine.IdleStop != "never" || h.Labels["place"] != "desk" || !h.Trusted {
 		t.Errorf("saved host = %+v, machine = %+v", h, h.Machine)
 	}
 	if h.WallFloor != "process" {

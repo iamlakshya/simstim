@@ -85,6 +85,8 @@ var (
 	qFix           = &question{cmd: "doctor", flag: "-y"}
 	qHostFix       = &question{cmd: "host doctor", flag: "-y"}
 	qDestroy       = &question{cmd: "host destroy", flag: "-y"}
+	qHostRmDestroy = &question{cmd: "host rm", flag: "--confirm"}
+	qHostSetTrust  = &question{cmd: "host set", flag: "--confirm"}
 	qSetup         = &question{cmd: "setup", flag: "--yes"}
 	qSSHConfig     = &question{cmd: "ssh-config", flag: "--yes", keep: true}
 	qCPFlagged     = &question{cmd: "cp", flag: "--allow-flagged"}
@@ -96,7 +98,7 @@ var (
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qHostKey, qHostRekey, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup, qSSHConfig, qCPFlagged, qPullFlagged, qDelete, qRestart}
+var questions = []*question{qInstallHelper, qHostKey, qHostRekey, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qHostRmDestroy, qHostSetTrust, qSetup, qSSHConfig, qCPFlagged, qPullFlagged, qDelete, qRestart}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.

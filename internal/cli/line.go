@@ -142,6 +142,16 @@ func withName(cmd *cobra.Command, line []string, e *client.UnknownNameError, wit
 	}
 	out := slices.Clone(line)
 	out[at] = line[at][:head] + fixed
+	// When a command also takes --confirm <host> with the same unknown name,
+	// update that flag's value too so the suggested Try: line runs cleanly
+	// (cli-spec 11.3, rule 7).
+	if e.Flag == "" {
+		for _, w := range words(cmd.Flags(), line) {
+			if w.flag == "confirm" && line[w.at][w.value:] == e.Name {
+				out[w.at] = line[w.at][:w.value] + with
+			}
+		}
+	}
 	return out, true
 }
 

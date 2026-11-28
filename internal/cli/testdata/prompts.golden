@@ -20,8 +20,16 @@ Found 1 to fix:
    Runs: loginctl enable-linger me
    Fix it? [y/N] 
 
+== host rm: created host (Enter keeps machine) (answers "\n")
+box was made by `host create`: the fake machine fake-box. It holds 0 sessions.
+Type box to delete the machine too, or press Enter to keep it: Forgot box. Its sessions and the helper stay on the host.
+Its fake machine fake-box is kept. Pass `--destroy --confirm box` to delete it next time; now delete it with fake's own tools.
+
+== host rm --destroy (Enter cancels) (answers "\n")
+Type box to delete the machine, or press Enter to keep it: 
+-> Cancelled. Nothing changed.
 == host destroy (answers "no\n")
-Delete the fake machine fake-box, with its disk and every session on it? [y/N] 
+Type box to delete the machine, or press Enter to keep it: 
 -> Cancelled. Nothing changed.
 == host add: the helper (answers "n\n")
 Install it? [y/N] 

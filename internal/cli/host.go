@@ -26,7 +26,7 @@ func hostCmd() *cobra.Command {
 		Example: "  " + brand.Name + " host add my-vps\n" +
 			"  " + brand.Name + " host ls",
 	}
-	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostShowCmd(), hostSetCmd(), hostRmCmd(), hostRekeyCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
+	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostShowCmd(), hostSetCmd(), hostUpgradeCmd(), hostRmCmd(), hostRekeyCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
 		hostCreateCmd(), hostDestroyCmd(), hostIdleCmd(),
 		hostProviderCmd("start", "Start the host through its provider or provider script", ""),
 		hostProviderCmd("stop", "Stop the host through its provider or provider script",
@@ -37,7 +37,7 @@ func hostCmd() *cobra.Command {
 
 func hostAddCmd() *cobra.Command {
 	var sshConfig, label, providerScript, hostKey, floor string
-	var yes, wake bool
+	var yes, wake, trusted bool
 	var loc localMacOpts
 	cmd := &cobra.Command{
 		Use:   "add [<name>] [<ssh-target>]",
@@ -45,12 +45,13 @@ func hostAddCmd() *cobra.Command {
 		Long: "Connect a host, pin its SSH host key and install the helper. The ssh target is a Host\n" +
 			"from your SSH config, or user@host. It defaults to the name. --ssh-config adds an extra\n" +
 			"SSH config file, for example a repo's own. --host-key pins the host key with the given\n" +
-			"SHA256 fingerprint instead of asking OpenSSH.\n\n" +
+			"SHA256 fingerprint instead of asking OpenSSH. --trusted marks the host as trusted (you\n" +
+			"control root on it); hosts default to untrusted.\n\n" +
 			"On a Mac, --local sets up this Mac as a host in a pinned Lima VM under your own account,\n" +
 			"started automatically with limactl autostart.",
 		Example: "  " + brand.Name + " host add my-vps\n" +
 			"  " + brand.Name + " host add my-vps dev@203.0.113.10\n" +
-			"  " + brand.Name + " host add my-vps dev@203.0.113.10 --host-key SHA256:…\n" +
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10 --host-key SHA256:… --trusted\n" +
 			"  " + brand.Name + " host add --local",
 		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -71,7 +72,7 @@ func hostAddCmd() *cobra.Command {
 						Kind: client.KindUsage,
 					}
 				}
-				return addLocalMacHost(cmd, args, loc, labels, floor, yes)
+				return addLocalMacHost(cmd, args, loc, labels, floor, trusted, yes)
 			}
 			for _, f := range []string{"cpus", "memory", "disk", "autostart", "idle-stop"} {
 				if cmd.Flags().Changed(f) {
@@ -91,7 +92,7 @@ func hostAddCmd() *cobra.Command {
 					Kind: client.KindUsage,
 				}
 			}
-			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig, Labels: labels, WallFloor: floor}
+			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig, Labels: labels, WallFloor: floor, Trusted: trusted}
 			if providerScript != "" {
 				h.Provider = &client.Provider{Script: providerScript, WakeOnAttach: wake}
 			}
@@ -112,6 +113,7 @@ func hostAddCmd() *cobra.Command {
 	f.StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	f.BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
 	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
+	f.BoolVar(&trusted, "trusted", false, "mark the host as trusted (you control root on it)")
 	f.BoolVar(&loc.local, "local", false, "set up this Mac as a host in a pinned Lima VM")
 	f.IntVar(&loc.cpus, "cpus", 0, "--local: VM CPUs (default: under half of this Mac)")
 	f.IntVar(&loc.memoryGiB, "memory", 0, "--local: VM memory in GiB (default: under half of this Mac)")
@@ -373,47 +375,4 @@ func hostLsCmd() *cobra.Command {
 	}
 	addJSON(cmd, &asJSON)
 	return cmd
-}
-
-func hostRmCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:     "rm <host>",
-		Short:   "Forget a host (its sessions keep running)",
-		Example: "  " + brand.Name + " host rm my-vps",
-		Args:    cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			hosts, err := client.LoadHosts()
-			if err != nil {
-				return err
-			}
-			names := make([]string, 0, len(hosts))
-			for _, h := range hosts {
-				names = append(names, h.Name)
-			}
-			out := hosts[:0]
-			var gone *client.Host
-			for _, h := range hosts {
-				if h.Name == args[0] {
-					gone = &h
-					continue
-				}
-				out = append(out, h)
-			}
-			if gone == nil {
-				return &client.UnknownNameError{
-					UserError: &client.UserError{Msg: fmt.Sprintf("no host named %q", args[0]), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: client.KindNotFound},
-					Name:      args[0], Known: names,
-				}
-			}
-			if err := client.SaveHosts(cmd.Context(), out); err != nil {
-				return err
-			}
-			_ = client.CleanupHostFiles(cmd.Context(), *gone)
-			say(cmd, "Forgot %s. Its sessions and the helper stay on the host.\n", args[0])
-			if m := gone.Machine; m != nil {
-				say(cmd, "Its %s machine %s is kept. `host destroy` would have deleted it; now delete it with %s's own tools.\n", m.Provider, m.ID, m.Provider)
-			}
-			return nil
-		},
-	}
 }

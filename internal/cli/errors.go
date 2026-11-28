@@ -286,6 +286,8 @@ var synonyms = map[string]map[string]string{
 		"create":   "new",
 		"run":      "new",
 		"install":  "agents install",
+		"update":   "host upgrade",
+		"upgrade":  "host upgrade",
 		"hosts":    "host ls",
 		"info":     "show",
 		"status":   "show",
@@ -294,6 +296,9 @@ var synonyms = map[string]map[string]string{
 	},
 	"host": {
 		"list":     "ls",
+		"remove":   "rm",
+		"delete":   "rm",
+		"forget":   "rm",
 		"info":     "show",
 		"details":  "show",
 		"config":   "set",

@@ -2,12 +2,9 @@ package tui
 
 import (
 	"fmt"
-	"sort"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
@@ -105,38 +102,25 @@ func (d *details) view(m *Model) string {
 		return ""
 	}
 	field := func(k, v string) string { return sFaint.Render(fit(k, labelW)) + trunc(v, cw-labelW) }
-	route := h.host.SSH
-	if h.host.SSHConfig != "" {
-		route += sFaint.Render("  with " + h.host.SSHConfig)
+	det := client.BuildHostDetails(h.host, h.info, len(h.sessions))
+	route := det.Target
+	if det.SSHConfig != "" {
+		route += sFaint.Render("  with " + det.SSHConfig)
 	}
 	body := []string{"", field("Route", route)}
-	if i := h.info; i != nil {
-		sys := []string{}
-		for _, s := range []string{i.Distro, i.Arch, plural(i.CPUs, "CPU", "CPUs"), fmtSize(i.MemTotal), fmtSize(i.DiskFree) + " free"} {
-			if s != "" && !strings.HasPrefix(s, "0 ") {
-				sys = append(sys, s)
-			}
-		}
-		var names []string
-		for k := range i.Agents {
-			if v := i.AgentVersions[k]; v != "" {
-				k += " " + v
-			}
-			names = append(names, k)
-		}
-		sort.Strings(names)
+	if det.Reachable {
 		body = append(body,
-			field("System", strings.Join(sys, dot)),
-			field("Helper", brand.HostBinary+" "+i.Version))
+			field("System", det.System),
+			field("Helper", det.Helper))
 		// The agents go on more lines rather than lose their versions.
-		for n, l := range joinWrap(names, cw-labelW) {
+		for n, l := range joinWrap(det.Agents, cw-labelW) {
 			k := ""
 			if n == 0 {
 				k = "Agents"
 			}
 			body = append(body, field(k, l))
 		}
-		body = append(body, field("Limits", fmtSize(i.MemoryMax)+" for sessions"+dot+plural(len(h.sessions), "session", "sessions")))
+		body = append(body, field("Limits", det.Limits))
 	} else {
 		msg, _ := errText(h.err)
 		if msg == "" {

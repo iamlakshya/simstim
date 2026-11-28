@@ -363,12 +363,12 @@ func TestHostQuestionsWithInputOff(t *testing.T) {
 	if _, err := client.FindHost("box"); err != nil {
 		t.Fatal("the host was forgotten")
 	}
-	// A no is a cancel, and nothing changes.
+	// Enter or wrong text is a cancel, and nothing changes.
 	var out bytes.Buffer
-	if err := destroyHost(context.Background(), testPrompts("n\n", &out), "box", false, false); !isCancel(err) {
-		t.Fatalf("destroy, no: %v", err)
+	if err := destroyHost(context.Background(), testPrompts("\n", &out), "box", false, false); !isCancel(err) {
+		t.Fatalf("destroy, Enter: %v", err)
 	}
-	if !strings.Contains(out.String(), "Delete the fake machine fake-box, with its disk and every session on it? [y/N] ") {
+	if !strings.Contains(out.String(), "Type box to delete the machine, or press Enter to keep it: ") {
 		t.Fatalf("destroy asked %q", out.String())
 	}
 }
@@ -475,6 +475,13 @@ func TestGoldenPrompts(t *testing.T) {
 		return offerFixes(p, qFix, sampleFixes[:1], false, func([]string) ([]client.Fix, error) { return nil, nil })
 	})
 	_ = saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}})
+	show("host rm: created host (Enter keeps machine)", "\n", func(p *prompter) error {
+		return rmHost(context.Background(), p, "box", hostRmOptions{})
+	})
+	_ = saveHost(context.Background(), client.Host{Name: "box", Machine: &client.Machine{Provider: "fake", ID: "fake-box"}})
+	show("host rm --destroy (Enter cancels)", "\n", func(p *prompter) error {
+		return rmHost(context.Background(), p, "box", hostRmOptions{destroy: true})
+	})
 	show("host destroy", "no\n", func(p *prompter) error { return destroyHost(context.Background(), p, "box", false, false) })
 	tr.NoHelper = true
 	show("host add: the helper", "n\n", func(p *prompter) error {

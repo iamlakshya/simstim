@@ -33,7 +33,7 @@ var (
 	localMacProvider = func() provider.Provider { return lima.Provider{} }
 )
 
-func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, labels map[string]string, floor string, yes bool) error {
+func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, labels map[string]string, floor string, trusted, yes bool) error {
 	if len(args) > 1 {
 		return &client.UserError{
 			Msg:  "`host add --local` takes at most one name and no SSH target",
@@ -92,6 +92,11 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 	if err := onboard.CheckCreate(p, req); err != nil {
 		return err
 	}
+	unlock, err := client.LockHost(ctx, req.Name, "host add")
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	fmt.Fprintf(os.Stderr, "Setting up this Mac as %s (Lima %s, %d CPUs, %d GiB memory, %d GiB disk)…\n",
 		req.Name, lima.PinnedVersion, req.CPUs, req.MemoryGiB, req.DiskGiB)
 	start := time.Now()
@@ -106,6 +111,7 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 		h.Labels = labels
 	}
 	h.WallFloor = floor
+	h.Trusted = trusted
 	fmt.Fprintf(os.Stderr, "  ✓ created %s %s in %s\n\n", h.Machine.Provider, h.Machine.ID, time.Since(start).Round(time.Second))
 	// Setting up this Mac's VM counts as consent to install the helper inside it.
 	if err := addHostWithKey(ctx, prompts(cmd), h, "", true, yes); err != nil {
@@ -114,7 +120,7 @@ func addLocalMacHost(cmd *cobra.Command, args []string, opts localMacOpts, label
 		}
 		return &client.UserError{
 			Msg:  fmt.Sprintf("%s was created, but setting it up failed: %v", h.Name, err),
-			Hint: brand.Name + " host doctor " + h.Name + ", or " + brand.Name + " host destroy " + h.Name,
+			Hint: brand.Name + " host doctor " + h.Name + ", or " + brand.Name + " host rm " + h.Name + " --destroy",
 			Code: "setup_failed",
 		}
 	}

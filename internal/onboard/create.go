@@ -50,6 +50,9 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 	if err := CheckCreate(p, req); err != nil {
 		return client.Host{}, err
 	}
+	if err := client.DeleteRemovalRecord(req.Name); err != nil {
+		return client.Host{}, err
+	}
 	probe := client.Host{Name: req.Name, Machine: &client.Machine{Provider: p.Name(), ID: provider.MachineName(req.Name)}}
 	fresh := false
 	if named[p.Name()] {
@@ -60,6 +63,9 @@ func Create(ctx context.Context, p provider.Provider, req provider.Request) (cli
 	}
 	h, err := p.Create(ctx, req)
 	if err == nil {
+		if h.Machine != nil && h.Machine.Created == "" {
+			h.Machine.Created = time.Now().UTC().Format(time.RFC3339Nano)
+		}
 		// The machine is made: it is saved, also when a cancel came just
 		// now, so that host destroy finds it. The caller's next step sees
 		// the cancel, and lists the machine among the changes.

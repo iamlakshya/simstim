@@ -581,7 +581,7 @@ func TestASignalAfterTheYesDestroysNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer in.Close()
-	_, _ = w.WriteString("y\n")
+	_, _ = w.WriteString("box\n")
 	_ = w.Close()
 	oldIn := os.Stdin
 	os.Stdin = in

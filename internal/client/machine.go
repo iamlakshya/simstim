@@ -48,6 +48,9 @@ type Machine struct {
 	// chunk, the default) or "stream" (one long request; not yet proved on
 	// E2B's servers).
 	Stdin string `toml:"stdin,omitempty"`
+	// Created records when `host create` made this machine (RFC3339Nano UTC),
+	// so two machines of the same host and provider ID can be told apart.
+	Created string `toml:"created,omitempty" json:"-"`
 }
 
 // Machine states, as a Lifecycle reports them.
@@ -101,7 +104,7 @@ func RegisterProvider(name string, open func(Host) (Lifecycle, error)) {
 // OpenMachine returns the lifecycle of the machine behind h.
 func OpenMachine(h Host) (Lifecycle, error) {
 	if h.Machine == nil {
-		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + " (forgets a host you added)", Code: "not_created"}
+		return nil, &UserError{Msg: h.Name + " was not made by `host create`", Hint: brand.Name + " host rm " + h.Name + " (forgets a host you added)", Code: "not_created", Kind: KindUsage}
 	}
 	providersMu.RLock()
 	open := providers[h.Machine.Provider]
@@ -110,6 +113,14 @@ func OpenMachine(h Host) (Lifecycle, error) {
 		return nil, &UserError{Msg: fmt.Sprintf("%s was made by the %q provider, which this build does not know", h.Name, h.Machine.Provider), Hint: "Install a release of " + brand.Name + " that knows the provider.", Code: "unknown_provider"}
 	}
 	return open(h)
+}
+
+// RemoveWrapperConfig removes the generated SSH config for h.
+func RemoveWrapperConfig(h Host) error {
+	if err := os.Remove(wrapperPath(h)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove the generated SSH config: %w", err)
+	}
+	return nil
 }
 
 // CleanupHostFiles stops the host's shared SSH connection and removes its
@@ -121,19 +132,22 @@ func CleanupHostFiles(ctx context.Context, h Host) error {
 	if err := RemovePin(ctx, h.Name); err != nil {
 		return err
 	}
-	if err := os.Remove(wrapperPath(h)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove the generated SSH config: %w", err)
-	}
-	return nil
+	return RemoveWrapperConfig(h)
 }
 
 // ForgetHost removes a host from hosts.toml, stops its shared connection,
-// and removes its pinned host key and generated SSH config.
+// and removes its pinned host key, generated SSH config and removal record.
 // It runs once the host's machine is gone, so it goes on after a cancel of
 // ctx: a host saved with no machine would be left.
 func ForgetHost(ctx context.Context, name string) error {
+	bg := context.WithoutCancel(ctx)
+	unlock, err := lockHostsFile(bg)
+	if err != nil {
+		return err
+	}
 	hosts, err := LoadHosts()
 	if err != nil {
+		unlock()
 		return err
 	}
 	out := hosts[:0]
@@ -147,12 +161,20 @@ func ForgetHost(ctx context.Context, name string) error {
 		out = append(out, h)
 	}
 	if gone == nil {
+		unlock()
 		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: KindNotFound}
 	}
-	if err := SaveHosts(context.WithoutCancel(ctx), out); err != nil {
+	if err := RemoveWrapperConfig(*gone); err != nil {
+		unlock()
 		return err
 	}
-	return CleanupHostFiles(context.WithoutCancel(ctx), *gone)
+	if err := lockedSaveHosts(context.WithoutCancel(ctx), out); err != nil {
+		unlock()
+		return err
+	}
+	unlock()
+	_ = DeleteRemovalRecord(name)
+	return CleanupHostFiles(bg, *gone)
 }
 
 // Target says how h is reached, for messages: its SSH target, or its
@@ -175,6 +197,20 @@ func WithoutWake(ctx context.Context) context.Context {
 
 func wakeAllowed(ctx context.Context) bool {
 	v, _ := ctx.Value(noWakeKey{}).(bool)
+	return !v
+}
+
+type noInstallKey struct{}
+
+// WithoutInstall returns a context in which Dial does not install or prune a
+// missing helper on a saved host; it returns a helper_missing error pointing
+// to `host upgrade` instead.
+func WithoutInstall(ctx context.Context) context.Context {
+	return context.WithValue(ctx, noInstallKey{}, true)
+}
+
+func installAllowed(ctx context.Context) bool {
+	v, _ := ctx.Value(noInstallKey{}).(bool)
 	return !v
 }
 

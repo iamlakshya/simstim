@@ -106,6 +106,7 @@ func (realBackend) SaveHosts(ctx context.Context, h []client.Host) error {
 	}
 	for _, x := range old {
 		if !kept[x.Name] {
+			_ = client.DeleteRemovalRecord(x.Name)
 			_ = client.CleanupHostFiles(ctx, x)
 		}
 	}

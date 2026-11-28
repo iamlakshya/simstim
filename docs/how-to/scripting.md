@@ -32,7 +32,9 @@ These are the questions, and the flag that answers each:
 | `new` | Make the folder that does not exist? | `--mkdir` | Fails with exit code 4. Without a terminal and without `--detach`, `new` fails with exit code 2 first |
 | `new` | Run the repository's setup script? | `--setup` or `--no-setup` | Skips the script, and says so |
 | `doctor --fix`, `host doctor --fix` | Fix it? | `-y` | Fails with exit code 4. With `--json` and `-y`, the JSON holds how each fix ended |
-| `host destroy` | Delete the machine? | `-y` | Fails with exit code 4 |
+| `host rm --destroy` | Type the host's name to delete the machine? | `--confirm <host>` | Fails with exit code 4 |
+| `host set <host> trusted=true` | Type the host's name to mark it trusted? | `--confirm <host>` | Fails with exit code 4 |
+| `host destroy` (old name) | Type the host's name to delete the machine? | `-y` | Fails with exit code 4 |
 | `setup` | Each question of the guided setup | `--yes`, with `--host` or `--create`, and `--agents` | Fails with exit code 4 |
 | `rm` | Delete the session? | `-y` | Deletes, and warns, until v0.4.0 and 11 November 2027, whichever comes later. Then fails with exit code 4 |
 | `attach`, on an agent that has ended | Start the agent again? | `--restart` | At a terminal, fails with exit code 4. Without one, `attach` fails with exit code 2 first: use `resume --detach` |
@@ -55,7 +57,7 @@ Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command pr
 
 JSON keeps integer sizes exact, including values above 2 to the power of 53. Use an integer type when reading them.
 
-These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host test`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
+These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host test`, `host upgrade`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
 
 <!-- test: help (needs a host) -->
 ```sh

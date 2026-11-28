@@ -7,17 +7,26 @@ title: "simstim host set"
 Change named settings of a host.
 
 ```text
-simstim host set <host> <key>=<value>…
+simstim host set <host> <key>=<value>… [flags]
 ```
 
-Changes one or more settings of a saved host. Supported keys: floor=&lt;none|process|gvisor|microvm&gt; weakest sandbox level for new sessions idle=&lt;duration&gt;|never idle stop for a created host
+Changes one or more settings of a saved host. Supported keys: idle=&lt;duration&gt;|never idle stop for a created host trusted=&lt;true|false&gt; whether you control root on this host floor=&lt;none|process|gvisor|microvm&gt; weakest sandbox level for new sessions label.&lt;key&gt;=&lt;value&gt; set a label (empty value removes it)
+
+Marking an untrusted host trusted checks its pinned SSH key and asks you to type the host's name, or takes `--confirm` &lt;host&gt;.
 
 ## Examples
 
 ```sh
+simstim host set my-vps idle=2h
 simstim host set my-vps floor=process
-simstim host set my-vps floor=none
+simstim host set my-vps trusted=true --confirm my-vps
 ```
+
+## Flags
+
+| Flag | What it does |
+| --- | --- |
+| `--confirm <string>` | type the host's name here instead of at the prompt when setting trusted=true |
 
 ## Flags from the parent command
 
@@ -27,5 +36,13 @@ simstim host set my-vps floor=none
 | `--debug-file <file>` | write the client's debug records to this file. On its own, it turns on every category (SIMSTIM_DEBUG_FILE does the same) |
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
+
+## Old names
+
+These still work, and print a warning on stderr, until their end.
+
+| Old | New | Works until |
+| --- | --- | --- |
+| host idle | host set &lt;host&gt; idle=&lt;duration&gt;\|never | v0.4.0 and 11 November 2027, whichever comes later |
 
 Part of [`host`](host.md): add, create, list, test and remove hosts.

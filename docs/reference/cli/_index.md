@@ -51,19 +51,18 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host alerts set`](host_alerts_set.md) | Choose where a host sends alerts, and which ones |
 | [`host alerts test`](host_alerts_test.md) | Send a test alert to every destination now, and say what each did |
 | [`host create`](host_create.md) | Make a host with lima, docker or e2b, and connect it |
-| [`host destroy`](host_destroy.md) | Delete a created host: its machine and every session on it |
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
-| [`host idle`](host_idle.md) | Set how long a created host may idle before it stops |
 | [`host ls`](host_ls.md) | List hosts |
 | [`host rekey`](host_rekey.md) | Replace a host's pinned SSH host key |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
-| [`host rm`](host_rm.md) | Forget a host (its sessions keep running) |
+| [`host rm`](host_rm.md) | Forget a host, and optionally delete its created machine |
 | [`host set`](host_set.md) | Change named settings of a host |
 | [`host show`](host_show.md) | Show a host's settings, sandbox levels and status |
 | [`host start`](host_start.md) | Start the host through its provider or provider script |
 | [`host status`](host_status.md) | Ask the provider or provider script whether the host is running |
 | [`host stop`](host_stop.md) | Stop the host through its provider or provider script |
 | [`host test`](host_test.md) | Check that a host answers, and how fast |
+| [`host upgrade`](host_upgrade.md) | Install or update this client's helper on a host |
 
 ## Agents
 

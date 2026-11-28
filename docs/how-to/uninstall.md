@@ -18,6 +18,16 @@ Linger, which `host add` turned on, stays on; `loginctl disable-linger` turns it
 
 ## From the laptop
 
+Forget a saved host (or delete a host made with `host create`) first:
+
+<!-- test: help (needs a saved host) -->
+```sh
+simstim host rm my-server
+simstim host rm dev --destroy
+```
+
+Then remove the client and its local files:
+
 <!-- test: skip (removes the client) -->
 ```sh
 rm -f ~/.local/bin/simstim

@@ -33,6 +33,7 @@ simstim host create e2b cloud --template simstim
 | `--memory <int>` | lima: memory in GiB (default: `4`) |
 | `--template <string>` | e2b: the template, which sets CPUs and memory (default: `simstim`) |
 | `--token-command <string>` | e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in |
+| `--trusted` | mark the host as trusted (you control root on it) |
 
 ## Flags from the parent command
 

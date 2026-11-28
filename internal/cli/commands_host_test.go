@@ -54,7 +54,7 @@ func TestHostCommands(t *testing.T) {
 		t.Errorf("host stop = %q", out)
 	}
 	fails(t, "is not an idle time", "host", "idle", "box", "soon")
-	if out := okSaid(t, "host", "idle", "box", "45m"); out != "Saved, but hosttest hosts do not stop by themselves.\n" {
+	if out := okSaid(t, "host", "idle", "box", "45m"); !strings.Contains(out, `Warning: "host idle" is now`) || !strings.Contains(out, "box: idle 45m.") {
 		t.Errorf("host idle = %q", out)
 	}
 	if h, _ := client.FindHost("box"); h.Machine.IdleStop != "45m" {
@@ -158,7 +158,7 @@ func TestHostCommandsWithoutAMachine(t *testing.T) {
 		t.Errorf("the script got %q", b)
 	}
 	fails(t, "was not made by `host create`", "host", "idle", "plain", "30m")
-	fails(t, "nothing to destroy", "host", "destroy", "plain", "--yes")
+	fails(t, "no machine to delete", "host", "destroy", "plain", "--yes")
 	if out := ok(t, "host", "ls"); !strings.Contains(out, "plain            box") {
 		t.Errorf("host ls = %q", out)
 	}
@@ -168,7 +168,7 @@ func TestHostRmAndDestroy(t *testing.T) {
 	newTestHost(t)
 	newSession(t, "busy", "sleep", "60")
 	failsWithHint(t, "are working: busy", "--force", "host", "destroy", "box", "--yes")
-	if out := okSaid(t, "host", "destroy", "box", "--yes", "--force"); !strings.HasPrefix(out, "Deleted the hosttest machine ") {
+	if out := okSaid(t, "host", "destroy", "box", "--yes", "--force"); !strings.Contains(out, `Warning: "host destroy" is now`) || !strings.Contains(out, "Deleted the hosttest machine ") {
 		t.Errorf("destroy = %q", out)
 	}
 	fails(t, `no host named "box"`, "host", "rm", "box")

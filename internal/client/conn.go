@@ -85,6 +85,13 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 	if !errors.Is(err, ErrNotInstalled) {
 		return c, err
 	}
+	if !installAllowed(ctx) {
+		return nil, &UserError{
+			Msg:  fmt.Sprintf("the %s helper is not installed on %s", brand.Name, h.Name),
+			Hint: brand.Name + " host upgrade " + ShellQuote(h.Name),
+			Code: "helper_missing",
+		}
+	}
 	if _, ferr := FindHost(h.Name); ferr != nil {
 		return nil, &UserError{Msg: fmt.Sprintf("the %s helper is not installed on %s", brand.Name, h.Name), Hint: brand.Name + " host add " + h.Name, Code: "helper_missing"}
 	}
@@ -187,7 +194,7 @@ func (c *Conn) startError(err error) error {
 	if strings.Contains(raw, helperDigestMismatchMarker) {
 		return &UserError{
 			Msg:  fmt.Sprintf("the %s helper on %s does not match this client's digest", brand.Name, c.Host.Name),
-			Hint: brand.Name + " host add " + c.Host.Name + " (reinstalls the helper)",
+			Hint: brand.Name + " host upgrade " + ShellQuote(c.Host.Name) + " (reinstalls the helper)",
 			Code: "digest_mismatch",
 			Kind: KindFailed,
 		}

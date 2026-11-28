@@ -44,6 +44,9 @@ type Host struct {
 	// WallFloor is the weakest sandbox level that new sessions on this host
 	// may get: "none", "process", "gvisor" or "microvm".
 	WallFloor string `toml:"wall_floor,omitempty" json:"-"`
+	// Trusted marks a host where you control root. Untrusted hosts default to
+	// false and do not receive secrets unless explicitly allowed.
+	Trusted bool `toml:"trusted,omitempty" json:"-"`
 }
 
 // Settings are the user's preferences, from config.toml. The comments on its
@@ -252,32 +255,68 @@ func SaveHosts(ctx context.Context, hosts []Host) error {
 	if err := ctx.Err(); err != nil {
 		return stoppedBefore("save the hosts", err)
 	}
-	sort.Slice(hosts, func(i, j int) bool { return hosts[i].Name < hosts[j].Name })
+	unlock, err := lockHostsFile(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return lockedSaveHosts(ctx, hosts)
+}
+
+func lockedSaveHosts(ctx context.Context, hosts []Host) error {
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
+	}
+	cp := make([]Host, len(hosts))
+	copy(cp, hosts)
+	sort.Slice(cp, func(i, j int) bool { return cp[i].Name < cp[j].Name })
 	if err := os.MkdirAll(ConfigDir(), 0o700); err != nil {
 		return fmt.Errorf("make %s: %w", ConfigDir(), err)
 	}
-	tmp := hostsPath() + ".tmp"
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	f, err := os.CreateTemp(ConfigDir(), "hosts.toml.tmp-*")
 	if err != nil {
 		return fmt.Errorf("save the hosts: %w", err)
 	}
+	tmp := f.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("save the hosts: %w", err)
+	}
 	fmt.Fprintf(f, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
-	if err := tomlv2.NewEncoder(f).Encode(hostsFile{Hosts: hosts}); err != nil {
-		f.Close()
+	if err := tomlv2.NewEncoder(f).Encode(hostsFile{Hosts: cp}); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("save the hosts: %w", err)
 	}
 	if err := f.Close(); err != nil {
 		return fmt.Errorf("save the hosts: %w", err)
 	}
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
+	}
 	if err := os.Rename(tmp, hostsPath()); err != nil {
 		return fmt.Errorf("save the hosts: %w", err)
 	}
+	cleanup = false
 	return nil
 }
 
 // SaveHost adds h to the saved hosts, or replaces the host of the same
-// name, through SaveHosts: nothing once ctx has ended.
+// name, through lockedSaveHosts: nothing once ctx has ended.
 func SaveHost(ctx context.Context, h Host) error {
+	if err := ctx.Err(); err != nil {
+		return stoppedBefore("save the hosts", err)
+	}
+	unlock, err := lockHostsFile(ctx)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	hosts, err := LoadHosts()
 	if err != nil {
 		return err
@@ -285,10 +324,10 @@ func SaveHost(ctx context.Context, h Host) error {
 	for i := range hosts {
 		if hosts[i].Name == h.Name {
 			hosts[i] = h
-			return SaveHosts(ctx, hosts)
+			return lockedSaveHosts(ctx, hosts)
 		}
 	}
-	return SaveHosts(ctx, append(hosts, h))
+	return lockedSaveHosts(ctx, append(hosts, h))
 }
 
 // StoppedError is the error of a change that a cancel or a timeout came
