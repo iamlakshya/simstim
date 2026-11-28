@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json"
+	"errors"
 
 	"github.com/iamlakshya/simstim/internal/proto"
 )
@@ -18,20 +19,25 @@ var sessionOps = map[string]bool{
 	"delete": true, "resume": true, "restore": true, "stop": true, "send": true, "peek": true, "rename": true, "kill": true,
 }
 
-// refuseInside answers a frame that a bridge inside a session must refuse:
-// an attach, or a request that acts on a session. It reports whether it
-// did.
-func (b *bridge) refuseInside(f proto.Frame) bool {
+// refuseInside answers a frame that a bridge inside a session (or another
+// cgroup namespace) must refuse: an attach, or a request that acts on a
+// session. It reports whether it did.
+func (b *bridge) refuseInside(f proto.Frame, callerErr error) bool {
+	pe := errCallerInside
+	var p *proto.Error
+	if errors.As(callerErr, &p) && p != nil {
+		pe = p
+	}
 	switch f.Type {
 	case proto.TAttach:
-		_ = b.w.WriteJSON(proto.TError, errCallerInside)
+		_ = b.w.WriteJSON(proto.TError, pe)
 		return true
 	case proto.TRequest:
 		var req proto.Request
 		if json.Unmarshal(f.Payload, &req) != nil || !sessionOps[req.Op] {
 			return false
 		}
-		b.reply(req.ID, nil, errCallerInside)
+		b.reply(req.ID, nil, pe)
 		return true
 	default:
 		return false

@@ -500,3 +500,167 @@ func TestManagerCgroupInSameNS(t *testing.T) {
 		}
 	}
 }
+
+// TestCgroupNamespacesEACCESFallback exercises the real CgroupNamespaces and
+// CheckCaller code paths over a Unix socket when /proc/<mgr>/ns/cgroup fails
+// with EACCES (as with a non-dumpable systemd --user on Debian 13).
+func TestCgroupNamespacesEACCESFallback(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses chmod 0000 permission checks")
+	}
+	alertHome(t)
+	oldReq := selfCgroupRequired
+	selfCgroupRequired = true
+	t.Cleanup(func() { selfCgroupRequired = oldReq })
+
+	// Stand-in for /run/user/<uid>/systemd/private.
+	sockDir, err := testhome.ShortTempDir("mgr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sockDir) })
+	sockPath := filepath.Join(sockDir, "private")
+	ln, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+	oldSock := systemdPrivateSocket
+	systemdPrivateSocket = func() string { return sockPath }
+	t.Cleanup(func() { systemdPrivateSocket = oldSock })
+
+	const mgrPID = 4242
+	aliveVal := true
+	oldReadPeer := readPeer
+	readPeer = func(net.Conn) (peer, error) {
+		return peer{pid: mgrPID, uid: os.Getuid(), alive: func() bool { return aliveVal }}, nil
+	}
+	t.Cleanup(func() { readPeer = oldReadPeer })
+
+	setupProc := func(t *testing.T, selfCG, mgrCG string, mgrCGReadable bool) {
+		t.Helper()
+		dir := t.TempDir()
+		oldProc := procRoot
+		procRoot = dir
+		t.Cleanup(func() {
+			// Restore permissions so TempDir cleanup can remove everything.
+			_ = os.Chmod(filepath.Join(dir, strconv.Itoa(mgrPID), "ns"), 0o700)
+			procRoot = oldProc
+		})
+		write := func(rel, body string) {
+			p := filepath.Join(dir, rel)
+			if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		write("self/cgroup", selfCG)
+		selfNS := filepath.Join(dir, "self", "ns", "cgroup")
+		if err := os.MkdirAll(filepath.Dir(selfNS), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("cgroup:[4026531835]", selfNS); err != nil {
+			t.Fatal(err)
+		}
+		mgrNSDir := filepath.Join(dir, strconv.Itoa(mgrPID), "ns")
+		if err := os.MkdirAll(mgrNSDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("cgroup:[4026531835]", filepath.Join(mgrNSDir, "cgroup")); err != nil {
+			t.Fatal(err)
+		}
+		// Deny traverse/read on /proc/<mgr>/ns so os.Readlink returns EACCES.
+		if err := os.Chmod(mgrNSDir, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		if mgrCGReadable {
+			write(strconv.Itoa(mgrPID)+"/cgroup", mgrCG)
+		}
+	}
+
+	t.Run("outside session passes on EACCES when manager cgroup is in same namespace", func(t *testing.T) {
+		aliveVal = true
+		setupProc(t, outsideCgroup(""), "0::"+userMgr+"init.scope\n", true)
+		selfNS, mgrNS, err := CgroupNamespaces()
+		if err != nil || selfNS != "cgroup:[4026531835]" || mgrNS != selfNS {
+			t.Fatalf("CgroupNamespaces() = (%q, %q, %v), want same namespace with nil err", selfNS, mgrNS, err)
+		}
+		if err := CheckCaller(); err != nil {
+			t.Fatalf("CheckCaller() = %v, want nil", err)
+		}
+		b := newBridgeConn(t)
+		if resp := b.request("delete", map[string]string{"id": "abcd2345"}); resp.OK || resp.Error == nil || resp.Error.Code != "not_found" {
+			t.Fatalf("bridge delete from outside on EACCES = %+v, want not_found (allowed)", resp.Error)
+		}
+	})
+
+	t.Run("inside session is still refused on EACCES", func(t *testing.T) {
+		aliveVal = true
+		setupProc(t, ownCgroup("abcd2345"), "0::"+userMgr+"init.scope\n", true)
+		if err := CheckCaller(); !errors.Is(err, errCallerInside) {
+			t.Fatalf("CheckCaller() = %v, want errCallerInside", err)
+		}
+		b := newBridgeConn(t)
+		forbidden(t, "delete from inside session on EACCES", b.request("delete", map[string]string{"id": "abcd2345"}))
+	})
+
+	t.Run("child cgroup namespace with ancestor .. is refused and bridge keeps namespace reason", func(t *testing.T) {
+		aliveVal = true
+		setupProc(t, "0::/\n", "0::/../../init.scope\n", true)
+		if err := CheckCaller(); !errors.Is(err, errCallerNamespace) {
+			t.Fatalf("CheckCaller() = %v, want errCallerNamespace", err)
+		}
+		b := newBridgeConn(t)
+		resp := b.request("delete", map[string]string{"id": "abcd2345"})
+		forbidden(t, "delete from child cgroup namespace", resp)
+		if resp.Error == nil || !strings.Contains(resp.Error.Message, "cgroup namespace") {
+			t.Fatalf("bridge error = %+v, want cgroup namespace message", resp.Error)
+		}
+	})
+
+	t.Run("exited manager pidfd fails closed on EACCES", func(t *testing.T) {
+		aliveVal = false
+		setupProc(t, outsideCgroup(""), "0::"+userMgr+"init.scope\n", true)
+		if err := CheckCaller(); !errors.Is(err, errCallerNamespace) {
+			t.Fatalf("CheckCaller() with exited manager = %v, want errCallerNamespace", err)
+		}
+	})
+
+	t.Run("unreadable manager cgroup fails closed on EACCES", func(t *testing.T) {
+		aliveVal = true
+		setupProc(t, outsideCgroup(""), "", false)
+		if err := CheckCaller(); !errors.Is(err, errCallerNamespace) {
+			t.Fatalf("CheckCaller() without manager cgroup = %v, want errCallerNamespace", err)
+		}
+	})
+}
+
+func TestMapUID(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		uid    int
+		uidMap string
+		want   int
+	}{
+		{"initial user namespace", 1000, "         0          0 4294967295\n", 1000},
+		{"unshare --map-root-user", 0, "         0       1000          1\n", 1000},
+		{"subuid range", 5, "         0     100000      65536\n", 100005},
+		{"empty map keeps uid", 1000, "", 1000},
+		{"unmapped uid keeps uid", 500, "         0       1000          1\n", 500},
+	} {
+		if got := mapUID(tc.uid, []byte(tc.uidMap)); got != tc.want {
+			t.Errorf("%s: mapUID(%d) = %d, want %d", tc.name, tc.uid, got, tc.want)
+		}
+	}
+}

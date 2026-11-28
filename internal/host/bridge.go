@@ -82,7 +82,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 	defer b.reclaimUploadsAt(true)
 	defer b.stopDebug("end")
 	defer b.closeHolder()
-	inside := CheckCaller() != nil // bridge_inside.go
+	callerErr := CheckCaller() // bridge_inside.go
 	for {
 		f, err := proto.Read(r)
 		if err != nil {
@@ -91,7 +91,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 			}
 			return err
 		}
-		if inside && b.refuseInside(f) {
+		if callerErr != nil && b.refuseInside(f, callerErr) {
 			continue
 		}
 		switch f.Type {

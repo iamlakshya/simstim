@@ -31,6 +31,7 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 ### Fixed
 
 - The terminal probe lifecycle test now uses `unix.Dup2` so `go vet` works on `linux/arm64`. The CLI specification keeps the current cancellation exceptions and `host destroy` prompt row alongside the planned C7 behaviour, and contributor documentation passes Markdown lint, spelling and link checks.
+- On Debian 13 and other Linux hosts where `systemd --user` is non-dumpable and `/proc/<pid>/ns/cgroup` returns `EACCES`, the host helper's caller check now falls back to verifying the user manager's `/proc/<pid>/cgroup` path instead of refusing every session command (`attach`, `send`, `rename`, `stop`, `resume`, `restore`, `kill`, `delete`). It also maps the caller's UID through `/proc/self/uid_map` so `unshare --user --map-root-user --cgroup` inside a session cannot bypass the cgroup-namespace check, and the bridge reports the exact namespace error when a caller runs in another cgroup namespace.
 - The setup example uses the documented host name, and the guide index no longer repeats a page.
 - The guided setup test now holds its fixture installer until the terminal reader starts. Fast installers cannot bypass the blocked reader case or leave the test waiting for a read that never began.
 

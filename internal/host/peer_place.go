@@ -120,6 +120,43 @@ var SelfCgroup = func() ([]byte, error) {
 // read: on Linux. Tests set it to check the other case.
 var selfCgroupRequired = runtime.GOOS == "linux"
 
+// systemdPrivateSocket returns the path of the user's systemd private socket.
+// It maps os.Getuid() through /proc/self/uid_map so a process in a child user
+// namespace (such as `unshare --user --map-root-user --cgroup`) still finds
+// the host user's systemd manager instead of looking for /run/user/0.
+// Tests replace it.
+var systemdPrivateSocket = func() string {
+	return fmt.Sprintf("/run/user/%d/systemd/private", hostUID())
+}
+
+func hostUID() int {
+	uid := os.Getuid()
+	b, err := os.ReadFile(filepath.Join(procRoot, "self", "uid_map"))
+	if err != nil {
+		return uid
+	}
+	return mapUID(uid, b)
+}
+
+func mapUID(uid int, uidMap []byte) int {
+	for _, line := range strings.Split(string(uidMap), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 3 {
+			continue
+		}
+		inStart, err1 := strconv.Atoi(f[0])
+		outStart, err2 := strconv.Atoi(f[1])
+		length, err3 := strconv.Atoi(f[2])
+		if err1 != nil || err2 != nil || err3 != nil || length <= 0 {
+			continue
+		}
+		if uid >= inStart && uid-inStart < length {
+			return outStart + (uid - inStart)
+		}
+	}
+	return uid
+}
+
 // CgroupNamespaces returns the cgroup namespace of this process, and that of
 // the user's systemd user manager, or "" when the user has no manager. The
 // manager is the peer of its private socket, at its fixed place under
@@ -129,7 +166,7 @@ var CgroupNamespaces = func() (self, manager string, err error) {
 	if err != nil {
 		return "", "", fmt.Errorf("read this process's cgroup namespace: %w", err)
 	}
-	sock := fmt.Sprintf("/run/user/%d/systemd/private", os.Getuid())
+	sock := systemdPrivateSocket()
 	conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(context.Background(), "unix", sock)
 	if errors.Is(err, os.ErrNotExist) {
 		return self, "", nil
@@ -138,7 +175,7 @@ var CgroupNamespaces = func() (self, manager string, err error) {
 		return self, "", fmt.Errorf("reach the user manager: %w", err)
 	}
 	defer conn.Close()
-	p, err := peerOf(conn)
+	p, err := readPeer(conn)
 	if err != nil {
 		return self, "", fmt.Errorf("read the user manager's process: %w", err)
 	}
