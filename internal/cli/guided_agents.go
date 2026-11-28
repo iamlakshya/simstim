@@ -211,7 +211,9 @@ func (g *guide) runSession(h client.Host, a onboard.Action) (string, bool, error
 		return "", false, err
 	}
 	cols, rows := termSize()
-	s, err := conn.NewSession(cctx, client.TerminalArgs(a.Args, cols, rows))
+	args := client.TerminalArgs(a.Args, cols, rows)
+	applyNoneDowngrade(cctx, conn, h, &args)
+	s, err := conn.NewSession(cctx, args)
 	conn.Close()
 	cancel()
 	if err != nil {

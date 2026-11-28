@@ -25,7 +25,7 @@ func TestCPCommandEndToEnd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(work, ".envrc"), []byte("export BAD=1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	okSaid(t, "new", "box", "--detach", "--name", "work", "--dir", work, "--", "sleep", "60")
+	okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "work", "--dir", work, "--", "sleep", "60")
 
 	localDir := filepath.Join(th.h.Root, "laptop")
 	if err := os.MkdirAll(localDir, 0o755); err != nil {

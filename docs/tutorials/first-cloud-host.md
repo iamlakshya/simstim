@@ -69,14 +69,14 @@ ssh my-server echo ok
 
 ## 5. Connect it, and install an agent
 
-Connect the host. This installs a small helper in your home folder there; nothing listens on the network.
+Connect the host. This installs a small helper in your home folder there, probes what sandbox walls the host supports, and pins the host's wall floor; nothing listens on the network.
 
 ```sh
 simstim host add my-server --yes
 simstim host doctor my-server
 ```
 
-`host doctor` checks the host and lists the agents it finds: none yet. Install one with its vendor's own installer, in a session you watch:
+`host doctor` checks the host, shows its **Sandboxes** summary, and lists the agents it finds: none yet. Install one with its vendor's own installer, in a session you watch:
 
 <!-- test: help (runs the vendor's installer) -->
 ```sh
@@ -90,11 +90,11 @@ Answer the installer's questions in the session that opens. When it is done, the
 simstim agents login claude my-server
 ```
 
-simstim never sees your login. [Install an agent](../how-to/install-agents.md) has the login for each agent.
+simstim never sees your login. `agents install` and `agents login` run outside the sandbox so they can write host files (recorded as a downgrade with `!`, without needing `--downgrade`). New agent sessions run inside the host's sandbox wall by default and cannot read host login files, so add a token or API key under `[secrets]` in `config.toml` ([secrets](../how-to/secrets.md), [install an agent](../how-to/install-agents.md)).
 
 ## 6. Give the agent a task, and walk away
 
-Clone a repository on the server and start the agent in its own worktree, so its changes stay on a branch of their own:
+Clone a repository on the server and start the agent in its own worktree, so its changes stay on a branch of their own inside the host's sandbox wall:
 
 <!-- test: help (opens the session) -->
 ```sh

@@ -135,7 +135,7 @@ func validateNewOpts(cmd *cobra.Command, o *newOpts) (wl string, err error) {
 // with `new --in` (isolation spec 6.11).
 func checkInFlags(cmd *cobra.Command) error {
 	for _, flag := range []string{
-		"wall", "dir", "old-dir", "mkdir", "worktree", "base",
+		"wall", "downgrade", "dir", "old-dir", "mkdir", "worktree", "base",
 		"cpus", "memory", "memory-max", "copy", "seed", "seed-dirty",
 		"image", "keep-system", "docker",
 		"setup-script", "no-setup-script", "setup", "no-setup",

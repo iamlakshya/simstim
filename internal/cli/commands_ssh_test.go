@@ -108,7 +108,7 @@ func TestPull(t *testing.T) {
 		t.Fatal(err)
 	}
 	newSession(t, "feat", "sleep", "60") // in the home folder, not a repository
-	out := okSaid(t, "new", "box", "--detach", "--name", "repo", "--dir", remote, "--", "sleep", "60")
+	out := okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "repo", "--dir", remote, "--", "sleep", "60")
 	if !strings.Contains(out, "(repo, shell)") {
 		t.Fatalf("new = %q", out)
 	}
@@ -156,7 +156,7 @@ func TestNewNamesTheHostOfAGitScopeError(t *testing.T) {
 	th.h.Script("systemctl", "echo running\n")
 	th.h.Script("systemd-run", "echo 'Failed to connect to bus: No such file or directory' >&2\nexit 1\n")
 	failsWithHint(t, "could not start git in a scope on box: Failed to connect to bus", brand.Name+" host doctor box",
-		"new", "box", "--detach", "--dir", repo, "--worktree", "--", "sleep", "60")
+		"new", "box", "--detach", "--wall", "none", "--downgrade", "--dir", repo, "--worktree", "--", "sleep", "60")
 }
 
 // kill of a session whose worktree a scope failure kept names the host in
@@ -173,7 +173,7 @@ func TestKillNamesTheHostOfAKeptWorktree(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "kept", "--dir", repo, "--worktree", "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "kept", "--dir", repo, "--worktree", "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}
@@ -229,7 +229,7 @@ func TestKillShowsWhyAWorktreeStays(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "bad", "--dir", repo, "--worktree", "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "bad", "--dir", repo, "--worktree", "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}

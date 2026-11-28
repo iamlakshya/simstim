@@ -227,8 +227,8 @@ func TestTryLinesPutFlagsBeforeDash(t *testing.T) {
 	if code != 2 || !strings.Contains(got, "Try: "+brand.Name+" new box --json --detach -- htop -d 5\n") {
 		t.Errorf("new --json -- htop: exit %d\n%s", code, got)
 	}
-	got, code = lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach", "--", "sleep", "60")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --mkdir -- sleep 60\n") {
+	got, code = lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach", "--wall", "none", "--downgrade", "--", "sleep", "60")
+	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --wall none --downgrade --mkdir -- sleep 60\n") {
 		t.Errorf("new with a missing folder and a command: exit %d\n%s", code, got)
 	}
 	// A "--" that is a flag's value is not the end of the flags.

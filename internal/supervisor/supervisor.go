@@ -217,7 +217,7 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 	restored := host.WasRestored(m)
 	secretEnv, notes := s.secretsBeforeStart(restored)
 
-	if err := s.bootSandbox(secretEnv, notes); err != nil {
+	if err := s.bootSandbox(secretEnv, notes, restored); err != nil {
 		s.log.Error("sandbox start failed", "err", err)
 		code := 127
 		reason := api.CleanText(err.Error(), maxDetailRunes)
@@ -295,7 +295,7 @@ func (s *Supervisor) closeSocket() {
 	})
 }
 
-func (s *Supervisor) bootSandbox(secretEnv, notes []string) error {
+func (s *Supervisor) bootSandbox(secretEnv, notes []string, restored bool) error {
 	bootTimeout := 15 * time.Second
 	if s.m != nil && s.m.Wall != nil && s.m.Wall.Driver == chv.DriverName {
 		bootTimeout = chv.DefaultBootTimeout
@@ -357,7 +357,7 @@ func (s *Supervisor) bootSandbox(secretEnv, notes []string) error {
 		_ = s.link.Close()
 		return errors.New("guest start reply did not include an agent PID")
 	}
-	s.finishStart(sr)
+	s.finishStart(sr, restored)
 	return nil
 }
 

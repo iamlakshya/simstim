@@ -31,6 +31,7 @@ const (
 	LinkSilent      = "link_silent"      // the guest init stopped sending heartbeats
 	ModelBudget     = "model_budget"     // the session reached its model token budget
 	DiskFull        = "disk_full"        // the session exceeded disk_max or the host fell below 5% free disk
+	WallDowngraded  = "wall_downgraded"  // the session started below its host's wall floor
 	EgressBlocked   = "egress_blocked"   // a held request opened, or the model guard / registry gate refused a request
 	SandboxReady    = "sandbox_ready"    // a sandbox started and its guest init answered
 	SandboxStopped  = "sandbox_stopped"  // a sandbox stopped by stop, idle_stop or max_run
@@ -43,14 +44,14 @@ const (
 // Kinds lists the events a config may name.
 var Kinds = []string{
 	NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored,
-	LinkSilent, ModelBudget, DiskFull, EgressBlocked,
+	LinkSilent, ModelBudget, DiskFull, WallDowngraded, EgressBlocked,
 	SandboxReady, SandboxStopped, SandboxError, HealthDegraded, HealthRecovered,
 }
 
 // DefaultEvents are sent when a config names none.
 var DefaultEvents = []string{
 	NeedsInput, TurnDone, Failed, OOM, Memory,
-	LinkSilent, ModelBudget, DiskFull, EgressBlocked,
+	LinkSilent, ModelBudget, DiskFull, WallDowngraded, EgressBlocked,
 	SandboxReady, SandboxStopped, SandboxError, HealthDegraded, HealthRecovered,
 }
 
@@ -180,6 +181,11 @@ func summary(ev Event) string {
 		}
 	case HealthRecovered:
 		s = ev.Host + " health recovered"
+	case WallDowngraded:
+		s = on + " started below its wall floor"
+		if ev.Usage != "" {
+			s += " (" + ev.Usage + ")"
+		}
 	case Test:
 		return "Test alert from " + ev.Host
 	default:
@@ -288,6 +294,8 @@ func TestEvent(kind, dir string) (Event, error) {
 		ev.Reason = "sandbox exited unexpectedly"
 	case HealthDegraded:
 		ev.Reason = "disk low"
+	case WallDowngraded:
+		ev.Usage = "none, below process"
 	}
 	return ev, nil
 }

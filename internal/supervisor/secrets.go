@@ -187,7 +187,7 @@ func (s *Supervisor) finishLinkClosed() {
 // start audit event, and replays any guest ctl events that arrived before
 // start completed. All of this happens before the first post-start manifest is
 // written, so an early guest exit can never write StateErrored with AgentPID 0.
-func (s *Supervisor) finishStart(sr guest.StartResp) {
+func (s *Supervisor) finishStart(sr guest.StartResp, restored bool) {
 	now := time.Now()
 	nowUTC := now.UTC()
 	s.mu.Lock()
@@ -212,11 +212,15 @@ func (s *Supervisor) finishStart(sr guest.StartResp) {
 	}
 	s.lastHB = now
 	s.starting = false
-	wallLvl, wallDrv := "", ""
+	wallLvl, wallDrv, downgradeDetail := "", "", ""
 	if s.m.Wall != nil {
 		wallLvl, wallDrv = s.m.Wall.Level, s.m.Wall.Driver
+		downgradeDetail = host.WallDowngradeDetail(s.m.Wall)
 	}
 	s.audit.Record(AuditEntry{Event: "start", Session: s.id, Wall: wallLvl, Driver: wallDrv})
+	if !restored && downgradeDetail != "" {
+		s.audit.Record(AuditEntry{Event: "wall_downgraded", Session: s.id, Wall: wallLvl, Driver: wallDrv, Detail: downgradeDetail})
+	}
 	queued := s.earlyEvents
 	s.earlyEvents = nil
 	for _, ev := range queued {

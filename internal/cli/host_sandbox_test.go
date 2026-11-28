@@ -133,6 +133,7 @@ func TestHostAddPinsBestFloor(t *testing.T) {
 
 	added := th.ch
 	added.Name = "pinned"
+	added.WallFloor = ""
 	ctx := context.Background()
 	out, err := said(t, func() error { return addHost(ctx, quietPrompts(ctx), added, true) })
 	if err != nil {

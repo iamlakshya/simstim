@@ -104,7 +104,7 @@ func RunSessionExec(ctx context.Context, h Host, s *Session, command string, std
 		Host:      h,
 		SessionID: s.ID,
 		Transport: t,
-		Walled:    s.Wall != nil,
+		Walled:    api.IsWalled(s.Wall),
 	}
 	es, err := backend.StartExec(ctx, api.SSHExecArgs{
 		Command: command,

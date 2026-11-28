@@ -48,6 +48,7 @@ Added along the way:
 12. One command attaches straight to a session, for scripts and terminal keybindings.
 13. One agent cannot take down the host: each session has a memory cap, and all sessions together leave a reserve free for the system.
 14. simstim's own screens feel as good as the Amp CLI: calm, fast, keyboard first.
+15. New sessions run inside an isolation wall by default, at the strongest level the host supports, with an explicit recorded downgrade (`--downgrade`) whenever a session runs below the host's floor or without a sandbox.
 
 ## Non-goals
 

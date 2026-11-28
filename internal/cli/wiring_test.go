@@ -54,9 +54,9 @@ func TestSecretCommandsGetTheTerminal(t *testing.T) {
 			t.Fatalf("%s: %v", args, err)
 		}
 	}
-	atTerminal("new", "box", "--detach", "--name", "one", "--secret", "TOK", "--", "sleep", "60")
-	atTerminal("new", "box", "--detach", "--name", "two", "--secret", "TOK", "--no-input", "--", "sleep", "60")
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "three", "--secret", "TOK", "--", "/bin/sh", "-c", "exit 0"))
+	atTerminal("new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "one", "--secret", "TOK", "--", "sleep", "60")
+	atTerminal("new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "two", "--secret", "TOK", "--no-input", "--", "sleep", "60")
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "three", "--secret", "TOK", "--", "/bin/sh", "-c", "exit 0"))
 	if m == nil {
 		t.Fatal("new started no session")
 	}

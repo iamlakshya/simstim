@@ -309,7 +309,7 @@ func TestListFlagsAcceptRepeatedAndCommas(t *testing.T) {
 		th := newTestHost(t)
 		writeSettings(t, "[secrets]\nONE = \"echo v1\"\nTWO = \"echo v2\"\nTHREE = \"echo v3\"\n")
 		outFile := filepath.Join(th.h.Home, "secrets.out")
-		okSaid(t, "new", "box", "--detach", "--secret", "ONE,TWO", "--secret", "THREE", "--", "/bin/sh", "-c", "printf '%s,%s,%s' \"$ONE\" \"$TWO\" \"$THREE\" > "+outFile+"; exec sleep 60")
+		okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--secret", "ONE,TWO", "--secret", "THREE", "--", "/bin/sh", "-c", "printf '%s,%s,%s' \"$ONE\" \"$TWO\" \"$THREE\" > "+outFile+"; exec sleep 60")
 		hosttest.WaitFor(t, 10*time.Second, "secrets file", func() bool {
 			b, err := os.ReadFile(outFile)
 			return err == nil && string(b) == "v1,v2,v3"
@@ -384,14 +384,14 @@ func TestC6OldFormsWorkAndWarnOnce(t *testing.T) {
 		_ = os.MkdirAll(dirB, 0o755)
 
 		// -C sets dir with no warning.
-		out, errOut, code := mainRun(t, "new", "box", "-C", dirA, "--detach", "--json", "--", "sleep", "60")
+		out, errOut, code := mainRun(t, "new", "box", "-C", dirA, "--detach", "--wall", "none", "--downgrade", "--json", "--", "sleep", "60")
 		var s client.Session
 		if code != 0 || errOut != "" || json.Unmarshal([]byte(out), &s) != nil || s.Cwd != dirA {
 			t.Fatalf("new -C: exit %d, out %q, err %q", code, out, errOut)
 		}
 
 		// -d sets dir and warns once (plain).
-		_, errOut, code = mainRun(t, "new", "box", "-d", dirB, "--detach", "--", "sleep", "60")
+		_, errOut, code = mainRun(t, "new", "box", "-d", dirB, "--detach", "--wall", "none", "--downgrade", "--", "sleep", "60")
 		if code != 0 || strings.Count(errOut, "Warning: ") != 1 || !strings.Contains(errOut, `"new -d" is now "new -C"`) {
 			t.Fatalf("new -d: exit %d, err %q", code, errOut)
 		}
@@ -407,7 +407,7 @@ func TestC6OldFormsWorkAndWarnOnce(t *testing.T) {
 		}
 
 		// -d with --json warns as one JSON line on stderr.
-		out, errOut, code = mainRun(t, "new", "box", "-d", dirA, "--detach", "--json", "--", "sleep", "60")
+		out, errOut, code = mainRun(t, "new", "box", "-d", dirA, "--detach", "--wall", "none", "--downgrade", "--json", "--", "sleep", "60")
 		var warn struct {
 			V       int
 			Warning map[string]string
@@ -418,7 +418,7 @@ func TestC6OldFormsWorkAndWarnOnce(t *testing.T) {
 		}
 
 		// Last flag wins when -d and -C both appear, and -d still warns.
-		out, errOut, code = mainRun(t, "new", "box", "-d", dirA, "-C", dirB, "--detach", "--json", "--", "sleep", "60")
+		out, errOut, code = mainRun(t, "new", "box", "-d", dirA, "-C", dirB, "--detach", "--wall", "none", "--downgrade", "--json", "--", "sleep", "60")
 		if code != 0 || json.Unmarshal([]byte(out), &s) != nil || s.Cwd != dirB || !strings.Contains(errOut, `"new -d"`) {
 			t.Fatalf("new -d -C: exit %d, out %q, err %q", code, out, errOut)
 		}
@@ -443,7 +443,7 @@ func TestC6OldFormsWorkAndWarnOnce(t *testing.T) {
 		_ = os.WriteFile(hook, []byte("#!/bin/sh\necho RAN > "+marker+"\n"), 0o755)
 
 		// --no-setup skips the script and warns once.
-		_, errOut, code := mainRun(t, "new", "box", "-C", repo, "--detach", "--no-setup", "--", "sleep", "60")
+		_, errOut, code := mainRun(t, "new", "box", "-C", repo, "--detach", "--wall", "none", "--downgrade", "--no-setup", "--", "sleep", "60")
 		if code != 0 || strings.Count(errOut, "Warning: ") != 1 || !strings.Contains(errOut, `"--no-setup" is now "--no-setup-script"`) {
 			t.Fatalf("new --no-setup: exit %d, err %q", code, errOut)
 		}
@@ -452,7 +452,7 @@ func TestC6OldFormsWorkAndWarnOnce(t *testing.T) {
 		}
 
 		// --setup runs the script and warns once.
-		_, errOut, code = mainRun(t, "new", "box", "-C", repo, "--detach", "--setup", "--", "sleep", "60")
+		_, errOut, code = mainRun(t, "new", "box", "-C", repo, "--detach", "--wall", "none", "--downgrade", "--setup", "--", "sleep", "60")
 		if code != 0 || strings.Count(errOut, "Warning: ") != 1 || !strings.Contains(errOut, `"--setup" is now "--setup-script"`) {
 			t.Fatalf("new --setup: exit %d, err %q", code, errOut)
 		}
@@ -633,7 +633,7 @@ func TestNewShortDAfterTheEnd(t *testing.T) {
 	}
 
 	// -d actually detaches without warning.
-	out, errOut, code := mainRun(t, "new", "box", "-d", "--json", "--", "sleep", "60")
+	out, errOut, code := mainRun(t, "new", "box", "-d", "--wall", "none", "--downgrade", "--json", "--", "sleep", "60")
 	var s client.Session
 	if code != 0 || errOut != "" || json.Unmarshal([]byte(out), &s) != nil || s.ID == "" {
 		t.Fatalf("new box -d --json after end: exit %d, out %q, err %q", code, out, errOut)

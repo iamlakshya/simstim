@@ -22,15 +22,15 @@ func TestNewAndResumeCPUsAndMemoryFlags(t *testing.T) {
 	newTestHost(t)
 
 	// --memory and --memory-max together fail with exit code 2.
-	if got, code := lineErr(t, "new", "box", "--detach", "--memory", "1G", "--memory-max", "2G", "--", "sleep", "60"); code != 2 || !strings.Contains(got, "cannot go together") {
+	if got, code := lineErr(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--memory", "1G", "--memory-max", "2G", "--", "sleep", "60"); code != 2 || !strings.Contains(got, "cannot go together") {
 		t.Fatalf("--memory + --memory-max = %d:\n%s", code, got)
 	}
-	if got, code := lineErr(t, "new", "box", "--detach", "--cpus", "0", "--", "sleep", "60"); code != 2 || !strings.Contains(got, "not a positive whole number") {
+	if got, code := lineErr(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--cpus", "0", "--", "sleep", "60"); code != 2 || !strings.Contains(got, "not a positive whole number") {
 		t.Fatalf("--cpus 0 = %d:\n%s", code, got)
 	}
 
 	// Start with --cpus 2 --memory 512M, then resume with --cpus 4 --memory 1G.
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "sized", "--cpus", "2", "--memory", "512M", "--", "/bin/sh", "-c", "sleep 2; exit 0"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "sized", "--cpus", "2", "--memory", "512M", "--", "/bin/sh", "-c", "sleep 2; exit 0"))
 	if m == nil {
 		t.Fatal("new started no session")
 	}
@@ -70,11 +70,11 @@ func TestNewEnvAndIdentityVarsEndToEnd(t *testing.T) {
 	t.Setenv("LAPTOP_VAR", "from-laptop")
 
 	// Secret name refused with env_is_secret (exit 5).
-	if got, code := lineErr(t, "new", "box", "--detach", "--env", "API_TOKEN=raw", "--", "sleep", "5"); code != 5 || !strings.Contains(got, "configured under [secrets]") {
+	if got, code := lineErr(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--env", "API_TOKEN=raw", "--", "sleep", "5"); code != 5 || !strings.Contains(got, "configured under [secrets]") {
 		t.Fatalf("env_is_secret = %d:\n%s", code, got)
 	}
 	// Missing laptop variable refused with exit 2.
-	if _, code := lineErr(t, "new", "box", "--detach", "--env", "MISSING_LAPTOP_VAR_XYZ", "--", "sleep", "5"); code != 2 {
+	if _, code := lineErr(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--env", "MISSING_LAPTOP_VAR_XYZ", "--", "sleep", "5"); code != 2 {
 		t.Fatalf("missing laptop var exited %d, want 2", code)
 	}
 
@@ -85,7 +85,7 @@ func TestNewEnvAndIdentityVarsEndToEnd(t *testing.T) {
 	outFile := filepath.Join(th.h.Home, "env-out.txt")
 	cmd := "printf '%s|%s|%s|%s|%s|%s|%s\\n' \"$FROM_CFG\" \"$FROM_FILE\" \"$LAPTOP_VAR\" \"$OVERRIDE\" \"$" +
 		brand.Env("HOST") + "\" \"$" + brand.Env("AGENT") + "\" \"$" + brand.Env("SANDBOX") + "\" > '" + outFile + "'"
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "envcheck",
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "envcheck",
 		"--env-file", envFile, "--env", "LAPTOP_VAR", "--env", "OVERRIDE=one", "--env", "OVERRIDE=two",
 		"--", "/bin/sh", "-c", cmd))
 	if m == nil {
@@ -112,7 +112,7 @@ func TestNewCopyInSensitiveRefusalAndUpload(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("PRIVATE"), 0o600)
 
 	// Refused before touching host with exit 5 (copy_sensitive).
-	if got, code := lineErr(t, "new", "box", "--detach", "--copy", "~/.ssh/id_ed25519", "--", "sleep", "5"); code != 5 || !strings.Contains(got, "private folder") {
+	if got, code := lineErr(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--copy", "~/.ssh/id_ed25519", "--", "sleep", "5"); code != 5 || !strings.Contains(got, "private folder") {
 		t.Fatalf("copy_sensitive = %d:\n%s", code, got)
 	}
 
@@ -122,7 +122,7 @@ func TestNewCopyInSensitiveRefusalAndUpload(t *testing.T) {
 		t.Fatal(err)
 	}
 	dstCheck := filepath.Join(th.h.Home, "verified-copy.txt")
-	okSaid(t, "new", "box", "--detach", "--name", "copier",
+	okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "copier",
 		"--copy", src+":~/copied-skill.txt",
 		"--", "/bin/sh", "-c", "cp ~/copied-skill.txt '"+dstCheck+"' && sleep 30")
 	hosttest.WaitFor(t, 5*time.Second, "copied file read by session", func() bool {
@@ -179,7 +179,7 @@ func TestNewSeedDirtyAndMultiRepoPull(t *testing.T) {
 	}
 
 	probeOut := filepath.Join(th.h.Home, "seed-probe.txt")
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--seed", apiRepo, "--seed-dirty",
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--seed", apiRepo, "--seed-dirty",
 		"--", "/bin/sh", "-c", "printf '%s|%s|%s|%s\\n' \"$(cat api.txt)\" \"$(cat extra.txt)\" \"$(git config user.email)\" \"$(git remote get-url origin)\" > '"+probeOut+"' && sleep 30"))
 	if m == nil {
 		t.Fatal("new --seed started no session")
@@ -194,7 +194,7 @@ func TestNewSeedDirtyAndMultiRepoPull(t *testing.T) {
 	}
 
 	// Multi-repo seed: pull without --repo fails exit 2 listing both repos; pull --repo web succeeds.
-	m2 := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "duo",
+	m2 := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "duo",
 		"--seed", apiRepo, "--seed", webRepo,
 		"--", "/bin/sh", "-c", "cd web && echo w2 >> web.txt && git add web.txt && git commit -m 'update web' && sleep 30"))
 	if m2 == nil {
@@ -275,7 +275,7 @@ func TestNewCopyInWithSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 	probe := filepath.Join(th.h.Home, "copy-secret-out.txt")
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "copysec",
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "copysec",
 		"--copy", src+":~/note-sec.txt", "--secret", "DEFERRED_SECRET",
 		"--", "/bin/sh", "-c", "printf '%s|%s\\n' \"$(cat ~/note-sec.txt)\" \"$DEFERRED_SECRET\" > '"+probe+"' && sleep 30"))
 	if m == nil {
@@ -306,7 +306,7 @@ func TestRestoreAndAttachResendsPendingCLICopyIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	target := filepath.Join(th.h.Home, "cli-restored.txt")
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "pendingcli",
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "pendingcli",
 		"--copy", src+":~/cli-restored.txt",
 		"--", "sleep", "60"))
 	if m == nil {

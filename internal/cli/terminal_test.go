@@ -60,7 +60,7 @@ func wait(t *testing.T, done chan error) error {
 
 func TestNewAttachesAndDetaches(t *testing.T) {
 	newTestHost(t)
-	term, done := inTerminal(t, "new", "box", "--name", "live", "--", "/bin/sh", "-c", "stty size; exec sleep 60")
+	term, done := inTerminal(t, "new", "box", "--wall", "none", "--downgrade", "--name", "live", "--", "/bin/sh", "-c", "stty size; exec sleep 60")
 	term.WaitFor("30 90") // the session got this terminal's size
 	term.Type("\x1c")
 	if err := wait(t, done); err != nil {

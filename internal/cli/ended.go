@@ -58,6 +58,9 @@ func wallRowTags(w *api.WallInfo) string {
 		return ""
 	}
 	var tags []string
+	if w.DowngradedFrom != "" {
+		tags = append(tags, "!")
+	}
 	if w.Sudo {
 		tags = append(tags, "root")
 	}

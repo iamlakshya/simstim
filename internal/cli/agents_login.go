@@ -222,6 +222,7 @@ func loginSession(ctx context.Context, conn *client.Conn, h client.Host, a agent
 	s, running := runningLogin(list, args.Name)
 	if !running {
 		cols, rows := termSize()
+		applyNoneDowngrade(ctx, conn, h, &args)
 		started, err := conn.NewSession(ctx, client.TerminalArgs(args, cols, rows))
 		if err != nil {
 			return client.Session{}, false, err

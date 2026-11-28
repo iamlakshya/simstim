@@ -22,11 +22,12 @@ type startReq struct {
 	// setup scripts into args. A start after an answer keeps the answers
 	// it has, with the new one in them. answers are those answers, so a
 	// question can say what the user said before.
-	answered bool
-	answers  client.SetupAnswers
-	attach   bool
-	form     *newSession  // the form that started it, or nil
-	line     *promptState // the quick-start line that started it, or nil
+	answered     bool
+	answers      client.SetupAnswers
+	wallResolved bool
+	attach       bool
+	form         *newSession  // the form that started it, or nil
+	line         *promptState // the quick-start line that started it, or nil
 }
 
 // waiting returns the form or the quick-start line that started r, while it

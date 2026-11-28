@@ -95,9 +95,15 @@ type Settings struct {
 		// `new --memory-max` sets it for one session.
 		MemoryMax string `toml:"memory_max"`
 	} `toml:"sessions"`
-	// Sandbox holds defaults for walled sessions: paste types, sizes,
+	// Sandbox holds defaults for walled sessions: wall level, paste types, sizes,
 	// environment variables, files copied from this laptop and repository seeds.
 	Sandbox struct {
+		// Wall sets the default isolation wall for new sessions: "auto" (use
+		// each host's wall floor, or the strongest level the host probes when
+		// unpinned), "process", "gvisor", "microvm" or "none". A value weaker
+		// than a host's floor is raised to the floor with a notice. Running at
+		// "none" or below a host's floor requires `new --downgrade`.
+		Wall string `toml:"wall"`
 		// Paste sets which file types image paste and drag-and-drop may upload
 		// into a walled session: "images-and-pdf" (PNG, JPEG, GIF, WebP and
 		// PDF only, the default) or "any". The paste guard still refuses
@@ -218,6 +224,7 @@ func DefaultSettings() Settings {
 	}
 	s.Attach.Scrollback = "keep"
 	s.Sessions.MemoryMax = "auto"
+	s.Sandbox.Wall = "auto"
 	s.Sandbox.Paste = "images-and-pdf"
 	s.Sandbox.PackageManagers = api.DefaultPackageManagers
 	s.Sandbox.KeepCaches = boolPtr(true)

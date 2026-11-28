@@ -28,22 +28,38 @@ const tidy = "]52;c;aGk=ok"
 // TestCleanSession checks every string of a session row, and that the
 // cleaned row shares no list with the host's.
 func TestCleanSession(t *testing.T) {
+	inWall := &api.WallInfo{
+		Level: dirty, Driver: dirty, Version: dirty, Floor: dirty, DowngradedFrom: dirty,
+		Preset: dirty, PackageManagers: dirty, MinReleaseAge: dirty, Image: dirty, System: dirty,
+		Docker: true, Sudo: true,
+	}
+	wantWall := &api.WallInfo{
+		Level: tidy, Driver: tidy, Version: tidy, Floor: tidy, DowngradedFrom: tidy,
+		Preset: tidy, PackageManagers: tidy, MinReleaseAge: tidy, Image: tidy, System: tidy,
+		Docker: true, Sudo: true,
+	}
 	in := Session{ID: dirty, Name: dirty, SandboxOf: dirty, Task: dirty, Agent: dirty, Cwd: dirty, State: dirty, Source: dirty, Reason: dirty,
-		Signal: dirty, Unit: dirty, HostVersion: dirty, MissingSecrets: []string{dirty}, Secrets: []string{dirty}}
+		Signal: dirty, Unit: dirty, HostVersion: dirty, MissingSecrets: []string{dirty}, Secrets: []string{dirty}, Wall: inWall}
 	got := CleanSession(in)
 	want := Session{ID: tidy, Name: tidy, SandboxOf: tidy, Task: tidy, Agent: tidy, Cwd: tidy, State: tidy, Source: tidy, Reason: tidy,
-		Signal: tidy, Unit: tidy, HostVersion: tidy, MissingSecrets: []string{tidy}, Secrets: []string{tidy}}
+		Signal: tidy, Unit: tidy, HostVersion: tidy, MissingSecrets: []string{tidy}, Secrets: []string{tidy}, Wall: wantWall}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CleanSession = %+v, want %+v", got, want)
 	}
-	if in.MissingSecrets[0] != dirty || in.Secrets[0] != dirty {
+	if in.MissingSecrets[0] != dirty || in.Secrets[0] != dirty || in.Wall.Level != dirty || in.Wall.DowngradedFrom != dirty {
 		t.Fatal("CleanSession changed the host's own row")
 	}
-	// Every string field: a new one must be cleaned too.
+	// Every string field on Session and WallInfo: a new one must be cleaned too.
 	v := reflect.ValueOf(got)
 	for i := range v.NumField() {
 		if f := v.Field(i); f.Kind() == reflect.String && f.String() != tidy {
 			t.Errorf("CleanSession leaves %s as %q", v.Type().Field(i).Name, f.String())
+		}
+	}
+	wv := reflect.ValueOf(*got.Wall)
+	for i := range wv.NumField() {
+		if f := wv.Field(i); f.Kind() == reflect.String && f.String() != tidy {
+			t.Errorf("CleanSession leaves Wall.%s as %q", wv.Type().Field(i).Name, f.String())
 		}
 	}
 	if CleanSessions(nil) != nil || len(CleanSessions([]Session{in})) != 1 {

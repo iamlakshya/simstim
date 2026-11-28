@@ -16,7 +16,43 @@ import (
 )
 
 // isWalled reports whether m runs under a supervisor and guest init.
-func isWalled(m *Manifest) bool { return m != nil && m.Wall != nil }
+// An unwalled session that recorded a downgrade has m.Wall.Driver == "none"
+// and runs on the unwalled holder path.
+func isWalled(m *Manifest) bool {
+	if m == nil || m.Wall == nil || m.Wall.Driver == api.LevelNone {
+		return false
+	}
+	return m.Wall.Driver != "" || (m.Wall.Level != "" && m.Wall.Level != api.LevelNone)
+}
+
+// applyDowngradedWall records a downgrade on an unwalled session's manifest
+// without turning it into a walled session.
+func applyDowngradedWall(m *Manifest, a NewArgs, now time.Time) {
+	if a.DowngradedFrom == "" && !a.Downgrade {
+		return
+	}
+	from := a.DowngradedFrom
+	if from == "" {
+		from = a.WallFloor
+	}
+	if from == "" {
+		from = "default"
+	}
+	m.Wall = &WallRecord{
+		Level:          api.LevelNone,
+		Driver:         api.LevelNone,
+		Floor:          a.WallFloor,
+		DowngradedFrom: from,
+		At:             now,
+	}
+}
+
+func worktreeBaseName(name, cwd string) string {
+	if strings.TrimSpace(name) != "" {
+		return name
+	}
+	return filepath.Base(cwd)
+}
 
 // startSessionProc starts either the supervisor (for walled sessions) or the
 // holder (for unwalled sessions).
@@ -169,7 +205,7 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	}
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
-		name = filepath.Base(cwd)
+		name = folderName(cwd)
 	}
 	env, term := walledEnv(a, id, guestHome, resolved, agent, inline)
 	env = applyUserAndIdentityEnv(env, a.Env, id, a.HostName, kind, name, true)
@@ -188,6 +224,8 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 			Level:           "none",
 			Driver:          "plain",
 			Version:         version.Version,
+			Floor:           a.WallFloor,
+			DowngradedFrom:  a.DowngradedFrom,
 			At:              now,
 			PackageManagers: ws.pkgLevel,
 			MinReleaseAge:   ws.minAge,

@@ -37,6 +37,7 @@ simstim new my-vps --agent claude --detach --json
 | `--detach` | start it without attaching |
 | `-C`, `--dir <string>` | the folder on the host (default: `~`) |
 | `--docker` | start the image's dockerd on first use inside a microvm (see sandbox.docker in config.toml) |
+| `--downgrade` | allow starting below the host's wall floor or without a sandbox (records a downgrade) |
 | `--env <stringArray>` | set a non-secret environment variable: K=V, or K to read from this laptop (repeatable) |
 | `--env-file <stringArray>` | read non-secret K=V or K environment variables from a file on this laptop (repeatable) |
 | `--expose <strings>` | expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated) |
@@ -56,7 +57,7 @@ simstim new my-vps --agent claude --detach --json
 | `--seed-dirty` | with `--seed`, include uncommitted changes and non-ignored untracked files as one commit |
 | `--setup-script` | run the repository's setup script this time, whatever your answer for it |
 | `--task <string>` | a short note describing the task for this session |
-| `--wall <string>` | sandbox wall level: none, process, gvisor or microvm |
+| `--wall <string>` | sandbox wall level: auto, process, gvisor, microvm or none (default: sandbox.wall in config.toml) |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command

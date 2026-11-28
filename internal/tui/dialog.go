@@ -40,11 +40,13 @@ type newSession struct {
 	host     string
 	choices  []agentChoice
 	ai       int
-	field    int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command (only for "other")
+	field    int // 0 agent, 1 folder, 2 name, 3 worktree, 4 command (only for "other"), 5 wall
 	command  input
 	folder   input
 	name     input
 	worktree bool
+	wi       int      // index into formWallChoices
+	floor    string   // host's pinned floor for auto (<floor>) display
 	suggest  []string // folder completions for the current folder text
 	hints    bool     // suggest holds recent folders and repositories, not completions
 	si       int      // the next suggestion Tab takes
@@ -88,6 +90,7 @@ func newSessionDialog(m *Model, h *hostConn) *newSession {
 		command: newInput("", "a command, for example aider --model sonnet"),
 		folder:  newInput("~", "~"),
 		name:    newInput("", "the folder name"),
+		floor:   strings.TrimSpace(h.host.WallFloor),
 		finding: h.info == nil,
 	}
 	// The last choice on this host, or the first agent it has.
@@ -123,9 +126,9 @@ func (d *newSession) paste(s string) {
 // order is the sequence Tab moves through; the command field exists only for "other".
 func (d *newSession) order() []int {
 	if d.agent() == otherAgent {
-		return []int{0, 4, 1, 2, 3}
+		return []int{0, 4, 1, 2, 3, 5}
 	}
-	return []int{0, 1, 2, 3}
+	return []int{0, 1, 2, 3, 5}
 }
 
 func (d *newSession) step(n int) {
@@ -218,6 +221,8 @@ func (d *newSession) key(m *Model, k tea.KeyPressMsg) tea.Cmd {
 		case "space":
 			d.worktree = !d.worktree
 		}
+	case 5:
+		d.wallKey(ks)
 	}
 	return nil
 }
@@ -234,7 +239,7 @@ func (d *newSession) submit(m *Model, attach bool) tea.Cmd {
 	if folder == "" {
 		folder = "~"
 	}
-	a := client.NewArgs{Agent: d.agent(), Cwd: client.RemotePath(folder), Name: strings.TrimSpace(d.name.value()), Worktree: d.worktree}
+	a := client.NewArgs{Agent: d.agent(), Cwd: client.RemotePath(folder), Name: strings.TrimSpace(d.name.value()), Worktree: d.worktree, Wall: d.wallChoice()}
 	if d.agent() == otherAgent {
 		c := strings.TrimSpace(d.command.value())
 		if c == "" {
@@ -276,8 +281,8 @@ func (d *newSession) view(m *Model) string {
 	fw := cw - labelW
 	label := func(i int, s string) string {
 		w := labelW
-		if i == 0 {
-			w-- // the agent chips have a space on each side, so they start a cell early
+		if i == 0 || i == 5 {
+			w-- // chips have a space on each side, so they start a cell early
 		}
 		if d.field == i {
 			return sBold.Render(fit(s, w))
@@ -295,6 +300,7 @@ func (d *newSession) view(m *Model) string {
 		label(2, "Name")+d.name.view(fw, d.field == 2),
 		"",
 		label(3, "Worktree")+d.worktreeRow(),
+		label(5, "Wall")+d.wallRow(fw+1),
 		"",
 	)
 	switch {

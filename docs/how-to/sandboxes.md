@@ -37,12 +37,36 @@ simstim host doctor my-vps --json
 
 ## Start a sandboxed session
 
-Pass `--wall process` to `new` to run a session inside a bubblewrap process wall:
+New sessions run in a sandbox by default (`sandbox.wall = "auto"`), at the host's pinned floor (`wall_floor` in `hosts.toml`):
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --dir /path/to/repo
+```
+
+You can also name a wall level explicitly with `--wall` (or set `[sandbox] wall` in `config.toml` or `[host.sandbox] wall` in `hosts.toml`):
 
 <!-- test: help (needs a reachable host) -->
 ```sh
 simstim new my-vps --wall process --dir /path/to/repo
 ```
+
+How `new` picks the wall level:
+
+- **Pinned host floor:** `host add` and `host create` pin `wall_floor` in `hosts.toml`. `new` runs at that floor by default.
+- **Unpinned hosts:** a host saved without `wall_floor` probes on start, uses the strongest level it finds without pinning, and prints a notice pointing to `host add` or `host set`.
+- **Config layers:** a `sandbox.wall` setting stronger than the host's floor raises the session's level; a setting weaker than the host's floor is raised back to the floor with a notice.
+- **Downgrading below the floor (or to `none`):** running below the host's floor — or running at `none`, even on a host whose floor is `none` (such as a Docker test container) — is refused with exit code `5` (`wall_floor`) unless you pass `--downgrade`:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --wall none --downgrade
+```
+
+- **Shared hosts:** on a `shared` host (such as an E2B sandbox), `new` never picks `process` without `--downgrade`; the minimum automatic level is `gvisor`.
+- **Recording downgrades:** every downgraded start records `downgraded_from` in the session manifest, marks the row with `!` in `ls`, `show` and the launcher, and fires a `wall_downgraded` alert.
+- **Agent install and login:** `agents install` and `agents login` modify host binaries and login files outside any sandbox, so they continue to run at `none` without requiring `--downgrade`. Their sessions still record the downgrade, show `!` and fire `wall_downgraded`.
+- **Launcher:** the new-session form includes a **Wall** row (`auto (<floor>)`, `process`, `gvisor`, `microvm` and `none…`). Picking a level below the floor, or starting a session on a `none`-only host, opens a red confirmation sheet listing what the weaker level loses and requiring you to type the level's name before Enter starts the session.
 
 Inside a process wall:
 

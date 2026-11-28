@@ -66,7 +66,7 @@ func TestNewNonTTYExecWithSeedAndRM(t *testing.T) {
 	initP116Repo(t, seedRepo)
 
 	// Case 1: clean exit 0 -> prints stdout and removes session.
-	out, errOut, code := mainRun(t, "new", "box", "--seed", seedRepo, "--rm", "--", "/bin/sh", "-c", "echo EXEC_STDOUT; cat README.md")
+	out, errOut, code := mainRun(t, "new", "box", "--wall", "none", "--downgrade", "--seed", seedRepo, "--rm", "--", "/bin/sh", "-c", "echo EXEC_STDOUT; cat README.md")
 	if code != 0 || !strings.Contains(out, "EXEC_STDOUT") || !strings.Contains(out, "hello") {
 		t.Fatalf("new --seed --rm (exit 0): code=%d out=%q err=%q", code, out, errOut)
 	}
@@ -75,7 +75,7 @@ func TestNewNonTTYExecWithSeedAndRM(t *testing.T) {
 	}
 
 	// Case 2: non-zero exit code -> propagates exit code and removes clean session.
-	out, errOut, code = mainRun(t, "new", "box", "--seed", seedRepo, "--rm", "--", "/bin/sh", "-c", "echo FAIL_OUT; echo FAIL_ERR >&2; exit 7")
+	out, errOut, code = mainRun(t, "new", "box", "--wall", "none", "--downgrade", "--seed", seedRepo, "--rm", "--", "/bin/sh", "-c", "echo FAIL_OUT; echo FAIL_ERR >&2; exit 7")
 	if code != 7 || !strings.Contains(out, "FAIL_OUT") || !strings.Contains(errOut, "FAIL_ERR") {
 		t.Fatalf("new --seed --rm (exit 7): code=%d out=%q err=%q", code, out, errOut)
 	}
@@ -85,7 +85,7 @@ func TestNewNonTTYExecWithSeedAndRM(t *testing.T) {
 
 	// Case 3: unpulled commits inside the session -> stops instead of removing and says so.
 	commitCmd := `git config user.name test && git config user.email test@example.com && echo change > new.txt && git add new.txt && git commit -q -m c1 && echo change2 > new2.txt && git add new2.txt && git commit -q -m c2`
-	out, errOut, code = mainRun(t, "new", "box", "--name", "auth-fix", "--seed", seedRepo, "--rm", "--", "/bin/sh", "-c", commitCmd)
+	out, errOut, code = mainRun(t, "new", "box", "--wall", "none", "--downgrade", "--name", "auth-fix", "--seed", seedRepo, "--rm", "--", "/bin/sh", "-c", commitCmd)
 	if code != 0 {
 		t.Fatalf("new --rm with commits: code=%d out=%q err=%q", code, out, errOut)
 	}
@@ -101,7 +101,7 @@ func TestNewNonTTYExecWithSeedAndRM(t *testing.T) {
 	// Case 4: non-TTY `new -- <command>` without `--rm` runs the command, keeps
 	// the workspace on disk, and stops the placeholder session instead of
 	// leaving a live sleep process running.
-	out, errOut, code = mainRun(t, "new", "box", "--name", "kept-run", "--seed", seedRepo, "--", "/bin/sh", "-c", "echo KEPT_STDOUT; echo saved > kept.txt")
+	out, errOut, code = mainRun(t, "new", "box", "--wall", "none", "--downgrade", "--name", "kept-run", "--seed", seedRepo, "--", "/bin/sh", "-c", "echo KEPT_STDOUT; echo saved > kept.txt")
 	if code != 0 || !strings.Contains(out, "KEPT_STDOUT") {
 		t.Fatalf("new --seed without --rm: code=%d out=%q err=%q", code, out, errOut)
 	}
@@ -132,7 +132,7 @@ func TestNewAttachedRMFastExitAndDetach(t *testing.T) {
 		th := newTestHost(t)
 		for i := range 3 {
 			t.Run(fmt.Sprintf("run_%d", i), func(t *testing.T) {
-				term, done := inTerminal(t, "new", "box", "--name", "fast-rm", "--rm", "--", "/bin/sh", "-c", "echo FAST_RM_OK; exit 7")
+				term, done := inTerminal(t, "new", "box", "--wall", "none", "--downgrade", "--name", "fast-rm", "--rm", "--", "/bin/sh", "-c", "echo FAST_RM_OK; exit 7")
 				err := wait(t, done)
 				var se silentError
 				if !errors.As(err, &se) || se.code != 7 {
@@ -149,7 +149,7 @@ func TestNewAttachedRMFastExitAndDetach(t *testing.T) {
 	t.Run("detach_then_exit", func(t *testing.T) {
 		th := newTestHost(t)
 		marker := filepath.Join(t.TempDir(), "release")
-		term, done := inTerminal(t, "new", "box", "--name", "detach-rm", "--rm", "--",
+		term, done := inTerminal(t, "new", "box", "--wall", "none", "--downgrade", "--name", "detach-rm", "--rm", "--",
 			"/bin/sh", "-c", `echo DETACH_RM_OK; while [ ! -f "$0" ]; do sleep 0.05; done`, marker)
 		term.WaitFor("DETACH_RM_OK")
 		term.Type("\x1c")
@@ -176,7 +176,7 @@ func TestNewAttachedRMFastExitAndDetach(t *testing.T) {
 func TestNewCountJSONAndPartialRefusal(t *testing.T) {
 	th := newTestHost(t)
 
-	out, errOut, code := mainRun(t, "new", "box", "--name", "worker", "--count", "4", "--detach", "--json", "--", "sleep", "60")
+	out, errOut, code := mainRun(t, "new", "box", "--wall", "none", "--downgrade", "--name", "worker", "--count", "4", "--detach", "--json", "--", "sleep", "60")
 	if code != 0 || errOut != "" {
 		t.Fatalf("new --count 4: code=%d out=%q err=%q", code, out, errOut)
 	}
@@ -210,7 +210,7 @@ func TestNewCountJSONAndPartialRefusal(t *testing.T) {
 	}
 	t.Cleanup(func() { startCountSession = orig })
 
-	out, errOut, code = mainRun(t, "new", "box", "--name", "batch", "--count", "4", "--json", "--", "sleep", "60")
+	out, errOut, code = mainRun(t, "new", "box", "--wall", "none", "--downgrade", "--name", "batch", "--count", "4", "--json", "--", "sleep", "60")
 	if code != 5 || errOut != "" {
 		t.Fatalf("partial refusal: code=%d (want 5) out=%q err=%q", code, out, errOut)
 	}

@@ -13,7 +13,8 @@ import (
 
 var (
 	wallItems = []compItem{
-		{api.LevelNone, "No sandbox wall"},
+		{"auto", "Host's wall floor (default)"},
+		{api.LevelNone, "No sandbox wall (needs --downgrade)"},
 		{api.LevelProcess, "Bubblewrap process wall"},
 		{api.LevelGVisor, "gVisor runsc wall"},
 		{api.LevelMicroVM, "Hardware-virtualised microVM wall"},

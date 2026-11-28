@@ -84,6 +84,7 @@ The [getting-started tutorial](docs/tutorials/getting-started.md) covers setup, 
 
 | Capability | How it works |
 | --- | --- |
+| **Sandboxed by default** | New sessions run inside an isolation wall at the host's floor (`process`, `gvisor` or `microvm`), with defensive package-manager settings and egress filtering. Pass `--wall none --downgrade` to run an unwalled session (recorded as a downgrade). |
 | **The agent's real terminal** | Live output passes through unchanged: kitty keyboard sequences, truecolour, links, clipboard operations and notifications. No panes, prefix layer or replacement agent UI. |
 | **Sessions that outlive the connection** | A host-side holder owns each agent's terminal. The client reconnects after a dropped link and catches up by byte offset when the retained output allows it. |
 | **Your hosts and SSH configuration** | Use OpenSSH with ProxyJump, Tailscale, IAP or SSM. Created Docker and E2B hosts use their provider's exec transport. No new network listener or telemetry. |
@@ -125,6 +126,7 @@ Agent authentication stays with the agent on the host. simstim does not provide 
 | Task | Start here |
 | --- | --- |
 | Attach, describe or delete a session | [Sessions](docs/how-to/sessions.md), `simstim attach first`, `simstim show first`, `simstim rm first` |
+| Configure sandboxes, floors and downgrades | [Sandboxes](docs/how-to/sandboxes.md), `simstim host set my-vps floor=process`, `simstim new my-vps --wall none --downgrade` |
 | List sessions or attach from a script | [Scripts](docs/how-to/scripting.md), `simstim ls --json`, `simstim attach my-vps/first` |
 | Work on a separate branch | [Worktrees](docs/how-to/worktrees.md) |
 | Bring the remote branch home | [Pull a session's branch](docs/how-to/pull.md) |

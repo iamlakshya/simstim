@@ -45,6 +45,26 @@ func (h *Holder) startAlerts(restored bool) {
 		kind = alerts.Restored
 	}
 	h.al.d.Notify(h.alertEvent(kind))
+	if !restored && h.m.Wall != nil && h.m.Wall.DowngradedFrom != "" {
+		ev := h.alertEvent(alerts.WallDowngraded)
+		ev.Usage = WallDowngradeDetail(h.m.Wall)
+		h.al.d.Notify(ev)
+	}
+}
+
+// WallDowngradeDetail describes a recorded wall downgrade for alerts and logs.
+func WallDowngradeDetail(w *WallRecord) string {
+	if w == nil || w.DowngradedFrom == "" {
+		return ""
+	}
+	lvl := w.Level
+	if lvl == "" {
+		lvl = "none"
+	}
+	if w.DowngradedFrom == "default" || w.DowngradedFrom == "none" {
+		return lvl + ", downgraded"
+	}
+	return lvl + ", below " + w.DowngradedFrom
 }
 
 // The labels that say why a session's agent starts again (startAgain).

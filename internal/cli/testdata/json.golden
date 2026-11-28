@@ -1,4 +1,4 @@
-== new box --detach --json --name api --memory-max 256M -- sleep 60
+== new box --detach --json --wall none --downgrade --name api --memory-max 256M -- sleep 60
 {
   "v": 1,
   "address": "box/<id>",
@@ -15,7 +15,13 @@
   "rows": 24,
   "since": "<since>",
   "source": "<source>",
-  "state": "<state>"
+  "state": "<state>",
+  "wall": {
+    "level": "none",
+    "driver": "none",
+    "floor": "none",
+    "downgraded_from": "default"
+  }
 }
 == ls --json
 [
@@ -38,7 +44,13 @@
         "memory_max": "<memory_max>",
         "host_version": "<host_version>",
         "cols": 80,
-        "rows": 24
+        "rows": 24,
+        "wall": {
+          "level": "none",
+          "driver": "none",
+          "floor": "none",
+          "downgraded_from": "default"
+        }
       }
     ]
   }
@@ -68,7 +80,13 @@
   "rows": 24,
   "since": "<since>",
   "source": "<source>",
-  "state": "<state>"
+  "state": "<state>",
+  "wall": {
+    "level": "none",
+    "driver": "none",
+    "floor": "none",
+    "downgraded_from": "default"
+  }
 }
 == doctor --json
 {
@@ -118,7 +136,8 @@
       "provider": "hosttest"
     },
     "name": "box",
-    "ssh": "box"
+    "ssh": "box",
+    "wall_floor": "none"
   }
 ]
 == host test box --json

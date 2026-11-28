@@ -342,11 +342,17 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 	if m.prompt != nil && m.prompt.mode == promptSearch {
 		q = m.prompt.in.value()
 	}
-	name := nameSegs(s.Name, c.name, sBold, q)
+	nameW := c.name
+	var name []seg
 	if r.indent {
-		innerW := max(c.name-2, 4)
-		name = append([]seg{{"  ", sPlain}}, nameSegs(s.Name, innerW, sBold, q)...)
+		name = append(name, seg{"  ", sPlain})
+		nameW = max(nameW-2, 4)
 	}
+	if s.Wall != nil && s.Wall.DowngradedFrom != "" {
+		name = append(name, seg{"! ", sWarning.Bold(true)})
+		nameW = max(nameW-2, 4)
+	}
+	name = append(name, nameSegs(s.Name, nameW, sBold, q)...)
 	if m.rename != nil && m.rename.key == r.key() {
 		name = []seg{{fit(m.rename.in.view(c.name, true), c.name), sPlain}}
 	}

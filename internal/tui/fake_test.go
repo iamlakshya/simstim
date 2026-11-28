@@ -17,6 +17,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // The golden screens are the same on every platform.
@@ -54,6 +55,8 @@ type fakeHost struct {
 	debugErr error
 	// folders are more folders that the host suggests (clean_test.go).
 	folders []string
+	// probedFloor overrides what ProbeWallFloor returns for unpinned hosts.
+	probedFloor string
 }
 
 // fakeBackend pretends to be SSH, the hosts and the terminal.
@@ -292,6 +295,16 @@ func (c *fakeConn) host() *fakeHost {
 	return c.be.state[c.name]
 }
 
+func (c *fakeConn) ProbeWallFloor(context.Context) (wall.Level, error) {
+	c.be.mu.Lock()
+	raw := c.host().probedFloor
+	c.be.mu.Unlock()
+	if raw == "" {
+		return wall.Process, nil
+	}
+	return wall.ParseLevel(raw)
+}
+
 func (c *fakeConn) Folders(_ context.Context, prefix string) (client.FoldersResult, error) {
 	all := []string{"~/src/api/", "~/src/app/", "~/notes/"}
 	c.be.mu.Lock()
@@ -360,6 +373,14 @@ func (c *fakeConn) NewSession(_ context.Context, a client.NewArgs) (*client.Sess
 	}
 	s := client.Session{ID: fmt.Sprintf("n%03d", len(h.sessions)+1), Name: name, Agent: a.Agent, Cwd: a.Cwd,
 		State: api.StateStarting, Since: now, CreatedAt: now, Alive: true}
+	if a.Wall != "" || a.Downgrade || a.WallFloor != "" || a.DowngradedFrom != "" {
+		s.Wall = &api.WallInfo{
+			Level:          a.Wall,
+			Driver:         a.Wall,
+			Floor:          a.WallFloor,
+			DowngradedFrom: a.DowngradedFrom,
+		}
+	}
 	h.sessions = append(h.sessions, s)
 	return &s, nil
 }
@@ -666,9 +687,9 @@ func code(n int) *int { return &n }
 func labBackend() *fakeBackend {
 	be := newFakeBackend()
 	be.hosts = []client.Host{
-		{Name: "atlas-dev", SSH: "atlas-dev"},
-		{Name: "gcp-dev", SSH: "dev@203.0.113.7", SSHConfig: "~/src/infra/ssh/config"},
-		{Name: "aws-gpu", SSH: "aws-gpu"},
+		{Name: "atlas-dev", SSH: "atlas-dev", WallFloor: api.LevelProcess},
+		{Name: "gcp-dev", SSH: "dev@203.0.113.7", SSHConfig: "~/src/infra/ssh/config", WallFloor: api.LevelProcess},
+		{Name: "aws-gpu", SSH: "aws-gpu", WallFloor: api.LevelProcess},
 	}
 	be.state["atlas-dev"] = &fakeHost{
 		latency: 9 * time.Millisecond,

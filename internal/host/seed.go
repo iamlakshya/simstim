@@ -252,7 +252,7 @@ func recordSeedHeads(m *Manifest, records []api.SeedRepoRecord) {
 }
 
 func hostToGuestPath(m *Manifest, hostDir string) string {
-	if m == nil || m.Wall == nil {
+	if !isWalled(m) {
 		return hostDir
 	}
 	if m.Wall.WorkspaceHost == hostDir && m.Wall.WorkspaceGuest != "" {

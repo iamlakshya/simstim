@@ -131,6 +131,8 @@ func newMicroVMWalled(a NewArgs) (_ *SessionInfo, err error) {
 			Level:            api.LevelMicroVM,
 			Driver:           chv.DriverName,
 			Version:          chvVer,
+			Floor:            a.WallFloor,
+			DowngradedFrom:   a.DowngradedFrom,
 			Preset:           string(egress.PresetBalanced),
 			WorkspaceGuest:   "/work",
 			StateDirs:        slices.Clone(agent.StateDirs),

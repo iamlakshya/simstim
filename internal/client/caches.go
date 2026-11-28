@@ -10,6 +10,10 @@ import (
 // HostSandbox overrides [sandbox] defaults from config.toml for sessions on
 // one host in hosts.toml.
 type HostSandbox struct {
+	// Wall overrides sandbox.wall from config.toml for sessions on this host:
+	// "auto", "process", "gvisor", "microvm" or "none". Cannot lower the host's
+	// wall_floor.
+	Wall string `toml:"wall,omitempty"`
 	// CPUs caps the CPU quota of new sessions on this host.
 	CPUs int `toml:"cpus,omitempty"`
 	// Memory caps the memory of new sessions on this host, such as "4G".

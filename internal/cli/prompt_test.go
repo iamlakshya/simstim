@@ -306,8 +306,8 @@ func TestCommandsWithNoInput(t *testing.T) {
 	newTestHost(t)
 
 	// new: a missing folder needs --mkdir.
-	got, code := lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach")
-	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --mkdir") {
+	got, code := lineErr(t, "new", "box", "--dir", "~/not-there", "--no-input", "--detach", "--wall", "none", "--downgrade")
+	if code != 4 || !strings.Contains(got, "Try: "+brand.Name+" new box --dir '~/not-there' --no-input --detach --wall none --downgrade --mkdir") {
 		t.Errorf("new with a missing folder: exit %d\n%s", code, got)
 	}
 
@@ -431,11 +431,11 @@ func TestNewSkipsTheSetupScriptWithInputOff(t *testing.T) {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
 	}
-	_, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--no-input", "--", "sleep", "60")
+	_, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--wall", "none", "--downgrade", "--no-input", "--", "sleep", "60")
 	if err != nil || !strings.Contains(errOut, "Skipping the setup script of "+repo+": you have not said that it may run on box. Pass --setup-script to run it.") {
 		t.Fatalf("new --no-input: %v\n%s", err, errOut)
 	}
-	out, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--json", "--", "sleep", "60")
+	out, errOut, err := runApart(t, "new", "box", "--dir", repo, "--detach", "--wall", "none", "--downgrade", "--json", "--", "sleep", "60")
 	var warn struct {
 		V       int
 		Warning map[string]string

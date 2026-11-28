@@ -19,6 +19,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // ShellOptions configures opening a shell session inside a session's sandbox
@@ -70,13 +71,13 @@ func OpenShellSession(ctx context.Context, conn *Conn, target Session, opts Shel
 	if settings.Attach.DetachKey == "" {
 		settings = LoadSettings()
 	}
-	walled := target.Wall != nil && target.Wall.Level != "" && target.Wall.Level != "none"
-	if !walled {
-		args := SessionArgs(NewArgs{
-			Agent: "shell",
-			Cwd:   target.Cwd,
-			Name:  opts.Name,
-		}, opts.Cols, opts.Rows, settings)
+	if !api.IsWalled(target.Wall) {
+		args := UnwalledShellArgs(conn.Host, target, ShellOptions{
+			Name:     opts.Name,
+			Cols:     opts.Cols,
+			Rows:     opts.Rows,
+			Settings: settings,
+		})
 		s, err := conn.NewSession(ctx, args)
 		return s, err == nil, err
 	}
@@ -104,6 +105,35 @@ func OpenShellSession(ctx context.Context, conn *Conn, target Session, opts Shel
 	}, opts.Cols, opts.Rows, settings)
 	s, err := conn.NewSession(ctx, args)
 	return s, err == nil, err
+}
+
+// UnwalledShellArgs builds NewArgs for opening a host shell beside an unwalled
+// session, carrying Wall="none", Downgrade=true, and the host/session floor
+// metadata so G9 records the downgrade, shows !, and emits wall_downgraded.
+func UnwalledShellArgs(h Host, target Session, opts ShellOptions) NewArgs {
+	floor, from := "", ""
+	if target.Wall != nil {
+		floor = strings.TrimSpace(target.Wall.Floor)
+		from = strings.TrimSpace(target.Wall.DowngradedFrom)
+	}
+	if floor == "" || from == "" {
+		df, dfrom := DowngradeForNone(h, wall.None)
+		if floor == "" {
+			floor = df
+		}
+		if from == "" {
+			from = dfrom
+		}
+	}
+	return SessionArgs(NewArgs{
+		Agent:          "shell",
+		Cwd:            target.Cwd,
+		Name:           opts.Name,
+		Wall:           api.LevelNone,
+		Downgrade:      true,
+		WallFloor:      floor,
+		DowngradedFrom: from,
+	}, opts.Cols, opts.Rows, opts.Settings)
 }
 
 // OpenStreamOp opens a dedicated bridge connection on h for a streaming bridge

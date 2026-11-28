@@ -100,8 +100,17 @@ type NewArgs struct {
 	// trusted. The scripts run only while their content has that hash.
 	SetupHashes map[string]string `json:"setup_hashes,omitempty"`
 	// Wall names the isolation wall for this session: "", "none", or a driver
-	// such as "plain" (the test-only supervisor driver).
+	// such as "process", "gvisor", or "plain" (the test-only supervisor driver).
 	Wall string `json:"wall,omitempty"`
+	// Downgrade records that the user confirmed starting below the host's
+	// wall floor (or at level "none").
+	Downgrade bool `json:"downgrade,omitempty"`
+	// WallFloor is the host's wall floor when the session started, carried from
+	// the client so the manifest and alerts can record it.
+	WallFloor string `json:"wall_floor,omitempty"`
+	// DowngradedFrom is the floor level this session was downgraded from
+	// (such as "process" or "gvisor"), empty when not downgraded.
+	DowngradedFrom string `json:"downgraded_from,omitempty"`
 	// PackageManagers picks the guest package manager guard level ("guarded",
 	// "strict", or "off") for walled sessions (isolation spec 7.10).
 	PackageManagers string `json:"package_managers,omitempty"`
@@ -175,6 +184,16 @@ type WallInfo struct {
 	System          string `json:"system,omitempty"`
 	Docker          bool   `json:"docker,omitempty"`
 	Sudo            bool   `json:"sudo,omitempty"`
+}
+
+// IsWalled reports whether w describes a session running inside a sandbox wall
+// (under a supervisor and guest init), rather than an unwalled session whose
+// WallInfo only records a downgrade.
+func IsWalled(w *WallInfo) bool {
+	if w == nil || w.Driver == LevelNone {
+		return false
+	}
+	return w.Driver != "" || (w.Level != "" && w.Level != LevelNone)
 }
 
 // SessionInfo is one row of the session list.

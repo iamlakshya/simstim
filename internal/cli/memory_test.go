@@ -51,9 +51,9 @@ func writeSettings(t *testing.T, text string) {
 // size stops the start with a hint before anything starts.
 func TestNewMemoryMax(t *testing.T) {
 	newTestHost(t)
-	failsWithHint(t, `"100M" is below the smallest cap, 256M`, "size of 256M or more", "new", "box", "--detach", "--memory-max", "100M", "--", "sleep", "60")
-	failsWithHint(t, `"4096" has no unit`, api.MemorySizes, "new", "box", "--detach", "--memory-max", "4096", "--", "sleep", "60")
-	failsWithHint(t, `"infinity" is not a size: auto already`, api.MemorySizes, "new", "box", "--detach", "--memory-max", "infinity", "--", "sleep", "60")
+	failsWithHint(t, `"100M" is below the smallest cap, 256M`, "size of 256M or more", "new", "box", "--detach", "--wall", "none", "--downgrade", "--memory-max", "100M", "--", "sleep", "60")
+	failsWithHint(t, `"4096" has no unit`, api.MemorySizes, "new", "box", "--detach", "--wall", "none", "--downgrade", "--memory-max", "4096", "--", "sleep", "60")
+	failsWithHint(t, `"infinity" is not a size: auto already`, api.MemorySizes, "new", "box", "--detach", "--wall", "none", "--downgrade", "--memory-max", "infinity", "--", "sleep", "60")
 	if list, _ := host.List(); len(list) != 0 {
 		t.Fatalf("a refused start left sessions: %+v", list)
 	}
@@ -71,13 +71,13 @@ func TestNewMemoryMax(t *testing.T) {
 		t.Errorf("new --memory-max auto: the cap is %d, want the default %d", got, capFor(0))
 	}
 	writeSettings(t, "[sessions]\nmemory_max = \"lots\"\n")
-	failsWithHint(t, `memory_max in config.toml: "lots" is not a size`, "[sessions] memory_max", "new", "box", "--detach", "--", "sleep", "60")
+	failsWithHint(t, `memory_max in config.toml: "lots" is not a size`, "[sessions] memory_max", "new", "box", "--detach", "--wall", "none", "--downgrade", "--", "sleep", "60")
 }
 
-// newSessionArgs starts a detached session with flags, and returns its ID.
+// newSessionArgs starts a detached unwalled session with flags, and returns its ID.
 func newSessionArgs(t *testing.T, flags ...string) string {
 	t.Helper()
-	args := append(append([]string{"new", "box", "--detach"}, flags...), "--", "sleep", "60")
+	args := append(append([]string{"new", "box", "--detach", "--wall", "none", "--downgrade"}, flags...), "--", "sleep", "60")
 	m := startedRE.FindStringSubmatch(okSaid(t, args...))
 	if m == nil {
 		t.Fatalf("%q started nothing", args)

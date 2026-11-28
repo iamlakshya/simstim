@@ -103,7 +103,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 	argv[0] = guestArg0
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
-		name = filepath.Base(wsGuest)
+		name = folderName(wsGuest)
 	}
 	env, term := processWalledEnv(a, id, extraPathDirs, agent, inline)
 	env = applyUserAndIdentityEnvWithBrowser(env, a.Env, id, a.HostName, kind, name, process.GuestRunDir()+"/browser")
@@ -124,6 +124,8 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			Level:            level,
 			Driver:           driver,
 			Version:          ver,
+			Floor:            a.WallFloor,
+			DowngradedFrom:   a.DowngradedFrom,
 			Preset:           string(egress.PresetBalanced),
 			WorkspaceHost:    wsHost,
 			WorkspaceGuest:   wsGuest,

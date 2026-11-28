@@ -31,6 +31,8 @@ func TestSummary(t *testing.T) {
 		{Event{Event: Memory, Session: s}, "api-tests on box is close to its memory cap"},
 		{Event{Event: ModelBudget, Session: s, Usage: "2000412 of 2000000 tokens"}, "api-tests on box reached its model token budget (2000412 of 2000000 tokens)"},
 		{Event{Event: ModelBudget, Session: s}, "api-tests on box reached its model token budget"},
+		{Event{Event: WallDowngraded, Session: s, Usage: "none, below process"}, "api-tests on box started below its wall floor (none, below process)"},
+		{Event{Event: WallDowngraded, Session: s}, "api-tests on box started below its wall floor"},
 	}
 	for _, c := range cases {
 		c.ev.Host = "box"

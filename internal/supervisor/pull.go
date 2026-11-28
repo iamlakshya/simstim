@@ -33,7 +33,7 @@ const (
 // agent, no holder, no egress, no secrets, leaving the session stopped), pulls
 // the bundle, and destroys the temporary sandbox.
 func PullBundle(m *host.Manifest, req api.PullBundleArgs, out io.Writer) error {
-	if m == nil || m.Wall == nil {
+	if m == nil || m.Wall == nil || m.Wall.Driver == api.LevelNone || (m.Wall.Driver == "" && (m.Wall.Level == "" || m.Wall.Level == api.LevelNone)) {
 		return writePullBundleErr(out, host.UserError("bad_request", "session is not walled", "Update the host helper."))
 	}
 	if req.Base != "" && !isValidGitOID(req.Base) {

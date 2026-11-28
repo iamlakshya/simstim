@@ -107,11 +107,12 @@ type Model struct {
 
 	// attach is kept for the whole run, so attaching to the same session
 	// again continues from the byte the terminal already shows.
-	attach    *client.AttachState
-	lastAgent map[string]string
-	resuming  map[sessKey]bool // the sessions whose resume runs (resume.go)
-	conns     *connSet
-	dbg       launcherDebug // what the debug commands turned on (debug.go)
+	attach        *client.AttachState
+	lastAgent     map[string]string
+	unpinnedNoted map[string]bool  // hosts whose "no wall floor yet" notice already showed (spec 8.4)
+	resuming      map[sessKey]bool // the sessions whose resume runs (resume.go)
+	conns         *connSet
+	dbg           launcherDebug // what the debug commands turned on (debug.go)
 
 	// exec hands the terminal to a blocking command; after delivers msg
 	// after d. Tests replace both.
@@ -147,13 +148,14 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	m := &Model{
 		ctx: ctx, be: be, now: o.Now, motion: o.Motion,
 		width: 80, height: 24, dark: true, focused: true,
-		autoSel:   true,
-		attach:    &client.AttachState{},
-		lastAgent: map[string]string{},
-		traces:    map[sessKey][]time.Time{},
-		activity:  map[sessKey]activity{},
-		conns:     newConnSet(),
-		exec:      tea.Exec,
+		autoSel:       true,
+		attach:        &client.AttachState{},
+		lastAgent:     map[string]string{},
+		unpinnedNoted: map[string]bool{},
+		traces:        map[sessKey][]time.Time{},
+		activity:      map[sessKey]activity{},
+		conns:         newConnSet(),
+		exec:          tea.Exec,
 		after: func(d time.Duration, msg tea.Msg) tea.Cmd {
 			return tea.Tick(d, func(time.Time) tea.Msg { return msg })
 		},
@@ -256,10 +258,13 @@ type (
 	}
 	activityTickMsg struct{}
 	startedMsg      struct {
-		startReq // what started: a question about it sends it again
-		s        *client.Session
-		err      error
-		warn     *client.UserError // the answers about setup scripts did not parse
+		startReq        // what started: a question about it sends it again
+		s               *client.Session
+		err             error
+		warn            *client.UserError // the answers about setup scripts did not parse
+		wallNotice      string            // unpinned host or raised-config notice
+		unpinnedHost    string            // host name when wallNotice is an unpinned notice
+		downgradePrompt *downgradeInfo    // non-nil when confirmation is required to downgrade
 	}
 	attachDoneMsg struct {
 		host, id, name string

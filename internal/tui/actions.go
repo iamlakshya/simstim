@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // op runs one request on h's connection and reports with a toast.
@@ -68,6 +70,46 @@ func (m *Model) openSelectedHost() tea.Cmd {
 	return nil
 }
 
+// resolveStartWall resolves the target wall level for r, memoizing any
+// unpinned host probe so a wall_floor downgrade sheet never probes twice.
+func resolveStartWall(ctx context.Context, c Conn, host client.Host, s client.Settings, r *startReq) (wallNotice, unpinnedHost string, prompt *downgradeInfo, err error) {
+	var probed bool
+	var probedLvl wall.Level
+	var probedErr error
+	probe := func() (wall.Level, error) {
+		if !probed {
+			probedLvl, probedErr = probeConnWall(ctx, c)
+			probed = true
+		}
+		return probedLvl, probedErr
+	}
+	plan, werr := client.ResolveWall(host, s, r.args.Wall, r.args.Downgrade, probe)
+	if werr != nil {
+		var ue *client.UserError
+		if errors.As(werr, &ue) && ue.Code == "wall_floor" {
+			if dp, derr := client.ResolveWall(host, s, r.args.Wall, true, probe); derr == nil {
+				return "", "", &downgradeInfo{
+					host:   host.Name,
+					floor:  dp.Floor,
+					from:   dp.DowngradedFrom,
+					want:   dp.Level,
+					shared: client.IsSharedHost(host),
+				}, nil
+			}
+		}
+		return "", "", nil, werr
+	}
+	r.args.Wall = plan.Level
+	r.args.Downgrade = plan.Downgraded
+	r.args.WallFloor = plan.Floor
+	r.args.DowngradedFrom = plan.DowngradedFrom
+	r.wallResolved = true
+	if plan.UnpinnedNotice != "" {
+		return plan.UnpinnedNotice, host.Name, nil, nil
+	}
+	return plan.RaisedNotice, "", nil, nil
+}
+
 // startSession sends "new" to the host h, for the start r.
 func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 	r.host = h.name()
@@ -85,6 +127,18 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 	return tea.Batch(warnCmd, m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
+		var wallNotice, unpinnedHost string
+		if !r.wallResolved {
+			var prompt *downgradeInfo
+			var werr error
+			wallNotice, unpinnedHost, prompt, werr = resolveStartWall(cctx, c, host, s, &r)
+			if prompt != nil {
+				return startedMsg{startReq: r, downgradePrompt: prompt}
+			}
+			if werr != nil {
+				return startedMsg{startReq: r, err: werr}
+			}
+		}
 		var warn *client.UserError
 		if r.args.Setup == "" && !r.answered {
 			answers := be.SetupAnswers(r.host)
@@ -96,12 +150,12 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 		if r.args.Secrets == nil {
 			secrets, err := be.Secrets(cctx, host)
 			if err != nil {
-				return startedMsg{startReq: r, err: err, warn: warn}
+				return startedMsg{startReq: r, err: err, warn: warn, wallNotice: wallNotice, unpinnedHost: unpinnedHost}
 			}
 			r.args.Secrets = secrets
 		}
-		s, err := c.NewSession(cctx, r.args)
-		return startedMsg{startReq: r, s: s, err: err, warn: warn}
+		sess, err := c.NewSession(cctx, r.args)
+		return startedMsg{startReq: r, s: sess, err: err, warn: warn, wallNotice: wallNotice, unpinnedHost: unpinnedHost}
 	}))
 }
 
@@ -109,10 +163,27 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 // about setup scripts, when they could not be read.
 func (m *Model) onStarted(msg startedMsg) tea.Cmd {
 	cmd := m.showStarted(msg)
-	if w := msg.warn; w != nil {
-		return tea.Batch(m.toastSetupWarn(w), cmd)
+	var cmds []tea.Cmd
+	if msg.wallNotice != "" {
+		show := true
+		if msg.unpinnedHost != "" {
+			if m.unpinnedNoted[msg.unpinnedHost] {
+				show = false
+			} else {
+				m.unpinnedNoted[msg.unpinnedHost] = true
+			}
+		}
+		if show {
+			cmds = append(cmds, m.toast(toastInfo, msg.wallNotice))
+		}
 	}
-	return cmd
+	if w := msg.warn; w != nil {
+		cmds = append(cmds, m.toastSetupWarn(w))
+	}
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return tea.Batch(cmds...)
 }
 
 // showStarted shows how a start went, in the form or the quick-start line
@@ -122,6 +193,14 @@ func (m *Model) onStarted(msg startedMsg) tea.Cmd {
 func (m *Model) showStarted(msg startedMsg) tea.Cmd {
 	d, p := m.waiting(msg.startReq)
 	waited := d != nil || p != nil
+	if msg.downgradePrompt != nil {
+		if waited {
+			cleanup := m.disposeModal()
+			m.modal = newDowngradeAsk(msg.startReq, *msg.downgradePrompt)
+			return cleanup
+		}
+		return nil
+	}
 	if q, ok := client.FolderQuestionOf(msg.err); ok && !msg.args.MakeFolder {
 		if waited {
 			cleanup := m.disposeModal()
@@ -219,7 +298,7 @@ func (m *Model) openSandboxShell() tea.Cmd {
 	}
 	settings, warnCmd := m.refreshSettings()
 	target := *s
-	c, hostName, cols, rows := h.conn, h.name(), m.width, m.height
+	c, host, hostName, cols, rows := h.conn, h.host, h.name(), m.width, m.height
 	return tea.Batch(warnCmd, m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
@@ -228,15 +307,14 @@ func (m *Model) openSandboxShell() tea.Cmd {
 			sess, created, err := client.OpenShellSession(cctx, cc, target, opts)
 			return shellOpenedMsg{h: h, hostName: hostName, conn: c, s: sess, created: created, err: err}
 		}
-		sess, created, err := openShellOnConn(cctx, c, target, opts)
+		sess, created, err := openShellOnConn(cctx, c, host, target, opts)
 		return shellOpenedMsg{h: h, hostName: hostName, conn: c, s: sess, created: created, err: err}
 	}))
 }
 
-func openShellOnConn(ctx context.Context, c Conn, target client.Session, opts client.ShellOptions) (*client.Session, bool, error) {
-	walled := target.Wall != nil && target.Wall.Level != "" && target.Wall.Level != "none"
-	if !walled {
-		args := client.SessionArgs(client.NewArgs{Agent: "shell", Cwd: target.Cwd, Name: opts.Name}, opts.Cols, opts.Rows, opts.Settings)
+func openShellOnConn(ctx context.Context, c Conn, host client.Host, target client.Session, opts client.ShellOptions) (*client.Session, bool, error) {
+	if !api.IsWalled(target.Wall) {
+		args := client.UnwalledShellArgs(host, target, opts)
 		s, err := c.NewSession(ctx, args)
 		return s, err == nil, err
 	}

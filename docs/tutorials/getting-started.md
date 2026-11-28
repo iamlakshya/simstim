@@ -34,7 +34,7 @@ It asks one thing at a time:
 
 1. **Where will agents run?** Pick a host in your SSH config, a local VM with Lima, a container for testing with Docker, an E2B sandbox, or "a server I will rent". Each one says whether this computer can use it now. If not, it shows the steps to make it ready, such as `brew install lima`, and checks again when you press Enter.
 2. **Connect.** It checks that the host answers, and asks before it installs a small helper there: in your home folder, with nothing that listens on the network. A host it makes for you, such as a Lima VM, counts as your yes.
-3. **Agents.** A checklist of the agents it can install. Installed ones are ticked already. Type the numbers of the ones you want, such as `1 2`. Each one installs with its vendor's own installer, in a session you watch: answer its questions there.
+3. **Agents.** A checklist of the agents it can install. Installed ones are ticked already. Type the numbers of the ones you want, such as `1 2`. Each one installs with its vendor's own installer, in a session you watch: answer its questions there. Because installers and logins change host files outside any sandbox, they run unwalled without needing `--downgrade` and are marked with `!` as a recorded downgrade.
 4. **Log in.** For each agent that is not logged in, it offers the agent's own login, in a session. Follow its prompts, usually a link to open in your browser. simstim never sees the login.
 5. **Done.** A summary of each agent, and the command that starts your first session.
 
@@ -75,6 +75,8 @@ simstim ls
 ```
 
 `ls` shows the session, with its state and folder.
+
+New sessions run inside a sandbox wall by default, at the floor that `host add` pinned for the host (for example `process`, `gvisor` or `microvm`), with defensive package-manager settings turned on. On a host that can run only `none` (such as a Docker test container), or whenever you want an unwalled session on purpose, pass `--wall none --downgrade` — or confirm the downgrade in the launcher's red confirmation sheet ([sandboxes](../how-to/sandboxes.md)).
 
 To start an agent instead, name it. This opens the session in your terminal straight away:
 

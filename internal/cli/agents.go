@@ -245,6 +245,7 @@ func installAgent(ctx context.Context, h client.Host, a agents.Agent, reinstall,
 	fmt.Fprintf(os.Stderr, "It comes from %s.\nIt runs in a session, so you see its output and can answer its questions.\n\n", a.Setup.Source)
 	cols, rows := termSize()
 	args := client.TerminalArgs(onboard.InstallArgs(a), cols, rows)
+	applyNoneDowngrade(cctx, conn, h, &args)
 	s, err := conn.NewSession(cctx, args)
 	conn.Close()
 	if err != nil {

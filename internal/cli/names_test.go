@@ -123,7 +123,7 @@ func TestEightLetterNamesAreNames(t *testing.T) {
 		t.Errorf("new --name proj2345: exit %d", code)
 	}
 	var obj struct{ Name string }
-	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--json", "--dir", "~/proj2345", "--mkdir", "--", "sleep", "60")), &obj); err != nil ||
+	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--dir", "~/proj2345", "--mkdir", "--", "sleep", "60")), &obj); err != nil ||
 		obj.Name != "proj2345-s" {
 		t.Errorf("a session in ~/proj2345: %+v, %v", obj, err)
 	}
@@ -134,7 +134,7 @@ func TestEightLetterNamesAreNames(t *testing.T) {
 func TestAScriptsAddressReachesItsSession(t *testing.T) {
 	th := newTestHost(t)
 	var obj struct{ ID, Address string }
-	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--json", "--name", "a", "--", "sleep", "60")), &obj); err != nil {
+	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", "a", "--", "sleep", "60")), &obj); err != nil {
 		t.Fatal(err)
 	}
 	other := newSession(t, "b", "sleep", "60")
@@ -223,7 +223,7 @@ func TestAFolderNamedLikeAnOlderID(t *testing.T) {
 		t.Fatal(err)
 	}
 	var obj struct{ ID, Name string }
-	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--json", "--dir", "~/oldoldid", "--mkdir", "--", "sleep", "60")), &obj); err != nil ||
+	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--dir", "~/oldoldid", "--mkdir", "--", "sleep", "60")), &obj); err != nil ||
 		obj.Name != "oldoldid-s" {
 		t.Fatalf("a session in ~/oldoldid: %+v, %v", obj, err)
 	}
@@ -244,7 +244,7 @@ func TestNewSessionIDIsExactForAttachAndShow(t *testing.T) {
 	hosttest.OldName(t, older, "abcd2345")
 	named := newSession(t, "frontend", "sleep", "60")
 	var obj struct{ ID, Address string }
-	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--json", "--name", "fresh", "--", "/bin/sh", "-c", "echo EXACT-99; exec sleep 60")), &obj); err != nil {
+	if err := json.Unmarshal([]byte(okJSON(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--name", "fresh", "--", "/bin/sh", "-c", "echo EXACT-99; exec sleep 60")), &obj); err != nil {
 		t.Fatal(err)
 	}
 	if !api.LooksLikeID(obj.ID) || obj.ID == "abcd2345" || obj.ID == "frontend" || obj.ID == older || obj.ID == named {

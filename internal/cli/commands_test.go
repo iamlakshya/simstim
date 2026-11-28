@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/host"
@@ -36,6 +37,7 @@ func newTestHost(t *testing.T) *testHost {
 	h := hosttest.New(t)
 	ch, tr := h.ClientHost("box")
 	ch.SSH = "box"
+	ch.WallFloor = api.LevelNone
 	h.Script("ssh", `echo "$@" >> "$HOME/ssh.log"
 for a; do last=$a; done
 case " $* " in *" -N "*|*" -O "*) exit 0;; esac
@@ -150,10 +152,10 @@ func failsWithHint(t *testing.T, want, hint string, args ...string) {
 
 var startedRE = regexp.MustCompile(`Started box/(\w+) \(`)
 
-// newSession starts a detached session and returns its ID.
+// newSession starts a detached unwalled session and returns its ID.
 func newSession(t *testing.T, name string, argv ...string) string {
 	t.Helper()
-	out := okSaid(t, append([]string{"new", "box", "--detach", "--name", name, "--"}, argv...)...)
+	out := okSaid(t, append([]string{"new", "box", "--detach", "--wall", "none", "--downgrade", "--name", name, "--"}, argv...)...)
 	m := startedRE.FindStringSubmatch(out)
 	if m == nil {
 		t.Fatalf("new printed %q", out)

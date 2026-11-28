@@ -129,7 +129,7 @@ func TestNewChecksTheSetupScriptsContent(t *testing.T) {
 		}
 	}
 	start := func(name string) (id, note string) {
-		out, warnings, err := runApart(t, "new", "box", "--detach", "--json", "--dir", "~/src/app", "--name", name, "--", "/bin/sh", "-c", "echo AGENT-UP; exec sleep 60")
+		out, warnings, err := runApart(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--json", "--dir", "~/src/app", "--name", name, "--", "/bin/sh", "-c", "echo AGENT-UP; exec sleep 60")
 		if err != nil {
 			t.Fatalf("new %s: %v: %s", name, err, warnings)
 		}

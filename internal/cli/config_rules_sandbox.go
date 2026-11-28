@@ -21,6 +21,20 @@ func validateSandboxSettings(abbrev string, s client.Settings, ins *client.TOMLI
 		})
 	}
 	sb := s.Sandbox
+	if sb.Wall != "" {
+		if _, err := client.ParseWallSetting(sb.Wall); err != nil {
+			pos := ins.Pos("sandbox", "wall")
+			out = append(out, configFinding{
+				Path:        abbrev,
+				Line:        pos.Line,
+				Column:      pos.Column,
+				Severity:    "error",
+				Code:        "bad_value",
+				Message:     fmt.Sprintf(`sandbox.wall must be "auto", "none", "process", "gvisor" or "microvm", not %q`, sb.Wall),
+				Suggestions: suggestFromStrings(sb.Wall, []string{"auto", "none", "process", "gvisor", "microvm"}),
+			})
+		}
+	}
 	if sb.Paste != "" && sb.Paste != "images-and-pdf" && sb.Paste != "any" {
 		pos := ins.Pos("sandbox", "paste")
 		out = append(out, configFinding{
@@ -66,24 +80,36 @@ func validateSandboxSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			addBad(ins.Pos("sandbox", "max_run"), "sandbox.max_run: "+err.Error())
 		}
 	}
-	names := make([]string, 0, len(sb.Env))
-	for k := range sb.Env {
+	out = append(out, validateSandboxEnv(abbrev, s, ins)...)
+	if len(sb.CopyIn) > 0 {
+		if _, err := client.ParseCopyInSpecs(sb.CopyIn, ""); err != nil {
+			addBad(ins.Pos("sandbox", "copy_in"), "sandbox.copy_in: "+err.Error())
+		}
+	}
+	return out
+}
+
+func validateSandboxEnv(abbrev string, s client.Settings, ins *client.TOMLInspection) []configFinding {
+	var out []configFinding
+	names := make([]string, 0, len(s.Sandbox.Env))
+	for k := range s.Sandbox.Env {
 		names = append(names, k)
 	}
 	sort.Strings(names)
 	for _, k := range names {
 		pos := ins.Pos("sandbox", "env", k)
 		if !client.ValidEnvName(k) {
-			addBad(pos, fmt.Sprintf("%q is not a valid environment variable name in [sandbox.env]", k))
+			out = append(out, configFinding{
+				Path: abbrev, Line: pos.Line, Column: pos.Column, Severity: "error", Code: "bad_value",
+				Message: fmt.Sprintf("%q is not a valid environment variable name in [sandbox.env]", k),
+			})
 			continue
 		}
 		if _, isSecret := s.Secrets[k]; isSecret {
-			addBad(pos, fmt.Sprintf("%q is in [secrets] and cannot be set in [sandbox.env]", k))
-		}
-	}
-	if len(sb.CopyIn) > 0 {
-		if _, err := client.ParseCopyInSpecs(sb.CopyIn, ""); err != nil {
-			addBad(ins.Pos("sandbox", "copy_in"), "sandbox.copy_in: "+err.Error())
+			out = append(out, configFinding{
+				Path: abbrev, Line: pos.Line, Column: pos.Column, Severity: "error", Code: "bad_value",
+				Message: fmt.Sprintf("%q is in [secrets] and cannot be set in [sandbox.env]", k),
+			})
 		}
 	}
 	return out
@@ -106,6 +132,20 @@ func validateHostSandbox(abbrev string, idx int, h client.Host, ins *client.TOML
 		})
 	}
 	sb := h.Sandbox
+	if sb.Wall != "" {
+		if _, err := client.ParseWallSetting(sb.Wall); err != nil {
+			pos := ins.HostPos(idx, "sandbox", "wall")
+			out = append(out, configFinding{
+				Path:        abbrev,
+				Line:        pos.Line,
+				Column:      pos.Column,
+				Severity:    "error",
+				Code:        "bad_value",
+				Message:     fmt.Sprintf(`host %q sandbox.wall must be "auto", "none", "process", "gvisor" or "microvm", not %q`, label, sb.Wall),
+				Suggestions: suggestFromStrings(sb.Wall, []string{"auto", "none", "process", "gvisor", "microvm"}),
+			})
+		}
+	}
 	if sb.CPUs < 0 {
 		addBad(ins.HostPos(idx, "sandbox", "cpus"), fmt.Sprintf("host %q sandbox.cpus must be positive, not %d", label, sb.CPUs))
 	}

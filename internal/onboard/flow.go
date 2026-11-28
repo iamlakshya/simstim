@@ -338,19 +338,35 @@ func (f *Flow) FirstSession() string {
 }
 
 // InstallArgs start an agent's official installer in a session named
-// install-<agent>, so the user sees its output and can answer it.
+// install-<agent>, so the user sees its output and can answer it. Installers
+// modify host binaries outside any sandbox, so they run at wall "none"
+// recorded as a downgrade without needing --downgrade (cli-spec 12, Q97).
 func InstallArgs(a agents.Agent) client.NewArgs {
-	return client.NewArgs{Name: "install-" + a.Kind, Cwd: "~", Argv: []string{"/bin/sh", "-c", a.Setup.Install}, Setup: api.SetupSkip}
+	return client.NewArgs{
+		Name:      "install-" + a.Kind,
+		Cwd:       "~",
+		Argv:      []string{"/bin/sh", "-c", a.Setup.Install},
+		Setup:     api.SetupSkip,
+		Wall:      api.LevelNone,
+		Downgrade: true,
+	}
 }
 
 // LoginArgs start an agent's own login in a session named login-<agent>. An
 // agent whose first start is its login starts as itself. The product never
-// sees or handles the login.
+// sees or handles the login. Logins modify host credential files outside any
+// sandbox, so they run at wall "none" recorded as a downgrade (cli-spec 12).
 func LoginArgs(a agents.Agent) (client.NewArgs, bool) {
 	if a.Setup == nil || a.Setup.Login == "" {
 		return client.NewArgs{}, false
 	}
-	args := client.NewArgs{Name: "login-" + a.Kind, Cwd: "~", Setup: api.SetupSkip}
+	args := client.NewArgs{
+		Name:      "login-" + a.Kind,
+		Cwd:       "~",
+		Setup:     api.SetupSkip,
+		Wall:      api.LevelNone,
+		Downgrade: true,
+	}
 	if a.Setup.Login == a.Binaries[0] {
 		args.Agent = a.Kind
 	} else {

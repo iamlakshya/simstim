@@ -10,7 +10,6 @@
 
 
 
-
   ── New session on atlas-dev ────────────────────────────────────────────────
 
     Agent      claude  codex  opencode  shell  other…   not installed: anti…
@@ -20,5 +19,6 @@
     Name       auth
 
     Worktree   ● this folder   ○ new worktree
+    Wall       auto (process)  process  gvisor  microvm  none…
 
     enter start   tab next   ctrl+enter start detached   esc cancel

@@ -156,7 +156,25 @@ func CleanSession(s Session) Session {
 	if s.Usage != nil {
 		s.Usage = cleanSessionUsage(s.Usage)
 	}
+	if s.Wall != nil {
+		s.Wall = cleanWallInfo(s.Wall)
+	}
 	return s
+}
+
+func cleanWallInfo(w *api.WallInfo) *api.WallInfo {
+	cp := *w
+	cp.Level = CleanLine(cp.Level)
+	cp.Driver = CleanLine(cp.Driver)
+	cp.Version = CleanLine(cp.Version)
+	cp.Floor = CleanLine(cp.Floor)
+	cp.DowngradedFrom = CleanLine(cp.DowngradedFrom)
+	cp.Preset = CleanLine(cp.Preset)
+	cp.PackageManagers = CleanLine(cp.PackageManagers)
+	cp.MinReleaseAge = CleanLine(cp.MinReleaseAge)
+	cp.Image = CleanLine(cp.Image)
+	cp.System = CleanLine(cp.System)
+	return &cp
 }
 
 func cleanSessionUsage(u *api.SessionUsage) *api.SessionUsage {

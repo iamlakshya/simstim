@@ -98,7 +98,7 @@ var sessionPorts = func(ctx context.Context, conn *client.Conn, id string) ([]cl
 }
 
 func buildForwardPlan(cmd *cobra.Command, ctx context.Context, conn *client.Conn, h client.Host, s *client.Session, target string, want []string) (forwardPlan, error) {
-	if s.Wall != nil {
+	if api.IsWalled(s.Wall) {
 		return walledForwardPlan(cmd, ctx, conn, h, s, target, want)
 	}
 	pairs, err := forwardPairs(ctx, conn, h, s, target, want)

@@ -220,6 +220,13 @@ func showSandbox(w *api.WallInfo) string {
 		return ""
 	}
 	var opts []string
+	if w.DowngradedFrom != "" {
+		if w.DowngradedFrom == "default" || w.DowngradedFrom == api.LevelNone {
+			opts = append(opts, "! downgraded")
+		} else {
+			opts = append(opts, "! below the floor "+w.DowngradedFrom)
+		}
+	}
 	if w.Sudo {
 		opts = append(opts, "root")
 	}

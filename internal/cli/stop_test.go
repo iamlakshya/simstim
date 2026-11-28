@@ -81,7 +81,7 @@ func TestStopCommandLifecycle(t *testing.T) {
 
 func TestAttachWakesStoppedSession(t *testing.T) {
 	newTestHost(t)
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "sleepy"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "sleepy"))
 	if m == nil {
 		t.Fatal("new started no session")
 	}

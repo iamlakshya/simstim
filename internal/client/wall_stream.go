@@ -83,7 +83,7 @@ func OpenSessionSFTP(ctx context.Context, h Host, s *Session) (*sftp.Client, io.
 }
 
 func openSessionSFTPOn(ctx context.Context, t Transport, h Host, s *Session) (*sftp.Client, io.Closer, error) {
-	if s.Wall == nil {
+	if !api.IsWalled(s.Wall) {
 		return openSFTPOn(ctx, t, h, s.ID, false)
 	}
 	st, closer, err := openBridgeStream(ctx, t, h, "sftp", api.SessionStreamArgs{ID: s.ID}, link.KindSFTP)

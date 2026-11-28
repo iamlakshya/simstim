@@ -2,12 +2,15 @@ package tui
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // The agent part of the wizard (docs/contributing/ux-spec.md 2.10): after
@@ -221,10 +224,19 @@ func (w *wizard) runAct(m *Model) tea.Cmd {
 	ctx, seq := w.beginAgentOp(m)
 	w.starting, w.err = true, nil
 	a := client.TerminalArgs(w.act.Args, m.width, m.height)
-	c := h.conn
+	c, host := h.conn, h.host
 	return m.bgCmd(func(context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
+		var probed wall.Level
+		if strings.TrimSpace(host.WallFloor) == "" {
+			if lvl, err := probeConnWall(cctx, c); err == nil {
+				probed = lvl
+			}
+		}
+		a.Wall = api.LevelNone
+		a.Downgrade = true
+		a.WallFloor, a.DowngradedFrom = client.DowngradeForNone(host, probed)
 		s, err := c.NewSession(cctx, a)
 		return actStartedMsg{owner: w, seq: seq, s: s, err: err}
 	})

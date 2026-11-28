@@ -147,13 +147,6 @@ func checkNewArgs(a NewArgs) error {
 	return checkNewSessionArgs(a)
 }
 
-func worktreeBaseName(name, cwd string) string {
-	if strings.TrimSpace(name) != "" {
-		return name
-	}
-	return filepath.Base(cwd)
-}
-
 func buildManifest(a NewArgs, id, cwd, kind string, argv, env []string, term string, secrets []string, gi *GitInfo, sessHooks sessionHooks, agent agents.Agent, known, inline bool, hooks []string, sessionUUID string) *Manifest {
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
@@ -174,6 +167,7 @@ func buildManifest(a NewArgs, id, cwd, kind string, argv, env []string, term str
 	m.Secrets = secrets
 	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
 	m.RunHook = m.SetupHook
+	applyDowngradedWall(m, a, now)
 	fillAgentManifest(m, a.Argv, argv, agent, known, inline, hooks, sessionUUID)
 	return m
 }

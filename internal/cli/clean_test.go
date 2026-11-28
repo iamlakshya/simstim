@@ -100,7 +100,7 @@ func TestSessionCommandsCleanHostText(t *testing.T) {
 			t.Errorf("%s does not show the name %q:\n%s", what, shown, out)
 		}
 	}
-	out := okSaid(t, "new", "box", "--detach", "--name", name, "--", "/bin/sh", "-c", "exec sleep 60")
+	out := okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", name, "--", "/bin/sh", "-c", "exec sleep 60")
 	check("new --detach", out)
 	id := startedRE.FindStringSubmatch(out)[1]
 	check("ports", okSaid(t, "ports", "box/"+id))
@@ -320,7 +320,7 @@ func TestPullCleansAFiltersError(t *testing.T) {
 	if err := os.Chtimes(filepath.Join(remote, "README"), later, later); err != nil {
 		t.Fatal(err)
 	}
-	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--name", "evil", "--dir", remote, "--", "sleep", "60"))
+	m := startedRE.FindStringSubmatch(okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "evil", "--dir", remote, "--", "sleep", "60"))
 	if m == nil {
 		t.Fatal("new did not start the session")
 	}
@@ -361,7 +361,7 @@ func TestPullRefusalsCleanHostText(t *testing.T) {
 		git(dir, "commit", "-q", "--allow-empty", "-m", "one")
 	}
 	t.Chdir(local)
-	out := okSaid(t, "new", "box", "--detach", "--name", "app"+hostile, "--dir", remote, "--", "/bin/sh", "-c", "exec sleep 60")
+	out := okSaid(t, "new", "box", "--detach", "--wall", "none", "--downgrade", "--name", "app"+hostile, "--dir", remote, "--", "/bin/sh", "-c", "exec sleep 60")
 	id := startedRE.FindStringSubmatch(out)[1]
 	refusal := func(what, want string) {
 		t.Helper()

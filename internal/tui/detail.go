@@ -39,6 +39,16 @@ func (m *Model) sessionDetail(h *hostConn, s client.Session, cw int, withHost bo
 	if client.ChildStopped(s) {
 		// The cap stopped another process in the session, not the agent.
 		note = capNote
+	} else if s.Wall != nil && s.Wall.DowngradedFrom != "" {
+		lvl := s.Wall.Level
+		if lvl == "" {
+			lvl = api.LevelNone
+		}
+		if s.Wall.DowngradedFrom == "default" || s.Wall.DowngradedFrom == api.LevelNone {
+			note = "! " + lvl + ", downgraded"
+		} else {
+			note = "! " + lvl + ", below the floor " + s.Wall.DowngradedFrom
+		}
 	}
 	empty := func(p string) bool { return p == "" }
 	head := slices.DeleteFunc([]string{where, mem}, empty)

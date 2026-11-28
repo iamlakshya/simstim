@@ -233,7 +233,8 @@ atlas
 :4
 
 === wall flag (new --wall) ===
-none	No sandbox wall
+auto	Host's wall floor (default)
+none	No sandbox wall (needs --downgrade)
 process	Bubblewrap process wall
 gvisor	gVisor runsc wall
 microvm	Hardware-virtualised microVM wall

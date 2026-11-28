@@ -11,7 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // startCountSession optionally overrides session creation in `new --count` for
@@ -82,6 +84,15 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 		return err
 	}
 	settings := client.LoadSettings()
+	var wallPlan client.WallPlan
+	wallResolved := o.in != ""
+	if !wallResolved && (m.wallLevel == "plain" || strings.TrimSpace(m.host.WallFloor) != "") {
+		wallPlan, err = client.ResolveWall(m.host, settings, m.wallLevel, o.downgrade, nil)
+		if err != nil {
+			return err
+		}
+		wallResolved = true
+	}
 	var prep *preparedNewP114
 	if o.in == "" {
 		prep, err = prepareNewP114(cmd, m.host, settings, o.dir, o.worktree, o.p114)
@@ -90,25 +101,51 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 		}
 		defer prep.cleanup()
 	}
-	// Fetch the secrets first: a password manager may want a touch,
-	// and a failing command should not cost a connection.
-	secretNames := client.GatewaySecretNames(settings, m.host, o.agent, m.wallLevel, o.secrets, o.expose)
-	values, err := client.FetchSecrets(cmd.Context(), settings, secretNames, secretTerminal(cmd))
-	if err != nil {
-		return err
+	var secretNames []string
+	var values map[string]api.Secret
+	var secretBinds map[string]api.SecretBind
+	if wallResolved {
+		// Fetch the secrets first: a password manager may want a touch,
+		// and a failing command should not cost a connection.
+		secretNames = client.GatewaySecretNames(settings, m.host, o.agent, wallPlan.Level, o.secrets, o.expose)
+		values, err = client.FetchSecrets(cmd.Context(), settings, secretNames, secretTerminal(cmd))
+		if err != nil {
+			return err
+		}
+		secretBinds = client.SecretBindsFor(settings, secretNames)
 	}
-	secretBinds := client.SecretBindsFor(settings, secretNames)
 	ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 	conn, err := client.Dial(ctx, m.host, true)
 	if err != nil {
 		cancel()
 		return err
 	}
+	if !wallResolved {
+		wallPlan, err = client.ResolveWall(m.host, settings, m.wallLevel, o.downgrade, func() (wall.Level, error) {
+			return probeConnWallFloor(ctx, conn)
+		})
+		if err != nil {
+			cancel()
+			conn.Close()
+			return err
+		}
+		secretNames = client.GatewaySecretNames(settings, m.host, o.agent, wallPlan.Level, o.secrets, o.expose)
+		values, err = client.FetchSecrets(cmd.Context(), settings, secretNames, secretTerminal(cmd))
+		if err != nil {
+			cancel()
+			conn.Close()
+			return err
+		}
+		secretBinds = client.SecretBindsFor(settings, secretNames)
+	}
+	printWallNotices(cmd, wallPlan)
 	cols, rows := termSize()
 	a := client.TerminalArgs(client.NewArgs{
 		Agent: o.agent, Cwd: client.RemotePath(o.dir), MakeFolder: o.mkdir, Name: o.name,
 		Worktree: o.worktree, Base: o.base, Inline: o.inline,
-		Secrets: values, SecretBinds: secretBinds, ExposedSecrets: o.expose, Wall: m.wallLevel,
+		Secrets: values, SecretBinds: secretBinds, ExposedSecrets: o.expose,
+		Wall: wallPlan.Level, Downgrade: wallPlan.Downgraded,
+		WallFloor: wallPlan.Floor, DowngradedFrom: wallPlan.DowngradedFrom,
 		Image: o.image, KeepSystem: o.keepSystem, Docker: o.docker, Task: o.task,
 		RemoveOnExit:     o.rm,
 		RemoveWaitAttach: o.rm && !o.detach && !m.countMode && !m.nonTTYExec,

@@ -37,9 +37,9 @@ func newDemoBackend(empty bool) *demoBackend {
 	now := time.Now()
 	ago := func(d time.Duration) time.Time { return now.Add(-d) }
 	b.hosts = []client.Host{
-		{Name: "homelab", SSH: "homelab", Labels: map[string]string{"provider": "proxmox"}},
-		{Name: "gcp-dev", SSH: "gcp-dev", Labels: map[string]string{"provider": "gcp"}},
-		{Name: "hetzner-box", SSH: "hetzner-box"},
+		{Name: "homelab", SSH: "homelab", WallFloor: api.LevelProcess, Labels: map[string]string{"provider": "proxmox"}},
+		{Name: "gcp-dev", SSH: "gcp-dev", WallFloor: api.LevelProcess, Labels: map[string]string{"provider": "gcp"}},
+		{Name: "hetzner-box", SSH: "hetzner-box", WallFloor: api.LevelProcess},
 	}
 	b.sessions["homelab"] = []client.Session{
 		{ID: "k2v7m4qa", Name: "auth-refactor", Agent: "claude", Cwd: "/home/me/src/app", State: "needs_input", Source: "screen:permission_prompt",

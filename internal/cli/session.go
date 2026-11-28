@@ -31,7 +31,7 @@ func termSize() (int, int) {
 type newOpts struct {
 	agent, dir, name, base, wallLevel, image, in, task          string
 	detach, rm, worktree, inline, setup, noSetup, mkdir, asJSON bool
-	keepSystem, docker                                          bool
+	keepSystem, docker, downgrade                               bool
 	usedOldDir, usedOldSetup, usedOldNoSetup                    bool
 	count                                                       int
 	secrets, expose                                             []string
@@ -89,7 +89,8 @@ func newCmd() *cobra.Command {
 	if oldNewNoSetup != nil {
 		addOldFlag(cmd, "no-setup-script", "no-setup", &o.usedOldNoSetup, oldNewNoSetup)
 	}
-	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: none, process, gvisor or microvm")
+	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: auto, process, gvisor, microvm or none (default: sandbox.wall in config.toml)")
+	cmd.Flags().BoolVar(&o.downgrade, "downgrade", false, "allow starting below the host's wall floor or without a sandbox (records a downgrade)")
 	cmd.Flags().StringVar(&o.image, "image", "", "microvm image reference or saved image name (default: sandbox.image in config.toml)")
 	cmd.Flags().BoolVar(&o.keepSystem, "keep-system", false, "keep microvm root filesystem changes across stops (default: reset)")
 	cmd.Flags().BoolVar(&o.docker, "docker", false, "start the image's dockerd on first use inside a microvm (see sandbox.docker in config.toml)")
@@ -125,24 +126,6 @@ func newArgs(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return nil
-}
-
-func parseWallFlag(raw string) (string, error) {
-	if raw == "" {
-		return "", nil
-	}
-	w := strings.ToLower(strings.TrimSpace(raw))
-	switch w {
-	case "none", "process", "gvisor", "microvm", "plain":
-		return w, nil
-	default:
-		return "", &client.UserError{
-			Msg:  fmt.Sprintf("--wall: unknown wall level %q", raw),
-			Hint: "Pass none, process, gvisor or microvm.",
-			Code: "bad_value",
-			Kind: client.KindUsage,
-		}
-	}
 }
 
 // listSessions asks a host for its sessions. Tests replace it.
