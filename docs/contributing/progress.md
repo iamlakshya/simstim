@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 28 |
-| To do | 71 |
+| Done | 30 |
+| To do | 69 |
 | **All** | **99** |
 
 ## Current focus
@@ -55,7 +55,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.13 | 1 | Day 1 | To do | Shells and commands in a sandbox |
 | P1.14 | 1 | Day 1 | To do | Sizes, variables, files and seeds from the laptop |
 | P1.15 | 1 | Day 1 | To do | Kept caches |
-| P1.9 | 1 | Day 1 | To do | Paste and ports through the supervisor |
+| P1.9 | 1 | Day 1 | Done | Paste and ports through the supervisor |
 | P1.10 | 1 | Day 1 | To do | Pull through a bundle, with a review |
 | P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
 | P1.16 | 1 | Day 1 | To do | Runs for many sessions |
@@ -72,7 +72,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | H15 | 4 | Day 1 | To do | Leave and wipe |
 | H16 | 4 | Day 1 | To do | Reach a host behind NAT |
 | H20 | 4 | Day 1 | To do | Machines that join |
-| H21 | 4 | Day 1 | To do | A Mac as a host |
+| H21 | 4 | Day 1 | Done | A Mac as a host |
 | C1 | cli | Day 1 | To do | The grammar record |
 | C2 | cli | Day 1 | Done | Errors, suggestions and exit codes |
 | C4 | cli | Day 1 | Done | Prompts, pickers and machine output |
