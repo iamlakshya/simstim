@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 19 |
-| To do | 80 |
+| Done | 20 |
+| To do | 79 |
 | **All** | **99** |
 
 ## Current focus
@@ -46,7 +46,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | H7 | 1 | Day 1 | To do | The root step |
 | P1.2 | 1 | Day 1 | Done | The link |
 | P1.3 | 1 | Day 1 | To do | Jails |
-| P1.4 | 1 | Day 1 | To do | The supervisor, the guest init and the holder's guest mode |
+| P1.4 | 1 | Day 1 | Done | The supervisor, the guest init and the holder's guest mode |
 | P1.5 | 1 | Day 1 | To do | The process wall |
 | P1.6 | 1 | Day 1 | To do | The files door |
 | P1.7 | 1 | Day 1 | To do | The egress process, first version |
