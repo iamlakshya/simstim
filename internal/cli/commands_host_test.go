@@ -272,8 +272,17 @@ func TestAddHost(t *testing.T) {
 			t.Fatalf("add on a host this build has no helper for = %v\n%s", err, out)
 		}
 		// With the helper in place, as a release installs it, add goes on.
+		// A build that has helpers, but none for this platform, cannot check
+		// the installed one's SHA-256, so it refuses it instead.
 		th.h.Install(client.HelperVersion(), "")
-		if out, err = said(t, func() error { return addHost(ctx, quietPrompts(ctx), added, false) }); err != nil {
+		out, err = said(t, func() error { return addHost(ctx, quietPrompts(ctx), added, false) })
+		if helpers.Embedded() {
+			if !errors.As(err, &ue) || !strings.Contains(ue.Msg, "no helper for "+runtime.GOOS+"/") {
+				t.Fatalf("add of an unchecked helper = %v\n%s", err, out)
+			}
+			return
+		}
+		if err != nil {
 			t.Fatalf("add = %v\n%s", err, out)
 		}
 		if !strings.Contains(out, "is already installed") {

@@ -434,7 +434,11 @@ func TestMainWarnsInJSON(t *testing.T) {
 func TestHostAddChecklistNoInputCommand(t *testing.T) {
 	th := newTestHost(t)
 	dst := th.h.Install(client.HelperVersion(), "")
-	if bin, ok := helpers.For(runtime.GOOS, runtime.GOARCH); runtime.GOOS == "linux" && ok {
+	bin, ok := helpers.For(runtime.GOOS, runtime.GOARCH)
+	if helpers.Embedded() && (!ok || runtime.GOOS != "linux") {
+		t.Skip("this build has helpers, but none for this platform, so it cannot check the test host's helper")
+	}
+	if ok {
 		// With embedded helpers, Probe and Dial check the installed helper's
 		// SHA-256 against the embedded bytes. Unlink the hard-linked test binary
 		// first so we never write through it.
