@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 22 |
-| To do | 77 |
+| Done | 23 |
+| To do | 76 |
 | **All** | **99** |
 
 ## Current focus
@@ -42,7 +42,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | H3 | 0 | Day 1 | Done | Pinned host keys and `host rekey` |
 | H4 | 0 | Day 1 | To do | The host ID and the tiers file |
 | H5 | 0 | Day 1 | To do | The grant gate and the grant ledger |
-| P1.1 | 1 | Day 1 | To do | Wall levels, the sandbox probe and the floor |
+| P1.1 | 1 | Day 1 | Done | Wall levels, the sandbox probe and the floor |
 | H7 | 1 | Day 1 | To do | The root step |
 | P1.2 | 1 | Day 1 | Done | The link |
 | P1.3 | 1 | Day 1 | To do | Jails |
