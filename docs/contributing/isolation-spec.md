@@ -4348,59 +4348,26 @@ ACME_GITHUB_TOKEN = "shared"               # the Macs are shared hosts (18.4)
 
 ### 18.4 A Mac as a host (H21)
 
-A Mac host is a Lima VM on the Mac. The helper runs in the VM, as on any Linux host. This plan has no native macOS helper ([question 37](#15-open-questions)). The laptop reaches the VM through the Mac's own sshd:
+Per decision [0053](decisions/0053-rebuild-with-open-source-parts.md) and [reuse](../research/reuse.md), a Mac host runs as a Lima VM under the user's own macOS account, without a hidden account, a hand-written launchd plist, an sshd drop-in or a custom facts script. The normal Linux helper runs inside the VM, so sessions run with the Linux walls.
 
-```text
-laptop -> Mac sshd, as the dedicated account (its key may only open 127.0.0.1:<port>)
-       -> Lima's host agent on 127.0.0.1:<port> -> vsock -> the VM's sshd -> the helper
-```
+**Needs.** Apple silicon and macOS 15 or later. Nested virtualisation needs an M3 chip or later (11); M1 and M2 Macs turn it off automatically and get process walls.
 
-**Needs.** Apple silicon and macOS 15 or later. Lima's `vz` works from macOS 13, but in November 2026 macOS 15 is the oldest release that still gets Apple's security fixes ([research](../research/locations.md#5-mac-hosts-checked-again)). microvm walls need an M3 chip or later (11). M1 and M2 Macs get process walls, and gvisor after P6.
+**What `host add --local` does on this Mac.**
 
-**What `host join` does on a Mac.**
+1. **Checks.** Verifies macOS, Apple silicon (`arm64`) and macOS 15 or later.
+2. **Pinned Lima.** Ensures the pinned Lima release (v2.3.0) is installed under `~/.local/share/simstim/lima/2.3.0/`, verified by its SHA-256 digest before extraction. Homebrew upgrades cannot alter it.
+3. **VM.** Creates a plain `vz` Ubuntu LTS VM through `internal/provider/lima` (`--plain`, no home-folder mounts, no automatic port forwards, `networkOpts.hostLoopback: false`, `--nested-virt` with automatic fallback when refused). Defaults to fewer than half of the Mac's CPUs and memory (`--cpus` and `--memory` override both) and `--idle-stop never`.
+4. **Autostart.** Registers the VM with `limactl autostart enable --keep-alive` — never writing a launchd plist itself:
+   - `--autostart boot` (default) uses `--condition=boot` (LaunchDaemon via `sudo`, starting the VM at boot before login). When input is off without passwordless `sudo`, an implicit default falls back to `--condition=login` and prints the `boot` command.
+   - `--autostart login` uses `--condition=login` (LaunchAgent, no `sudo`, starting at login).
+   - `--autostart off` skips autostart.
+5. **Helper and SSH.** Connects over the system `ssh` through Lima's generated `ssh.config`, installs the host helper inside the VM, turns on linger and restore after restart, and saves the host in `hosts.toml`.
 
-1. **Checks.** The chip, the macOS version, MDM enrolment, a managed sshd and Remote Login. The join runs as root, so each check works. For Remote Login, it reads `launchctl print-disabled system`, and the members of the group `com.apple.access_ssh`. UNVERIFIED: no Apple document names that group. The test by hand checks it on macOS 15 and on the newest macOS, when the build is done.
-2. **Account.** A standard account, hidden from the login window, with a random password that the join does not keep. It logs in by key only. Its shell is a real shell, because sshd runs the forced command of step 7 through it. The join adds `;DisabledTags;SecureToken` to the account's `AuthenticationAuthority`, so the account never becomes a FileVault user.
-3. **Lima.** The Lima release that the release manifest pins as an item of kind `lima` (14.9.1), v2.3.0 or later, checked by its digest, in a folder that root owns. A Homebrew upgrade cannot change it.
-4. **VM.** Made as that account, from the template of `host create lima` (P0.8), with these changes:
-   - `vmType: vz`, in plain mode: no mounts, no port forwards and no containerd.
-   - `networkOpts.hostLoopback: false`.
-   - `ssh.localPort` fixed at a free port that the join picks.
-   - An instance name that holds the account's name. Lima's daemon label holds only the instance name, so two instances with one name would collide.
-   - `nestedVirtualization: true`. When Lima refuses it, the join turns it off and starts again, as `host create lima` does (19.4, [question 78](#15-open-questions)).
-   - Less than half of the Mac's CPUs and memory, because Virtualization.framework does not return all freed memory to macOS. `--cpus` and `--memory` change both.
-   - The base image that the release manifest pins by its digest, as an item of kind `vm-image`. It is the VM's own system, apart from the one sandbox image of 14.9.1.
-5. **VM key.** The laptop's key goes into the VM user's `~/.ssh/authorized_keys`.
-6. **Start at boot.** `host join` writes the launch daemon's plist itself, from Lima's template: `/Library/LaunchDaemons/io.lima-vm.daemon.<instance>.plist`, with `UserName` set to the account, `LIMA_HOME`, `KeepAlive` and `ExitTimeOut` of 60 s. Then it runs `launchctl bootstrap system` on it.
-   - `limactl autostart enable` cannot do this. `limactl` refuses to run as root, and then needs `sudo` as the account, which has no known password.
-   - The VM starts at boot as the account, whichever user logs in. With FileVault on, the boot waits for the login that unlocks the disk.
-   - The VM starts again when Lima's host agent exits with an error.
-   - `ExitTimeOut` gives the guest time to shut down. Without it, launchd kills the host agent 5 s after `SIGTERM`.
-7. **Mac key.** The laptop's key goes into the account's `authorized_keys` on the Mac with `restrict,port-forwarding,permitopen="127.0.0.1:<port>",permitlisten="127.0.0.1:<port>",command="<facts script>"`. The key can open a channel only to the VM's port, or run the facts script. It has no shell on the Mac. Lima already holds that port, so a remote forward to it fails. The client asks for `127.0.0.1`, not `localhost`, because `permitopen` matches the literal host.
-8. **sshd.** A drop-in `/etc/ssh/sshd_config.d/00-simstim.conf` holds a `Match User` block for the account: `AuthenticationMethods publickey`, `AllowTcpForwarding local`, `AllowStreamLocalForwarding no`, `PermitListen none`, `PermitTTY no`, `AllowAgentForwarding no` and `X11Forwarding no`. The join checks the values with `sshd -T -C user=<account>`, as on Linux (18.3.1). With a managed sshd, the drop-in may have no effect. Then the values differ, and the join stops, because the key's own options do not limit Unix-socket forwards. `host doctor` reports a managed sshd.
-9. **Remote Login.** The join never turns it on. When it is off, or does not allow the account, the join stops: "Remote Login is off. Try: turn it on in System Settings > General > Sharing > Remote Login, add <account> to Allow access for, then run simstim host join again."
-10. **Power.** With the user's yes and an undo, it sets `pmset -c sleep 0`, so the Mac does not sleep on power. It never changes the settings for battery.
-11. **Steps for the user.** It prints the steps that it cannot take: Charge Limit at 80 %, the lid open, and a place with good air flow at 10 °C to 35 °C. With the lid closed and no display, the Mac sleeps even with `pmset -c sleep 0`. The tool does not use the undocumented `pmset disablesleep`.
-12. **Reply.** The reply holds both host keys: the Mac's sshd key and the VM's.
+**Checks and removal.** `host doctor` runs the Linux host checks, the `laptop loopback` check (`hostLoopback: false`) and the `autostart` check. `host destroy` calls `limactl autostart disable` before `limactl delete --force`, leaving no launchd plist or VM behind.
 
-**A test when the build is done.** Lima's contributors report that a Linux VM starts from such a daemon with nobody logged in. No source covers an account that has never logged in and has no login keychain. Apple does not support the Virtualization framework in a daemon, so a macOS update can break it. The owner chose on 11 November 2026 to build first. The test by hand in [the research note](../research/locations.md#5-mac-hosts-checked-again) runs when the build is done, on macOS 15 and on the newest macOS of that day. If the test fails, H21 starts the VM from a launch agent of the Mac's user instead, as the owner decided ([question 91](#15-open-questions)). `host join` and `host doctor` then warn that anyone at the unlocked Mac can read the VM's disk.
+**Restarts and another Mac.** After a rare restart with FileVault enabled, the user logs in once at the Mac so FileVault unlocks and launchd starts the VM. A second Mac is set up the same way and reached over SSH (for example by `ProxyJump` or Tailscale inside the VM).
 
-**The facts script.** Root owns it, and the account cannot change it. It prints JSON with the power source and battery level (`pmset -g batt`), the sleep settings and assertions (`pmset -g`, `pmset -g assertions`), and the thermal state (`pmset -g therm`). The JSON also holds the macOS version, MDM enrolment, and whether MDM manages sshd's files. The laptop runs it over the same SSH path. The helper's `host.facts` cannot see the Mac's battery, because the VM has none. So the client takes `on_battery` from the Mac's facts (14.10.2). The script runs as the account, a standard user. These `pmset` and `profiles` reads worked without `sudo` for an admin user. UNVERIFIED for a standard user: H21 checks it.
-
-**Placement and health.** `auto` already ranks a host on battery one band lower (14.10.5). On battery, the Mac sleeps by its own settings. So `host doctor` adds the health item `mac-on-battery` (warn), and the item `mac-sleep-on` (warn) when `pmset -c sleep` is not 0. It also reports when the user has turned the launch daemon off in System Settings > General > Login Items & Extensions.
-
-**Day to day.** A Mac host needs to stay on, with its user logged in at the Mac. The VM runs from a launch daemon, so a locked screen or a logout does not stop it. But a Tailscale app other than the open-source daemon stops at logout, and the laptop then reaches the Mac only from its LAN (18.6). The docs advise a screen lock, because an unlocked screen lets anyone at the Mac act as its logged-in user. That user's files and keychain are outside the VM, but sessions do not need them.
-
-**Restarts.** The design assumes that a Mac host does not restart. After a rare restart, such as a power cut or a macOS update, the Mac's user logs in at the Mac ([question 68](#15-open-questions)).
-
-- The login unlocks FileVault. Then the launch daemon starts the VM, and the helper restores the sessions that were working (6.8).
-- Until then `ls` shows the host as away, as for any host that does not answer. `host doctor` says: "mac1 is away. Try: if it restarted, log in at the Mac."
-- The tool does not unlock FileVault, and the docs describe no unlock from far away.
-- The docs say to install macOS updates by hand, or at the times that the organisation's MDM sets.
-
-**The tier.** A Mac that an organisation manages with MDM is `shared`, because the organisation's admins have root through MDM. The reply suggests `shared` when the Mac is enrolled. A `shared` host takes only the repositories that its `repos` list matches (14.8.2), so `host add --accept` asks for that list, for example `github.com/acme/*`. The organisation's secrets get `shared` in `[secret_tiers]`, and their `on_hosts` can list the Macs (18.2). Personal secrets stay `own`, so they never reach such a Mac. The docs say to ask the organisation's IT team before its Mac becomes a host ([question 69](#15-open-questions)).
-
-**Leave.** `sudo simstim host leave` on the Mac runs the leave script. It stops and deletes the VM, and removes the launch daemon, the drop-in, the account and its home folder. Then it restores the old `pmset` values. `host rm --purge` on the laptop purges the helper's files in the VM, as for any host (14.12). Its key has no shell on the Mac, so it cannot undo the Mac's changes. It ends with: "Run sudo simstim host leave on mac1 to remove the account and the VM."
+**Loopback exception.** Decision [0044](decisions/0044-mac-host-loopback-port.md) still applies to Lima's loopback SSH port.
 
 ### 18.5 Homelab hosts (H19)
 

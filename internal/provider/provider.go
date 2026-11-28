@@ -45,6 +45,17 @@ type Request struct {
 	// IdleStop is how long the host may idle before it stops ("" for the
 	// provider's default, or "never").
 	IdleStop string
+	// Autostart asks a local Lima VM on macOS to start automatically through
+	// `limactl autostart`: "boot", "login", "off" or "".
+	Autostart string
+	// AutostartExplicit is true when the caller chose Autostart on the command
+	// line rather than taking a default, so a missing sudo fails instead of
+	// falling back to login.
+	AutostartExplicit bool
+	// Interactive is true when stdin, stdout and stderr are a terminal and
+	// input is allowed, so `limactl autostart enable --condition=boot` may
+	// prompt for sudo.
+	Interactive bool
 	// TokenCommand prints an API key, for providers that need one.
 	TokenCommand string
 	// Out gets progress lines.

@@ -7,10 +7,12 @@ title: "simstim host add"
 Connect a host: check it, install the helper, prepare it.
 
 ```text
-simstim host add <name> [<ssh-target>] [flags]
+simstim host add [<name>] [<ssh-target>] [flags]
 ```
 
 Connect a host, pin its SSH host key and install the helper. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own. `--host-key` pins the host key with the given SHA256 fingerprint instead of asking OpenSSH.
+
+On a Mac, `--local` sets up this Mac as a host in a pinned Lima VM under your own account, started automatically with limactl autostart.
 
 ## Examples
 
@@ -18,15 +20,22 @@ Connect a host, pin its SSH host key and install the helper. The ssh target is a
 simstim host add my-vps
 simstim host add my-vps dev@203.0.113.10
 simstim host add my-vps dev@203.0.113.10 --host-key SHA256:…
+simstim host add --local
 ```
 
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
+| `--autostart <string>` | `--local`: start VM automatically: boot, login or off (default boot) |
+| `--cpus <int>` | `--local`: VM CPUs (default: under half of this Mac) |
+| `--disk <int>` | `--local`: VM disk in GiB (sparse, default 40) |
 | `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |
 | `--host-key <string>` | pin the host key with this SHA256 fingerprint (SHA256:…) |
+| `--idle-stop <string>` | `--local`: idle power-off time, or never (default never) |
 | `--label <string>` | labels, for example provider=gcp,region=eu |
+| `--local` | set up this Mac as a host in a pinned Lima VM |
+| `--memory <int>` | `--local`: VM memory in GiB (default: under half of this Mac) |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
 | `--ssh-config <string>` | an extra SSH config file to include |
 | `--wake` | start the host through its provider script when it does not answer |

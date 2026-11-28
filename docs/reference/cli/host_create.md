@@ -24,6 +24,7 @@ simstim host create e2b cloud --template simstim
 
 | Flag | What it does |
 | --- | --- |
+| `--autostart <string>` | lima on macOS: start VM automatically: boot, login or off |
 | `--cpus <int>` | lima: CPUs (default: `2`) |
 | `--disk <int>` | lima: disk in GiB (sparse: it grows as it fills) (default: `40`) |
 | `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |

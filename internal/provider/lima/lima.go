@@ -64,7 +64,7 @@ type instance struct {
 
 // find returns the instance called name, or nil when there is none.
 func find(ctx context.Context, name string) (*instance, error) {
-	out, err := provider.Exec(ctx, install, "limactl", "list", "--json")
+	out, err := provider.Exec(ctx, install, limaCommand(), "list", "--json")
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	}
 	args := CreateArgs(inst, req, goos)
 	fmt.Fprintf(out, "  Creating the VM: limactl %s\n", shellLine(args))
-	if _, err := provider.Exec(ctx, install, "limactl", args...); err != nil {
+	if _, err := provider.Exec(ctx, install, limaCommand(), args...); err != nil {
 		return client.Host{}, err
 	}
 	if goos == "darwin" {
@@ -150,6 +150,19 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	}
 	if err := startNew(ctx, out, req.Name, inst); err != nil {
 		return client.Host{}, err
+	}
+	autostartMode := ""
+	if req.Autostart != "" && req.Autostart != AutostartOff {
+		var aerr error
+		autostartMode, aerr = EnableAutostart(ctx, out, inst, req.Autostart, req.AutostartExplicit, req.Interactive)
+		if aerr != nil {
+			if ctx.Err() != nil {
+				return client.Host{}, aerr
+			}
+			_ = DisableAutostart(ctx, inst)
+			_, _ = provider.Exec(ctx, install, limaCommand(), "delete", "--force", inst)
+			return client.Host{}, aerr
+		}
 	}
 	in, err := find(ctx, inst)
 	if err != nil {
@@ -164,7 +177,7 @@ func (Provider) Create(ctx context.Context, req provider.Request) (client.Host, 
 	}
 	return client.Host{
 		Name: req.Name, SSH: sshAlias(inst), SSHConfig: in.SSHConfigFile,
-		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle},
+		Machine: &client.Machine{Provider: "lima", ID: inst, IdleStop: idle, Autostart: autostartMode},
 	}, nil
 }
 
@@ -182,7 +195,7 @@ func shellLine(args []string) string {
 // VM is left that no host names. The error says what went wrong, and hint
 // what to try next.
 func discard(ctx context.Context, inst, problem, hint string) error {
-	if _, err := provider.Exec(ctx, install, "limactl", "delete", "--force", inst); err != nil {
+	if _, err := provider.Exec(ctx, install, limaCommand(), "delete", "--force", inst); err != nil {
 		return &client.UserError{
 			Msg:  fmt.Sprintf("%s, and host create could not delete it: %v", problem, err),
 			Hint: "limactl delete --force " + inst + ", then " + hint,
@@ -242,17 +255,20 @@ func (v *vm) Start(ctx context.Context) error {
 
 // Stop shuts the VM down. Its disk stays.
 func (v *vm) Stop(ctx context.Context) error {
-	_, err := provider.Exec(ctx, install, "limactl", "stop", v.inst)
+	_, err := provider.Exec(ctx, install, limaCommand(), "stop", v.inst)
 	return err
 }
 
-// Destroy deletes the VM and its disk.
+// Destroy unregisters any autostart entry, then deletes the VM and its disk.
 func (v *vm) Destroy(ctx context.Context) error {
+	if err := DisableAutostart(ctx, v.inst); err != nil {
+		return err
+	}
 	in, err := find(ctx, v.inst)
 	if err != nil || in == nil {
 		return err
 	}
-	_, err = provider.Exec(ctx, install, "limactl", "delete", "--force", v.inst)
+	_, err = provider.Exec(ctx, install, limaCommand(), "delete", "--force", v.inst)
 	return err
 }
 

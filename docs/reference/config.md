@@ -42,6 +42,7 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `machine.image` | string | Names the container image a docker host was made from. |
 | `machine.template` | string | Names the E2B template a sandbox was made from. It sets the sandbox's CPUs and memory. |
 | `machine.idle_stop` | string | Sets how long the host may go with no client connected and no session working before it stops: a duration such as "30m", or "never". A Lima VM powers itself off (30m by default; it needs passwordless sudo). An E2B sandbox pauses when its lease runs out (15m by default). |
+| `machine.autostart` | string | Says when a local Lima VM on macOS starts by itself through `limactl autostart`: "boot" (at system boot), "login" (when you log in), or empty (off). |
 | `machine.busy_lease` | string | Sets how long an E2B sandbox keeps running after the last client goes, while a session is working (60m by default). |
 | `machine.token_command` | string | Prints the E2B API key, for example a read from your keychain. It is used when E2B_API_KEY is not set and the E2B CLI is not logged in. The key is never written down. |
 | `machine.stdin` | string | Says how keys reach an E2B sandbox: "send" (one request for each chunk, the default) or "stream" (one long request; not yet proved on E2B's servers). |

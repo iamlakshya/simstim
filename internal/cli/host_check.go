@@ -97,6 +97,11 @@ func hostDoctorCmd() *cobra.Command {
 				if check := machineChecks[h.Machine.Provider]; check != nil {
 					d.Checks = append(d.Checks, check(ctx, h))
 				}
+				if h.Machine.Provider == (lima.Provider{}).Name() {
+					if ac, ok := lima.AutostartCheck(ctx, h); ok {
+						d.Checks = append(d.Checks, ac)
+					}
+				}
 			}
 			if d.AgentChecks, err = conn.AgentChecks(ctx); err != nil {
 				return err

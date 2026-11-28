@@ -68,6 +68,15 @@ Some teams keep an SSH config in a repository, with jump hosts and names of thei
 simstim host add dev-vm dev-vm --ssh-config ~/src/infra/ssh/config --yes
 ```
 
+## This Mac as a host
+
+On an Apple silicon Mac (macOS 15 or later), `--local` sets up this Mac as a host inside a pinned Lima VM under your own account, with automatic startup through `limactl autostart` ([use a Mac as a host](a-mac-as-a-host.md)):
+
+<!-- test: help (it downloads Lima and makes a VM) -->
+```sh
+simstim host add --local
+```
+
 ## What host add does
 
 1. Pins the host's SSH key in `~/.config/simstim/ssh/known_hosts-<host>`, from your OpenSSH settings, `--host-key` or a first-use confirmation.

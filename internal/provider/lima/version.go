@@ -77,7 +77,7 @@ func (v limaVersion) before(w limaVersion) bool {
 // it cannot read. A missing limactl (already a UserError from Exec) or a
 // cancelled context returns as it is.
 func checkVersion(ctx context.Context) error {
-	out, err := provider.Exec(ctx, install, "limactl", "--version")
+	out, err := provider.Exec(ctx, install, limaCommand(), "--version")
 	var userErr *client.UserError
 	if errors.As(err, &userErr) || (err != nil && ctx.Err() != nil) {
 		return err

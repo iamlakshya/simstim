@@ -33,6 +33,10 @@ type Machine struct {
 	// A Lima VM powers itself off (30m by default; it needs passwordless
 	// sudo). An E2B sandbox pauses when its lease runs out (15m by default).
 	IdleStop string `toml:"idle_stop,omitempty"`
+	// Autostart says when a local Lima VM on macOS starts by itself through
+	// `limactl autostart`: "boot" (at system boot), "login" (when you log in),
+	// or empty (off).
+	Autostart string `toml:"autostart,omitempty" json:"-"`
 	// BusyLease sets how long an E2B sandbox keeps running after the last
 	// client goes, while a session is working (60m by default).
 	BusyLease string `toml:"busy_lease,omitempty"`

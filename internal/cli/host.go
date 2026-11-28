@@ -38,53 +38,99 @@ func hostCmd() *cobra.Command {
 func hostAddCmd() *cobra.Command {
 	var sshConfig, label, providerScript, hostKey, floor string
 	var yes, wake bool
+	var loc localMacOpts
 	cmd := &cobra.Command{
-		Use:   "add <name> [<ssh-target>]",
+		Use:   "add [<name>] [<ssh-target>]",
 		Short: "Connect a host: check it, install the helper, prepare it",
 		Long: "Connect a host, pin its SSH host key and install the helper. The ssh target is a Host\n" +
 			"from your SSH config, or user@host. It defaults to the name. --ssh-config adds an extra\n" +
 			"SSH config file, for example a repo's own. --host-key pins the host key with the given\n" +
-			"SHA256 fingerprint instead of asking OpenSSH.",
+			"SHA256 fingerprint instead of asking OpenSSH.\n\n" +
+			"On a Mac, --local sets up this Mac as a host in a pinned Lima VM under your own account,\n" +
+			"started automatically with limactl autostart.",
 		Example: "  " + brand.Name + " host add my-vps\n" +
 			"  " + brand.Name + " host add my-vps dev@203.0.113.10\n" +
-			"  " + brand.Name + " host add my-vps dev@203.0.113.10 --host-key SHA256:…",
-		Args: cobra.RangeArgs(1, 2),
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10 --host-key SHA256:…\n" +
+			"  " + brand.Name + " host add --local",
+		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig, WallFloor: floor}
+			labels := parseLabels(label)
 			if floor != "" {
 				lvl, err := wall.ParseLevel(floor)
 				if err != nil {
 					return &client.UserError{Msg: fmt.Sprintf("--floor: %v", err), Hint: "Pass none, process, gvisor or microvm.", Code: "bad_value", Kind: client.KindUsage}
 				}
-				h.WallFloor = lvl.String()
+				floor = lvl.String()
 			}
+			if loc.local {
+				if sshConfig != "" || hostKey != "" || providerScript != "" || wake {
+					return &client.UserError{
+						Msg:  "--local cannot be combined with --ssh-config, --host-key, --provider-script or --wake",
+						Hint: brand.Name + " host add --local",
+						Code: "bad_flag",
+						Kind: client.KindUsage,
+					}
+				}
+				return addLocalMacHost(cmd, args, loc, labels, floor, yes)
+			}
+			for _, f := range []string{"cpus", "memory", "disk", "autostart", "idle-stop"} {
+				if cmd.Flags().Changed(f) {
+					return &client.UserError{
+						Msg:  "--" + f + " needs --local",
+						Hint: brand.Name + " host add --local --" + f + "=…",
+						Code: "bad_flag",
+						Kind: client.KindUsage,
+					}
+				}
+			}
+			if len(args) == 0 {
+				return &client.UserError{
+					Msg:  "host add needs a host name, or --local for this Mac",
+					Hint: brand.Name + " host add my-vps (or " + brand.Name + " host add --local on a Mac)",
+					Code: "missing_name",
+					Kind: client.KindUsage,
+				}
+			}
+			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig, Labels: labels, WallFloor: floor}
 			if providerScript != "" {
 				h.Provider = &client.Provider{Script: providerScript, WakeOnAttach: wake}
 			}
 			if len(args) == 2 {
 				h.SSH = args[1]
 			}
-			if label != "" {
-				h.Labels = map[string]string{}
-				for _, kv := range strings.Split(label, ",") {
-					k, v, _ := strings.Cut(kv, "=")
-					h.Labels[strings.TrimSpace(k)] = strings.TrimSpace(v)
-				}
-			}
 			if !client.ValidHostName(h.Name) {
 				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 			}
-			return addHostWithKey(cmd.Context(), prompts(cmd), h, hostKey, yes)
+			return addHostWithKey(cmd.Context(), prompts(cmd), h, hostKey, yes, yes)
 		},
 	}
-	cmd.Flags().StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
-	cmd.Flags().StringVar(&hostKey, "host-key", "", "pin the host key with this SHA256 fingerprint (SHA256:…)")
-	cmd.Flags().StringVar(&label, "label", "", "labels, for example provider=gcp,region=eu")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking, pin an unknown host key on first use, and offer no agents to install")
-	cmd.Flags().StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
-	cmd.Flags().BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
-	cmd.Flags().StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
+	f := cmd.Flags()
+	f.StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
+	f.StringVar(&hostKey, "host-key", "", "pin the host key with this SHA256 fingerprint (SHA256:…)")
+	f.StringVar(&label, "label", "", "labels, for example provider=gcp,region=eu")
+	f.BoolVarP(&yes, "yes", "y", false, "install the helper without asking, pin an unknown host key on first use, and offer no agents to install")
+	f.StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
+	f.BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
+	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
+	f.BoolVar(&loc.local, "local", false, "set up this Mac as a host in a pinned Lima VM")
+	f.IntVar(&loc.cpus, "cpus", 0, "--local: VM CPUs (default: under half of this Mac)")
+	f.IntVar(&loc.memoryGiB, "memory", 0, "--local: VM memory in GiB (default: under half of this Mac)")
+	f.IntVar(&loc.diskGiB, "disk", 0, "--local: VM disk in GiB (sparse, default 40)")
+	f.StringVar(&loc.autostart, "autostart", "", "--local: start VM automatically: boot, login or off (default boot)")
+	f.StringVar(&loc.idleStop, "idle-stop", "", "--local: idle power-off time, or never (default never)")
 	return cmd
+}
+
+func parseLabels(label string) map[string]string {
+	if label == "" {
+		return nil
+	}
+	out := map[string]string{}
+	for _, kv := range strings.Split(label, ",") {
+		k, v, _ := strings.Cut(kv, "=")
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out
 }
 
 // hostAddGuide changes the guide that host add offers agents with. Tests
@@ -95,14 +141,14 @@ var hostAddGuide = func(*guide) {}
 // it asks p before it installs the helper, and with input on it offers the
 // agents that the host lacks, as setup does.
 func addHost(ctx context.Context, p *prompter, h client.Host, yes bool) error {
-	return addHostWithKey(ctx, p, h, "", yes)
+	return addHostWithKey(ctx, p, h, "", yes, yes)
 }
 
-func addHostWithKey(ctx context.Context, p *prompter, h client.Host, hostKey string, yes bool) error {
-	consent := installConsent(ctx, p, h, yes)
+func addHostWithKey(ctx context.Context, p *prompter, h client.Host, hostKey string, installYes, skipAgents bool) error {
+	consent := installConsent(ctx, p, h, installYes)
 	pinOpts := client.PinOptions{
 		HostKey:        hostKey,
-		AcceptFirstUse: yes || (h.Machine != nil && h.Machine.Provider == "lima"),
+		AcceptFirstUse: installYes || (h.Machine != nil && h.Machine.Provider == "lima"),
 		Interactive:    p.on,
 	}
 	// connectHost records each change in p's log as it makes it, so a
@@ -118,7 +164,7 @@ func addHostWithKey(ctx context.Context, p *prompter, h client.Host, hostKey str
 		fmt.Fprintln(os.Stderr, "\nAgents:")
 		printAgentChecks(os.Stderr, h.Name, checks)
 	}
-	if !yes && p.asks(qAddAgents) {
+	if !skipAgents && p.asks(qAddAgents) {
 		// The flow records each install in p's log as it makes it.
 		f := onboard.NewFlow(h.Name, checks, p.changes())
 		f.NoLogin = true

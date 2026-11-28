@@ -7,6 +7,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Add a host](add-a-host.md) | Connect any host you can reach with SSH, with the guided setup or by hand |
+| [Use a Mac as a host](a-mac-as-a-host.md) | Run sessions on this Mac in a pinned Lima VM started with `limactl autostart` |
 | [Create a host](create-a-host.md) | Make a host in one step: a local Lima VM, a Docker container for testing, or an E2B sandbox |
 | [Sandboxes](sandboxes.md) | Check which sandbox wall levels a host supports, install bubblewrap and set a host's floor |
 | [Restore after a reboot](restore-after-reboot.md) | Bring sessions back after the host restarts |

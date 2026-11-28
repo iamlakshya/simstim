@@ -45,7 +45,7 @@ func startNew(ctx context.Context, out io.Writer, host, inst string) error {
 	again := brand.Name + " host create lima " + host + " (to try again)"
 	edit := []string{"edit", "--tty=false", "--set", ".nestedVirtualization = false", inst}
 	fmt.Fprintf(out, "  Turning nested virtualisation off: limactl %s\n", shellLine(edit))
-	if _, err := provider.Exec(ctx, install, "limactl", edit...); err != nil {
+	if _, err := provider.Exec(ctx, install, limaCommand(), edit...); err != nil {
 		if ctx.Err() != nil {
 			return err
 		}
@@ -88,7 +88,7 @@ func checkNestingOff(ctx context.Context, inst, again string) error {
 }
 
 func startVM(ctx context.Context, inst string) error {
-	_, err := provider.Exec(ctx, install, "limactl", "start", "--tty=false", inst)
+	_, err := provider.Exec(ctx, install, limaCommand(), "start", "--tty=false", inst)
 	return err
 }
 

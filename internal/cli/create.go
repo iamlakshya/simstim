@@ -75,6 +75,16 @@ func hostCreateCmd() *cobra.Command {
 			if len(args) == 2 {
 				req.Name = args[1]
 			}
+			if !lima.ValidAutostart(req.Autostart) {
+				return &client.UserError{
+					Msg:  fmt.Sprintf("%q is not an autostart mode", req.Autostart),
+					Hint: "Use --autostart boot, login or off.",
+					Code: "bad_value",
+					Kind: client.KindUsage,
+				}
+			}
+			req.AutostartExplicit = cmd.Flags().Changed("autostart")
+			req.Interactive = inputOn(cmd)
 			req.Out = os.Stderr
 			return createHostWithFloor(cmd.Context(), p, req, floor)
 		},
@@ -88,6 +98,7 @@ func hostCreateCmd() *cobra.Command {
 	f.StringVar(&req.TokenCommand, "token-command", "", "e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in")
 	f.StringVar(&req.IdleStop, "idle-stop", "", "stop after this long with no client and no working session, or never (lima: 30m, e2b: 15m)")
 	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
+	f.StringVar(&req.Autostart, "autostart", "", "lima on macOS: start VM automatically: boot, login or off")
 	return cmd
 }
 
