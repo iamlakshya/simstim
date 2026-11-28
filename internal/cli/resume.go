@@ -14,7 +14,8 @@ import (
 )
 
 func resumeCmd() *cobra.Command {
-	var memoryMax string
+	var memoryMax, memory string
+	var cpus int
 	var detach, asJSON bool
 	var secrets []string
 	cmd := &cobra.Command{
@@ -29,7 +30,7 @@ func resumeCmd() *cobra.Command {
 			"gives the host are fetched again. Any other secret that the session started with needs --secret.\n" +
 			"While the agent still runs, resume attaches, or with --detach says that it runs.",
 		Example: "  " + brand.Name + " resume my-vps/auth-fix\n" +
-			"  " + brand.Name + " resume my-vps/auth-fix --memory-max 6G\n" +
+			"  " + brand.Name + " resume my-vps/auth-fix --memory 6G --cpus 4\n" +
 			"  " + brand.Name + " resume my-vps/auth-fix --secret GITHUB_TOKEN\n" +
 			"  " + brand.Name + " resume my-vps/auth-fix --detach --json",
 		Args: cobra.ExactArgs(1),
@@ -38,12 +39,19 @@ func resumeCmd() *cobra.Command {
 				return err
 			}
 			a := client.ResumeArgs{}
-			if cmd.Flags().Changed("memory-max") {
-				n, err := client.ParseMemoryFlag(memoryMax)
-				if err != nil {
-					return err
-				}
-				a.MemoryMax = n
+			memFlag, hasMemFlag, err := parseMemoryPairFlags(cmd, memory, memoryMax)
+			if err != nil {
+				return err
+			}
+			if hasMemFlag {
+				a.MemoryMax = memFlag
+			}
+			cpusFlag, hasCPUsFlag, err := parseCPUsFlag(cmd, cpus)
+			if err != nil {
+				return err
+			}
+			if hasCPUsFlag {
+				a.CPUs = cpusFlag
 			}
 			if cmd.Flags().Changed("secret") {
 				var err error
@@ -70,6 +78,8 @@ func resumeCmd() *cobra.Command {
 			return nil
 		},
 	}
+	addCPUs(cmd, &cpus, 0, "cap the session's CPUs from now on, through systemd (default: the size it had)")
+	addMemory(cmd, &memory, "", "cap the session's memory from now on: auto, or a `size` such as 4G (default: the size it had)")
 	addMemoryMax(cmd, &memoryMax, "cap the session's memory from now on: auto, or a `size` such as 4G (default: the size it had)")
 	addDetach(cmd, &detach, "resume it without attaching")
 	addSecret(cmd, &secrets, "pass again a secret that the session started with and that hosts.toml does not give its host (repeatable, or comma-separated)")
@@ -186,7 +196,7 @@ func resumeFound(ctx context.Context, f found, a client.ResumeArgs, passed []str
 // a start reads changes nothing, and resume says so (cli-spec 9.4).
 func resumeRunning(cmd *cobra.Command, r resumed, detach, asJSON bool) error {
 	var unused []string
-	for _, f := range []string{"memory-max", "secret"} {
+	for _, f := range []string{"cpus", "memory", "memory-max", "secret"} {
 		if cmd.Flags().Changed(f) {
 			unused = append(unused, "--"+f)
 		}

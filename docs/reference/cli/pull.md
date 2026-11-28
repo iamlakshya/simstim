@@ -10,13 +10,14 @@ Bring a session's branch into the git repository you are in.
 simstim pull <host>/<session> [flags]
 ```
 
-Fetches the branch that the session's folder has checked out, as a git bundle verified into a quarantine ref, reviews flagged files, and updates a branch of the current repository: the same name, or `--into`. It changes neither working tree and works over any host transport.
+Fetches the branch that the session's folder has checked out, as a git bundle verified into a quarantine ref, reviews flagged files, and updates a branch of the current repository: the same name, or `--into`. It changes neither working tree and works over any host transport. Use `--repo` when a session holds more than one repository.
 
 ## Examples
 
 ```sh
 simstim pull my-vps/auth-fix
 simstim pull my-vps/auth-fix --into review/auth-fix
+simstim pull my-vps/auth-fix --repo api
 ```
 
 ## Flags
@@ -26,6 +27,7 @@ simstim pull my-vps/auth-fix --into review/auth-fix
 | `--allow-flagged` | update the branch even when the diff touches flagged files |
 | `--force` | move the local branch even when the fetch is not a fast-forward |
 | `--into <string>` | the local branch to fetch into (default: the session's branch name) |
+| `--repo <string>` | the repository base name to pull when the session holds more than one |
 
 ## Flags from the parent command
 

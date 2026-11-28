@@ -7,17 +7,94 @@ import "github.com/iamlakshya/simstim/internal/api"
 // sends it as 0. A resume sends it as it is (api.MemoryAuto).
 const MemoryAuto = api.MemoryAuto
 
-// ParseMemoryFlag reads the size of `new --memory-max`: "auto" for the host's
-// default (MemoryAuto), or a size such as "4G".
+// ParseMemoryFlag reads the size of `new --memory-max` or `--memory`: "auto"
+// for the host's default (MemoryAuto), or a size such as "4G".
 func ParseMemoryFlag(v string) (int64, error) {
+	return ParseMemoryFlagNamed("--memory-max", v)
+}
+
+// ParseMemoryFlagNamed parses a memory flag with the caller's flag name in
+// error messages.
+func ParseMemoryFlagNamed(flagName, v string) (int64, error) {
 	n, err := api.ParseMemoryMax(v)
 	if err != nil {
-		return 0, &UserError{Msg: "--memory-max: " + err.Error(), Hint: "Pass auto, or a size of 256M or more: " + api.MemorySizes + ".", Code: "bad_value", Kind: KindUsage}
+		return 0, &UserError{Msg: flagName + ": " + err.Error(), Hint: "Pass auto, or a size of 256M or more: " + api.MemorySizes + ".", Code: "bad_value", Kind: KindUsage}
 	}
 	if n == 0 {
 		return MemoryAuto, nil
 	}
 	return n, nil
+}
+
+// SandboxSizes holds resolved session size defaults from Settings and Host.
+type SandboxSizes struct {
+	CPUs    int
+	Memory  int64
+	DiskMax int64
+	CopyMax int64
+	SeedMax int64
+}
+
+// ResolveSandboxSizes merges [sandbox] settings from config.toml and hosts.toml
+// (host layer wins over global config).
+func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
+	out := SandboxSizes{
+		CPUs:    s.Sandbox.CPUs,
+		CopyMax: DefaultCopyInMaxBytes,
+		SeedMax: DefaultSeedMaxBytes,
+	}
+	memRaw := s.Sandbox.Memory
+	diskRaw := s.Sandbox.DiskMax
+	if h.Sandbox != nil {
+		if h.Sandbox.CPUs < 0 {
+			return out, &UserError{Msg: "sandbox.cpus in hosts.toml must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
+		}
+		if h.Sandbox.CPUs > 0 {
+			out.CPUs = h.Sandbox.CPUs
+		}
+		if h.Sandbox.Memory != "" {
+			memRaw = h.Sandbox.Memory
+		}
+		if h.Sandbox.DiskMax != "" {
+			diskRaw = h.Sandbox.DiskMax
+		}
+	}
+	if out.CPUs < 0 {
+		return out, &UserError{Msg: "sandbox.cpus in config must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
+	}
+	if memRaw != "" {
+		n, err := api.ParseMemoryMax(memRaw)
+		if err != nil {
+			return out, &UserError{Msg: "sandbox.memory in config: " + err.Error(), Hint: `Set sandbox.memory to "auto" or a size of 256M or more (` + api.MemorySizes + ").", Code: "bad_config", Kind: KindUsage}
+		}
+		if n == 0 {
+			out.Memory = MemoryAuto
+		} else {
+			out.Memory = n
+		}
+	}
+	if diskRaw != "" {
+		n, err := api.ParseByteSize(diskRaw, 1<<20)
+		if err != nil {
+			return out, &UserError{Msg: "sandbox.disk_max in config: " + err.Error(), Hint: "Set sandbox.disk_max to a size such as 10G.", Code: "bad_config", Kind: KindUsage}
+		}
+		out.DiskMax = n
+	}
+	if s.Sandbox.CopyMax != "" {
+		n, err := api.ParseByteSize(s.Sandbox.CopyMax, 1<<10)
+		if err != nil {
+			return out, &UserError{Msg: "sandbox.copy_max in config.toml: " + err.Error(), Hint: "Set [sandbox] copy_max to a size such as 64M.", Code: "bad_config", Kind: KindUsage}
+		}
+		out.CopyMax = n
+	}
+	if s.Sandbox.SeedMax != "" {
+		n, err := api.ParseByteSize(s.Sandbox.SeedMax, 1<<20)
+		if err != nil {
+			return out, &UserError{Msg: "sandbox.seed_max in config.toml: " + err.Error(), Hint: "Set [sandbox] seed_max to a size such as 512M.", Code: "bad_config", Kind: KindUsage}
+		}
+		out.SeedMax = n
+	}
+	return out, nil
 }
 
 // SettingsMemoryMax is [sessions] memory_max from s, in bytes, or 0 for the

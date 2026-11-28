@@ -1,10 +1,14 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	tomlv2 "github.com/pelletier/go-toml/v2"
+
+	"github.com/iamlakshya/simstim/internal/brand"
 )
 
 // LoadSettings reads the settings, with defaults for anything missing. If
@@ -79,6 +83,12 @@ func LoadSettingsChecked() (Settings, string) {
 	if s.Sandbox.KeepCaches == nil {
 		s.Sandbox.KeepCaches = d.Sandbox.KeepCaches
 	}
+	if s.Sandbox.CopyMax == "" {
+		s.Sandbox.CopyMax = d.Sandbox.CopyMax
+	}
+	if s.Sandbox.SeedMax == "" {
+		s.Sandbox.SeedMax = d.Sandbox.SeedMax
+	}
 	if s.Network.MinReleaseAge == "" {
 		s.Network.MinReleaseAge = d.Network.MinReleaseAge
 	}
@@ -89,4 +99,30 @@ func LoadSettingsChecked() (Settings, string) {
 		s.Images.Fetch = d.Images.Fetch
 	}
 	return s, ""
+}
+
+// UserError is an error with a suggested next step: the message, and the
+// "Try:" line (docs/contributing/cli-spec.md, section 4).
+type UserError struct {
+	Msg  string
+	Hint string
+	// Code names the error, such as host_not_found. A host sends its own
+	// codes, and the client acts on some of them, such as a repository's
+	// setup script that needs the user's answer. Data carries what the
+	// client needs for that.
+	Code string
+	Data json.RawMessage
+	// Kind sets the exit code. The zero Kind is KindFailed.
+	Kind Kind
+}
+
+func (e *UserError) Error() string { return e.Msg }
+
+// SplitTarget splits "host/session" into its parts.
+func SplitTarget(t string) (host, session string, err error) {
+	host, session, ok := strings.Cut(t, "/")
+	if !ok || host == "" || session == "" {
+		return "", "", &UserError{Msg: fmt.Sprintf("%q is not host/session", t), Hint: brand.Name + " ls", Code: "bad_address", Kind: KindUsage}
+	}
+	return host, session, nil
 }

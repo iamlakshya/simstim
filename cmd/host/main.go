@@ -145,8 +145,11 @@ func runEgress(args []string) error {
 }
 
 func runSFTP(args []string) error {
+	if len(args) == 2 && args[0] == "--stage" {
+		return host.RunStageSFTP(args[1], os.Stdin, os.Stdout)
+	}
 	if len(args) != 1 {
-		return fmt.Errorf("usage: %s sftp <id>", brand.HostBinary)
+		return fmt.Errorf("usage: %s sftp [--stage] <id>", brand.HostBinary)
 	}
 	return host.RunSFTP(args[0], os.Stdin, os.Stdout)
 }

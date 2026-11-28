@@ -10,6 +10,17 @@ import (
 // HostSandbox overrides [sandbox] defaults from config.toml for sessions on
 // one host in hosts.toml.
 type HostSandbox struct {
+	// CPUs caps the CPU quota of new sessions on this host.
+	CPUs int `toml:"cpus,omitempty"`
+	// Memory caps the memory of new sessions on this host, such as "4G".
+	Memory string `toml:"memory,omitempty"`
+	// DiskMax sets the soft disk cap for walled sessions on this host, such as "10G".
+	DiskMax string `toml:"disk_max,omitempty"`
+	// Env sets non-secret environment variables for new sessions on this host.
+	Env map[string]string `toml:"env,omitempty"`
+	// CopyIn lists laptop paths (or laptop:guest pairs) copied into new
+	// sessions on this host at start.
+	CopyIn []string `toml:"copy_in,omitempty"`
 	// KeepCaches overrides sandbox.keep_caches from config.toml for this host.
 	KeepCaches *bool `toml:"keep_caches,omitempty"`
 	// Caches adds relative cache paths under /home/agent, or drops one with

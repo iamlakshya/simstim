@@ -17,7 +17,8 @@ simstim new my-vps --agent claude --dir ~/src/app
 simstim new my-vps --agent claude --wall process --dir ~/src/app
 simstim new my-vps --agent claude --dir ~/src/new-app --mkdir
 simstim new my-vps --agent claude --secret ANTHROPIC_API_KEY
-simstim new my-vps --agent claude --memory-max 6G
+simstim new my-vps --agent claude --memory 6G --cpus 2
+simstim new my-vps --agent claude --seed . --copy ~/.claude/skills
 simstim new my-vps --detach -- htop
 simstim new my-vps --agent claude --detach --json
 ```
@@ -28,16 +29,23 @@ simstim new my-vps --agent claude --detach --json
 | --- | --- |
 | `-a`, `--agent <string>` | the agent: claude, codex, opencode, antigravity, gemini, amp, cursor, aider, goose or shell (default: `shell`) |
 | `--base <string>` | the commit or branch the worktree starts from (default: HEAD) |
+| `--copy <stringArray>` | copy a file or folder from this laptop into the session over SFTP: &lt;laptop&gt;[:&lt;guest&gt;] (repeatable) |
+| `--cpus <int>` | cap the session's CPUs through systemd (default: sandbox.cpus in config.toml) |
 | `--detach` | start it without attaching |
 | `-C`, `--dir <string>` | the folder on the host (default: `~`) |
+| `--env <stringArray>` | set a non-secret environment variable: K=V, or K to read from this laptop (repeatable) |
+| `--env-file <stringArray>` | read non-secret K=V or K environment variables from a file on this laptop (repeatable) |
 | `--expose <strings>` | expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated) |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--memory <size>` | cap the session's memory: auto, or a size such as 4G (default: sandbox.memory or sessions.memory_max in config.toml) |
 | `--memory-max <size>` | cap the session's memory: auto, or a size such as 4G (default: sessions.memory_max in config.toml) |
 | `--mkdir` | make the folder on the host if it does not exist, without asking |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
 | `--no-setup-script` | do not run the repository's setup script this time |
 | `--secret <strings>` | pass a secret from config.toml's [secrets] to the session (repeatable, or comma-separated) |
+| `--seed <stringArray>` | seed the session from a git repository on this laptop as a git bundle (repeatable) |
+| `--seed-dirty` | with `--seed`, include uncommitted changes and non-ignored untracked files as one commit |
 | `--setup-script` | run the repository's setup script this time, whatever your answer for it |
 | `--wall <string>` | sandbox wall level: none, process or gvisor |
 | `-w`, `--worktree` | give the session its own git worktree and branch |

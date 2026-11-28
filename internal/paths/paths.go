@@ -67,6 +67,10 @@ func AuditLog(id string) string { return filepath.Join(SessionDir(id), "audit.js
 // WorkDir is the workspace folder of one walled session.
 func WorkDir(id string) string { return filepath.Join(SessionDir(id), "work") }
 
+// StageDir holds temporary files and seed bundles uploaded over SFTP before
+// a session starts or refreshes its laptop copies.
+func StageDir(id string) string { return filepath.Join(SessionDir(id), "stage") }
+
 // SessionStateDir holds the agent state folders kept across starts of a walled session.
 func SessionStateDir(id string) string { return filepath.Join(SessionDir(id), "state") }
 

@@ -120,6 +120,9 @@ func runHelperInProcess(remote string, in io.Reader, out io.Writer) error {
 	if len(args) >= 3 {
 		switch args[1] {
 		case "sftp":
+			if len(args) >= 4 && args[2] == "--stage" {
+				return host.RunStageSFTP(args[3], in, out)
+			}
 			return host.RunSFTP(args[2], in, out)
 		case "ssh-exec":
 			return host.RunSSHExec(args[2], in, out)

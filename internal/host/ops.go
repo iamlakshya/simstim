@@ -76,8 +76,8 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cwd := expandHome(a.Cwd)
-	missing, err := checkFolder(cwd, a.Worktree)
+	id := unusedID()
+	cwd, missing, err := resolveNewCwd(id, a)
 	if err != nil {
 		return nil, err
 	}
@@ -89,26 +89,27 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		login = os.Environ()
 	}
-	id := unusedID()
+	name := strings.TrimSpace(a.Name)
+	if name == "" {
+		name = folderName(cwd)
+	}
 	// Find the agent before anything is asked or made. A missing agent
 	// leaves nothing behind: no folder, no worktree and no branch.
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
 	env, term := sessionEnv(a, id, login, agent, inline)
+	env = applyUserAndIdentityEnv(env, a.Env, id, a.HostName, kind, name, false)
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
 	if _, err := lookPath(argv[0], envValue(env, "PATH")); err != nil {
 		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
 	}
-	if len(missing) > 0 {
-		if !a.MakeFolder {
-			return nil, folderQuestion(cwd)
-		}
-		if err := makeFolders(cwd); err != nil {
-			return nil, err
-		}
-		// A start that fails after this point removes the new folders again.
+	cleanupDir, err := ensureNewCwd(cwd, missing, a)
+	if err != nil {
+		return nil, err
+	}
+	if cleanupDir != nil {
 		defer func() {
 			if err != nil {
-				removeFolders(missing)
+				cleanupDir()
 			}
 		}()
 	}
@@ -125,6 +126,9 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 		return nil, err
 	}
 	m := buildManifest(a, id, cwd, kind, argv, env, term, secrets, gi, sessHooks, agent, known, inline, hooks, sessionUUID)
+	if a.DeferStart {
+		return saveDeferredSession(m)
+	}
 	return startSession(m, a.Secrets)
 }
 
@@ -134,7 +138,7 @@ func checkNewArgs(a NewArgs) error {
 			return err
 		}
 	}
-	return checkMemoryMax(a.MemoryMax)
+	return checkNewSessionArgs(a)
 }
 
 func worktreeBaseName(name, cwd string) string {
@@ -149,17 +153,19 @@ func buildManifest(a NewArgs, id, cwd, kind string, argv, env []string, term str
 	if name == "" {
 		name = folderName(cwd)
 	}
-	asked := max(a.MemoryMax, 0)
 	now := time.Now().UTC()
 	m := &Manifest{
 		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
 		Agent: AgentInfo{Kind: kind, Argv: argv},
 		Cwd:   cwd, Env: env,
-		Term:    TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:  Limits{MemoryMax: sessionMemoryMax(asked), MemoryAsked: asked},
-		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
-		Status:  Status{State: StateStarting, Since: now},
-		Restart: Restart{Policy: "resume", MaxAttempts: 3},
+		Term:        TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
+		Limits:      resolveSessionLimits(a.MemoryMax, a.CPUs, a.DiskMax, kind, false),
+		Run:         Runtime{Socket: paths.Socket(id), BootID: BootID()},
+		Status:      Status{State: StateStarting, Since: now},
+		Restart:     Restart{Policy: "resume", MaxAttempts: 3},
+		HostName:    a.HostName,
+		SandboxName: name,
+		CopyIn:      a.CopyIn,
 	}
 	m.Git = gi
 	m.Secrets = secrets
@@ -297,11 +303,18 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 			st.Reason = "the session's holder stopped"
 		}
 	}
+	var seedRepos []string
+	for _, r := range m.SeedRepos {
+		if r.Name != "" {
+			seedRepos = append(seedRepos, r.Name)
+		}
+	}
 	info := SessionInfo{
 		ID: m.ID, Name: m.Name, Agent: m.Agent.Kind, Cwd: m.Cwd,
 		State: st.State, Source: st.Source, Since: st.Since, Reason: st.Reason, ExitCode: st.ExitCode, Signal: st.Signal, OOM: st.OOM,
 		CreatedAt: m.CreatedAt, LastActivityAt: m.LastActivityAt, LastAttachedAt: m.LastAttachedAt,
 		Alive: alive, Unit: m.Run.Unit, MemoryMax: m.Limits.MemoryMax, MemoryCurrent: memoryCurrent(m.Run.Unit),
+		CPUs: m.Limits.CPUs, DiskMax: m.Limits.DiskMax, SeedRepos: seedRepos, CopiesPending: m.CopiesPending,
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
 		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
 		DebugUntil: debugUntil(m, alive),

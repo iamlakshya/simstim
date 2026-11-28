@@ -12,7 +12,7 @@ simstim attach [<host>/<session>|-] [flags]
 
 **Aliases:** `a`
 
-Attaches this terminal to a session. A stopped host that its provider script can start wakes first, and a stopped session wakes on attach. When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name.
+Attaches this terminal to a session. A stopped host that its provider script can start wakes first, and a stopped session wakes on attach (with `--cpus` and `--memory` when given). When the session's agent has ended, attach asks to start it again, as resume does. `--restart` answers yes. The host may be left out when no other host has a session of that name.
 
 ## Examples
 
@@ -27,6 +27,8 @@ simstim attach            # pick one from a list
 
 | Flag | What it does |
 | --- | --- |
+| `--cpus <int>` | when waking a stopped session, cap its CPUs through systemd |
+| `--memory <size>` | when waking a stopped session, cap its memory: auto, or a size such as 4G |
 | `--restart` | when the agent has ended, start it again without asking |
 
 ## Flags from the parent command

@@ -44,6 +44,29 @@ type NewArgs struct {
 	// default. A helper refuses less than MinMemoryMax, and lowers more than
 	// its limit for all sessions together to that limit (decision 0024).
 	MemoryMax int64 `json:"memory_max,omitempty"`
+	// CPUs caps the session's CPU quota through systemd (100% per CPU).
+	// 0 asks for the default (unbounded on unwalled sessions; agent table or
+	// 2 CPUs on walled sessions, spec 17.1).
+	CPUs int `json:"cpus,omitempty"`
+	// DiskMax is the soft disk cap for a walled session's folder, in bytes.
+	// 0 disables the per-session disk cap (the 5% free-space floor still holds).
+	DiskMax int64 `json:"disk_max,omitempty"`
+	// Env holds non-secret environment variables from config layers, --env-file
+	// and --env (spec 17.2). Identity variables always win over Env.
+	Env map[string]string `json:"env,omitempty"`
+	// HostName is the client's saved name for this host, used for the host
+	// identity environment variable (spec 17.2).
+	HostName string `json:"host_name,omitempty"`
+	// CopyIn records the laptop-to-session copy specs so a boot-time restore
+	// marks the session as needing copies on the next attach (spec 17.3).
+	CopyIn []CopyInSpec `json:"copy_in,omitempty"`
+	// DeferStart creates the session folder, manifest and staging directory
+	// without launching the holder or supervisor yet, so the client can upload
+	// copy-in files and seed bundles over SFTP before calling session.start.
+	DeferStart bool `json:"defer_start,omitempty"`
+	// SeedWorkspace tells the host to place seeded repositories under the
+	// session's own work directory instead of requiring a pre-existing host Cwd.
+	SeedWorkspace bool `json:"seed_workspace,omitempty"`
 	// Worktree gives the session its own git worktree and branch, from Base (default HEAD).
 	Worktree bool   `json:"worktree,omitempty"`
 	Base     string `json:"base,omitempty"`
@@ -130,6 +153,10 @@ type SessionInfo struct {
 	Unit           string    `json:"unit,omitempty"`
 	MemoryMax      int64     `json:"memory_max,omitempty"`
 	MemoryCurrent  int64     `json:"memory_current,omitempty"`
+	CPUs           int       `json:"cpus,omitempty"`
+	DiskMax        int64     `json:"disk_max,omitempty"`
+	SeedRepos      []string  `json:"seed_repos,omitempty"`
+	CopiesPending  bool      `json:"copies_pending,omitempty"`
 	HostVersion    string    `json:"host_version"`
 	Cols           int       `json:"cols"`
 	Rows           int       `json:"rows"`
@@ -174,6 +201,11 @@ type ResumeArgs struct {
 	// the size that the session asked for before, and MemoryAuto asks for
 	// the host's default.
 	MemoryMax int64 `json:"memory_max,omitempty"`
+	// CPUs is the session's CPU cap from now on. 0 keeps the existing CPU cap,
+	// and CPUsAuto asks for the default (spec 17.1).
+	CPUs int `json:"cpus,omitempty"`
+	// DiskMax updates the soft disk cap in bytes when > 0.
+	DiskMax int64 `json:"disk_max,omitempty"`
 	// Secrets are the values of the session's secrets, which the client
 	// fetches again. The host writes none of them down (host/secrets.go).
 	Secrets map[string]Secret `json:"secrets,omitempty"`

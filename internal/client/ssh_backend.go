@@ -43,11 +43,25 @@ func OpenSFTP(ctx context.Context, h Host, sessionID string) (*sftp.Client, io.C
 	if err != nil {
 		return nil, nil, err
 	}
-	return openSFTPOn(ctx, t, h, sessionID)
+	return openSFTPOn(ctx, t, h, sessionID, false)
 }
 
-func openSFTPOn(ctx context.Context, t Transport, h Host, sessionID string) (*sftp.Client, io.Closer, error) {
+// OpenStageSFTP opens a pkg/sftp client rooted at session id's private staging
+// directory (`<helper> sftp --stage <id>`) so the client can upload copy-in
+// files and seed bundles before start or after a boot-time restore.
+func OpenStageSFTP(ctx context.Context, h Host, sessionID string) (*sftp.Client, io.Closer, error) {
+	t, err := HostTransport(ctx, h, true)
+	if err != nil {
+		return nil, nil, err
+	}
+	return openSFTPOn(ctx, t, h, sessionID, true)
+}
+
+func openSFTPOn(ctx context.Context, t Transport, h Host, sessionID string, stage bool) (*sftp.Client, io.Closer, error) {
 	remote := RemoteHelper(HelperVersion()) + " sftp " + shellWord(sessionID)
+	if stage {
+		remote = RemoteHelper(HelperVersion()) + " sftp --stage " + shellWord(sessionID)
+	}
 	proc, err := t.Start(context.WithoutCancel(ctx), remote)
 	if err != nil {
 		return nil, nil, err

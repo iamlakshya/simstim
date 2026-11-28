@@ -21,9 +21,15 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sessions.memory_max` | string | `"auto"` | Caps the memory of each new session, with everything it starts. "auto" gives the host's default: its memory minus a reserve for the system. A size is a number and a unit in powers of 1024, such as "512M", "4G", "4GiB" or "1.5G", from 256M. A host lowers a size above its limit for all sessions together to that limit. `new --memory-max` sets it for one session. |
 | `sandbox.paste` | string | `"images-and-pdf"` | Sets which file types image paste and drag-and-drop may upload into a walled session: "images-and-pdf" (PNG, JPEG, GIF, WebP and PDF only, the default) or "any". The paste guard still refuses private files and clipboard-written paths in either mode. |
 | `sandbox.package_managers` | string | `"guarded"` | Controls the settings that guest init writes for package managers inside a sandbox: "guarded" (minimum release age, no dependency install scripts for npm, pnpm, Yarn and Bun, and Go proxy settings), "strict" (also blocks pip and uv source builds), or "off". |
-| `sandbox.env` | table | — | Sets extra environment variables inside a sandbox. A name set here replaces the guest init's value for that name. |
+| `sandbox.cpus` | integer | — | Caps the CPU quota of each new session through systemd (100% per CPU). 0 uses the agent's default on walled sessions and leaves unwalled sessions unbounded. `new --cpus` overrides it. |
+| `sandbox.memory` | string | — | Caps the memory of each new session, such as "4G" or "auto". `new --memory` overrides it. |
+| `sandbox.disk_max` | string | — | Sets the soft disk cap for a walled session's folder, such as "10G". The supervisor stops a session past this cap with disk_full. |
+| `sandbox.env` | table | — | Sets non-secret environment variables for each new session, replacing guest init defaults for those names. A name listed in [secrets] is refused with env_is_secret. `new --env` and `--env-file` override it. |
 | `sandbox.keep_caches` | boolean | `true` | Keeps package and build caches across starts of a sandbox, inside that sandbox only. |
 | `sandbox.caches` | array of string | — | Adds relative paths under /home/agent, or drops one with "!". |
+| `sandbox.copy_in` | array of string | — | Lists laptop paths (or laptop:guest pairs) copied into each new session at start over SFTP. Paths under your home land under /home/agent; other paths land under /mnt/<name>. `new --copy` adds more. |
+| `sandbox.copy_max` | string | `"64M"` | Caps the total bytes copied by copy_in and --copy at one start (default "64M"). |
+| `sandbox.seed_max` | string | `"512M"` | Caps the size of each git bundle created by --seed (default "512M"). |
 | `network.min_release_age` | string | `"7d"` | Sets the minimum release age for package managers inside a sandbox, as a whole number of days from "0d" to "365d". "0d" turns the age check off. |
 | `network.model_budget` | integer | — | Caps the total model tokens a walled session may use across gateway requests. 0 turns the cap off. |
 | `network.upload_budget` | string | `"16M"` | Caps bytes uploaded per host per hour from a walled session to non-model hosts, such as "16M". "0" turns the cap off. |
@@ -59,6 +65,11 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `secrets` | array of string | Lists secrets from config.toml that every new session on this host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more. |
 | `wall_floor` | string | Is the weakest sandbox level that new sessions on this host may get: "none", "process", "gvisor" or "microvm". |
 | `trusted` | boolean | Marks a host where you control root. Untrusted hosts default to false and do not receive secrets unless explicitly allowed. |
-| `[sandbox]` | table | Overrides [sandbox] defaults from config.toml for this host. |
+| `[sandbox]` | table | Holds per-host defaults for session sizes, environment variables, laptop copies and kept caches. Host settings win over config.toml's [sandbox] table, and command-line flags win over both. |
+| `sandbox.cpus` | integer | Caps the CPU quota of new sessions on this host. |
+| `sandbox.memory` | string | Caps the memory of new sessions on this host, such as "4G". |
+| `sandbox.disk_max` | string | Sets the soft disk cap for walled sessions on this host, such as "10G". |
+| `sandbox.env` | table | Sets non-secret environment variables for new sessions on this host. |
+| `sandbox.copy_in` | array of string | Lists laptop paths (or laptop:guest pairs) copied into new sessions on this host at start. |
 | `sandbox.keep_caches` | boolean | Overrides sandbox.keep_caches from config.toml for this host. |
 | `sandbox.caches` | array of string | Adds relative cache paths under /home/agent, or drops one with a leading "!", layered on top of sandbox.caches from config.toml. |

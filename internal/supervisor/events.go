@@ -70,6 +70,7 @@ func (s *Supervisor) step() {
 			s.log.Warn("manifest not saved", "err", err)
 		}
 	}
+	s.checkDisk(now)
 }
 
 // reconcileStatus combines trusted memory warnings with guest claims.

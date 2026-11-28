@@ -29,10 +29,11 @@ func termSize() (int, int) {
 }
 
 type newOpts struct {
-	agent, dir, name, base, memoryMax, wallLevel            string
+	agent, dir, name, base, wallLevel                       string
 	detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
 	usedOldDir, usedOldSetup, usedOldNoSetup                bool
 	secrets, expose                                         []string
+	p114                                                    newP114Opts
 }
 
 func newCmd() *cobra.Command {
@@ -44,7 +45,8 @@ func newCmd() *cobra.Command {
 			"  " + brand.Name + " new my-vps --agent claude --wall process --dir ~/src/app\n" +
 			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
 			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
-			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
+			"  " + brand.Name + " new my-vps --agent claude --memory 6G --cpus 2\n" +
+			"  " + brand.Name + " new my-vps --agent claude --seed . --copy ~/.claude/skills\n" +
 			"  " + brand.Name + " new my-vps --detach -- htop\n" +
 			"  " + brand.Name + " new my-vps --agent claude --detach --json",
 		Args: newArgs,
@@ -63,7 +65,14 @@ func newCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.worktree, "worktree", "w", false, "give the session its own git worktree and branch")
 	cmd.Flags().BoolVar(&o.inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
 	cmd.Flags().StringVar(&o.base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
-	addMemoryMax(cmd, &o.memoryMax, "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
+	addCPUs(cmd, &o.p114.cpus, 0, "cap the session's CPUs through systemd (default: sandbox.cpus in config.toml)")
+	addMemory(cmd, &o.p114.memory, "", "cap the session's memory: auto, or a `size` such as 4G (default: sandbox.memory or sessions.memory_max in config.toml)")
+	addMemoryMax(cmd, &o.p114.memoryMax, "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
+	cmd.Flags().StringArrayVar(&o.p114.envFlags, "env", nil, "set a non-secret environment variable: K=V, or K to read from this laptop (repeatable)")
+	cmd.Flags().StringArrayVar(&o.p114.envFiles, "env-file", nil, "read non-secret K=V or K environment variables from a file on this laptop (repeatable)")
+	cmd.Flags().StringArrayVar(&o.p114.copyFlags, "copy", nil, "copy a file or folder from this laptop into the session over SFTP: <laptop>[:<guest>] (repeatable)")
+	cmd.Flags().StringArrayVar(&o.p114.seedDirs, "seed", nil, "seed the session from a git repository on this laptop as a git bundle (repeatable)")
+	cmd.Flags().BoolVar(&o.p114.seedDirty, "seed-dirty", false, "with --seed, include uncommitted changes and non-ignored untracked files as one commit")
 	addSecret(cmd, &o.secrets, "pass a secret from config.toml's [secrets] to the session (repeatable, or comma-separated)")
 	cmd.Flags().StringSliceVar(&o.expose, "expose", nil, "expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated)")
 	cmd.Flags().BoolVar(&o.setup, "setup-script", false, "run the repository's setup script this time, whatever your answer for it")
@@ -144,15 +153,14 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 	if o.setup && o.noSetup {
 		return &client.UserError{Msg: "--setup-script and --no-setup-script cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
 	}
-	var memMax int64
-	if cmd.Flags().Changed("memory-max") {
-		if memMax, err = client.ParseMemoryFlag(o.memoryMax); err != nil {
-			return err
-		}
+	settings := client.LoadSettings()
+	prep, err := prepareNewP114(cmd, h, settings, o.dir, o.worktree, o.p114)
+	if err != nil {
+		return err
 	}
+	defer prep.cleanup()
 	// Fetch the secrets first: a password manager may want a touch,
 	// and a failing command should not cost a connection.
-	settings := client.LoadSettings()
 	secretNames := client.GatewaySecretNames(settings, h, o.agent, wl, o.secrets, o.expose)
 	values, err := client.FetchSecrets(cmd.Context(), settings, secretNames, secretTerminal(cmd))
 	if err != nil {
@@ -168,7 +176,7 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 	cols, rows := termSize()
 	a := client.TerminalArgs(client.NewArgs{
 		Agent: o.agent, Cwd: client.RemotePath(o.dir), MakeFolder: o.mkdir, Name: o.name,
-		Worktree: o.worktree, Base: o.base, Inline: o.inline, MemoryMax: memMax,
+		Worktree: o.worktree, Base: o.base, Inline: o.inline,
 		Secrets: values, SecretBinds: secretBinds, ExposedSecrets: o.expose, Wall: wl,
 	}, cols, rows)
 	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
@@ -178,7 +186,7 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 		a.Setup = setupValue(o.setup)
 	}
 	cancel()
-	s, err := startSession(cmd, conn, h, a)
+	s, err := startNewWithP114(cmd, conn, h, a, prep)
 	if err != nil {
 		conn.Close()
 		return err
@@ -334,7 +342,11 @@ func printSessions(all []hostSessions) {
 			continue
 		}
 		for _, s := range r.Sessions {
-			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s\n", host, shown(s.ID), trunc(shown(s.Name), 20), shown(s.Agent), stateW, stateLabel(s), age(s.CreatedAt), shown(s.Cwd))
+			extra := ""
+			if s.CopiesPending {
+				extra = "  (copies not sent)"
+			}
+			fmt.Printf("%-14s %-10s %-20s %-9s %-*s %6s  %s%s\n", host, shown(s.ID), trunc(shown(s.Name), 20), shown(s.Agent), stateW, stateLabel(s), age(s.CreatedAt), shown(s.Cwd), extra)
 		}
 	}
 }

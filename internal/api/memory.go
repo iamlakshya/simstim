@@ -18,6 +18,9 @@ const MinMemoryMax = 256 << 20
 // session asked for at its start.
 const MemoryAuto = -1
 
+// CPUsAuto resets a session's CPU cap to the default on resume.
+const CPUsAuto = -1
+
 // MemorySizes lists the forms of a size that ParseSize and ParseMemoryMax take,
 // for hints.
 const MemorySizes = "512M, 4G, 4Gi, 4GiB, 4GB or 1.5G"
@@ -83,6 +86,26 @@ func ParseMemoryMax(v string) (int64, error) {
 	}
 	if bytes < MinMemoryMax {
 		return 0, fmt.Errorf("%q is below the smallest cap, 256M", v)
+	}
+	return bytes, nil
+}
+
+// ParseByteSize parses a positive byte size with a unit (K, M, G or T in powers
+// of 1024, such as "64M", "512M", "10G"). Empty string returns 0. minBytes
+// enforces a lower bound when > 0.
+func ParseByteSize(v string, minBytes int64) (int64, error) {
+	if strings.TrimSpace(v) == "" {
+		return 0, nil
+	}
+	bytes, err := ParseSize(v)
+	if err != nil {
+		if errors.Is(err, errSizeTooSmall) {
+			return 0, fmt.Errorf("%q is below the smallest allowed size", v)
+		}
+		return 0, err
+	}
+	if minBytes > 0 && bytes < minBytes {
+		return 0, fmt.Errorf("%q is below the smallest allowed size", v)
 	}
 	return bytes, nil
 }

@@ -11,9 +11,9 @@ import (
 // in this file, a new session's secrets (secrets.go), its missing folder
 // (folders.go), trust in a repository's setup script (setup.go), the resume
 // of a session whose agent ended (resume.go), stopping a session while
-// keeping its state (stop.go), SFTP/SSH-exec/bundle-pull file transfers, and
-// port grants for walled sessions (bridge_ports.go).
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle, "port.grant"}
+// keeping its state (stop.go), SFTP/SSH-exec/bundle-pull/seed file transfers,
+// and port grants for walled sessions (bridge_ports.go).
+var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle, api.FeatureSeed, "port.grant"}
 
 func init() { Features = append(Features, moreFeatures...) }
 
@@ -50,6 +50,22 @@ func (b *bridge) handleMore(req proto.Request) bool {
 		b.reply(req.ID, v, err)
 	case "port.grant", "port.revoke":
 		b.handlePortGrant(req)
+	case "session.start":
+		var a api.SessionStartArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the session.start request is not valid JSON", "Update the client."))
+			return true
+		}
+		v, err := StartDeferred(a)
+		b.reply(req.ID, v, err)
+	case "copy.apply":
+		var a api.CopyApplyArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the copy.apply request is not valid JSON", "Update the client."))
+			return true
+		}
+		err := ApplyCopyIn(a)
+		b.reply(req.ID, map[string]bool{"ok": true}, err)
 	default:
 		return false
 	}

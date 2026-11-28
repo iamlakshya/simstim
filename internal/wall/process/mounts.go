@@ -177,7 +177,7 @@ func buildPlanWithFS(spec Spec, fsOps planFS) (*Plan, error) {
 	helperDir := filepath.Dir(spec.HelperExe)
 	guestHelper := GuestHelperDir() + "/" + filepath.Base(spec.HelperExe)
 
-	llCfg := buildLandlockConfig(spec, guestRun)
+	llCfg := buildLandlockConfig(spec, guestRun, fsOps)
 	llJSON, err := EncodeLandlockEnv(llCfg)
 	if err != nil {
 		return nil, err
@@ -428,8 +428,9 @@ func appendEnvArgs(args []string, spec Spec, guestRun, llJSON string) []string {
 	return args
 }
 
-func buildLandlockConfig(spec Spec, guestRun string) LandlockConfig {
+func buildLandlockConfig(spec Spec, guestRun string, fsOps planFS) LandlockConfig {
 	rwDirs := make([]string, 0, 5+len(spec.ExtraRW))
+	var rwFiles []string
 	rwDirs = append(rwDirs,
 		spec.WorkspaceGuest,
 		GuestHome,
@@ -438,6 +439,10 @@ func buildLandlockConfig(spec Spec, guestRun string) LandlockConfig {
 		guestRun,
 	)
 	for _, m := range spec.ExtraRW {
+		if fi, err := fsOps.stat(m.Source); err == nil && !fi.IsDir() {
+			rwFiles = append(rwFiles, m.Dest)
+			continue
+		}
 		rwDirs = append(rwDirs, m.Dest)
 	}
 	return LandlockConfig{
@@ -445,8 +450,9 @@ func buildLandlockConfig(spec Spec, guestRun string) LandlockConfig {
 		// host /etc secrets and foreign sessions. Allowing read-only on "/"
 		// permits directory listings and reading the mounted system/agent trees
 		// while blocking every write outside rwDirs and /dev/{pts,shm,null,...}.
-		RODirs: []string{"/"},
-		RWDirs: rwDirs,
+		RODirs:  []string{"/"},
+		RWDirs:  rwDirs,
+		RWFiles: rwFiles,
 	}
 }
 

@@ -16,7 +16,7 @@ Starts the agent of a session again, in the same session, after it stopped or en
 
 ```sh
 simstim resume my-vps/auth-fix
-simstim resume my-vps/auth-fix --memory-max 6G
+simstim resume my-vps/auth-fix --memory 6G --cpus 4
 simstim resume my-vps/auth-fix --secret GITHUB_TOKEN
 simstim resume my-vps/auth-fix --detach --json
 ```
@@ -25,8 +25,10 @@ simstim resume my-vps/auth-fix --detach --json
 
 | Flag | What it does |
 | --- | --- |
+| `--cpus <int>` | cap the session's CPUs from now on, through systemd (default: the size it had) |
 | `--detach` | resume it without attaching |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--memory <size>` | cap the session's memory from now on: auto, or a size such as 4G (default: the size it had) |
 | `--memory-max <size>` | cap the session's memory from now on: auto, or a size such as 4G (default: the size it had) |
 | `--secret <strings>` | pass again a secret that the session started with and that hosts.toml does not give its host (repeatable, or comma-separated) |
 

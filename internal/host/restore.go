@@ -80,6 +80,9 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 			reason = "restored from stopped state"
 		}
 		m.Run.RespawnCount++
+		if len(m.CopyIn) > 0 {
+			m.CopiesPending = true
+		}
 		argv, why, err := startAgain(m, again{label: restoredLabel, reason: reason})
 		r.Argv = argv
 		if err != nil {
@@ -128,7 +131,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	// The old processes are gone. The new holder or supervisor records its own.
 	m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
 	m.Guest = nil
-	m.Limits.MemoryMax = sessionMemoryMax(m.Limits.MemoryAsked)
+	m.Limits = resolveSessionLimits(m.Limits.MemoryAsked, m.Limits.CPUsAsked, m.Limits.DiskMax, m.Agent.Kind, isWalled(m))
 	// To the nanosecond: the holder compares it with the last start, which
 	// can be in the same second. The other label goes: after a restore
 	// that failed to start the agent, a resume must not look like one.

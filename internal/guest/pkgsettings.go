@@ -16,6 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
 )
 
@@ -291,11 +292,25 @@ func mergePackageEnv(baseEnv []string, plan PackageSettingsPlan, userEnv map[str
 
 func applyStartPackageSettings(a StartReq, baseEnv []string) ([]string, error) {
 	homeDir := envLookup(baseEnv, "HOME")
-	userEnv := parseEnvSlice(a.UserEnv)
+	userEnv := filterProtectedUserEnv(parseEnvSlice(a.UserEnv))
 	return ApplyPackageSettings(homeDir, baseEnv, userEnv, PackageSettingsConfig{
 		Level:         a.PackageManagers,
 		MinReleaseAge: a.MinReleaseAge,
 	})
+}
+
+func filterProtectedUserEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(env))
+	for k, v := range env {
+		if k == "BROWSER" || strings.HasPrefix(k, brand.EnvPrefix) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
 }
 
 func envLookup(env []string, key string) string {

@@ -94,7 +94,11 @@ func runHelperSubcommand(args []string) bool {
 	case "git-op":
 		mustRun(host.RunGitOp(args[1:], os.Stdin, os.Stdout))
 	case "sftp":
-		mustRun(host.RunSFTP(args[1], os.Stdin, os.Stdout))
+		if len(args) >= 3 && args[1] == "--stage" {
+			mustRun(host.RunStageSFTP(args[2], os.Stdin, os.Stdout))
+		} else {
+			mustRun(host.RunSFTP(args[1], os.Stdin, os.Stdout))
+		}
 	case "ssh-exec":
 		mustRun(host.RunSSHExec(args[1], os.Stdin, os.Stdout))
 	case "dial-port":

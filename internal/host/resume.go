@@ -49,6 +49,12 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}
+	if err := checkCPUs(a.CPUs); err != nil {
+		return nil, err
+	}
+	if err := checkDiskMax(a.DiskMax); err != nil {
+		return nil, err
+	}
 	if err := CheckCaller(); err != nil {
 		return nil, err
 	}
@@ -88,6 +94,15 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 		m.Limits.MemoryAsked = a.MemoryMax
 	case a.MemoryMax < 0:
 		m.Limits.MemoryAsked = 0
+	}
+	switch {
+	case a.CPUs > 0:
+		m.Limits.CPUsAsked = a.CPUs
+	case a.CPUs < 0:
+		m.Limits.CPUsAsked = 0
+	}
+	if a.DiskMax > 0 {
+		m.Limits.DiskMax = a.DiskMax
 	}
 	m.Run.RespawnCount = 0
 	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets})

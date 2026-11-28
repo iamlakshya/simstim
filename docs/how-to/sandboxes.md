@@ -187,3 +187,62 @@ simstim new my-vps --wall gvisor --dir /path/to/repo
 ```
 
 Inside a gVisor wall, the session gets the same workspace, fresh `/home/agent`, filtered `/etc`, `/opt/agents/` mounts, and loopback proxy (`127.0.0.1:3128`) through the host `egress` process as the process wall, with gVisor's Sentry (`--network=none --directfs=false --ignore-cgroups --host-uds=none`) and an OCI seccomp profile between the agent and the host kernel.
+
+## Session sizes
+
+Set CPU and memory limits with `--cpus` and `--memory`, or under `[sandbox]` in `config.toml` (and per host under `[host.sandbox]` in `hosts.toml`). `--memory` and `--memory-max` set the same memory limit and cannot be passed together.
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --agent claude --cpus 2 --memory 4G
+simstim resume my-vps/auth-fix --cpus 4 --memory 8G
+simstim attach my-vps/auth-fix --cpus 4 --memory 8G
+```
+
+Limits are applied through systemd unit properties (`MemoryMax=` and `CPUQuota=`). A new size takes effect at the next start or wake; passing `--cpus` or `--memory` to `resume` or `attach` on a running session changes nothing and prints a notice on stderr. On walled sessions, `[sandbox] disk_max` adds a soft disk cap checked every minute alongside the 5% host free-space floor; exceeding either stops the session with `disk_full`.
+
+## Environment variables
+
+Pass non-secret environment variables with `--env K=V`, `--env K` (reading `K` from your laptop's environment), `--env-file <path>`, or `[sandbox.env]` in config. Narrower layers win over wider layers, and later flags win over earlier flags. `--env-file` reads one `K=V` or `K` per line, skipping blank lines and `#` comments without stripping quotes or expanding variables.
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --agent claude --env LOG_LEVEL=debug --env-file ./dev.env
+```
+
+Any variable listed under `[secrets]` is refused with `env_is_secret` so credentials always travel through `--secret`. Every session also receives its identity variables (`SIMSTIM_SESSION`, `SIMSTIM_HOST`, `SIMSTIM_AGENT` and `SIMSTIM_SANDBOX`), which always take precedence, and walled sessions set `BROWSER` to a guest helper that prints login URLs in the session terminal.
+
+Everything set through `--env`, `--env-file` or `[sandbox.env]` can be read by processes inside the session; never put secrets there.
+
+## Copy files from your laptop
+
+Use `--copy <laptop path>[:<guest path>]` or `[sandbox] copy_in` to copy skills, settings or fixtures from your laptop into a session over SFTP (`github.com/pkg/sftp`) before the agent starts:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --agent claude --copy ~/.claude/skills --copy ./fixture.json:/mnt/fixture.json
+```
+
+Without a guest path, paths under your laptop's home folder land under `/home/agent/` (the walled session home) and other paths land under `/mnt/<name>`. A guest path starting with `~/` expands to `/home/agent/`. Private files matching the paste guard's rules (`~/.ssh`, `~/.aws`, `~/.gnupg`, `*.pem`, `*.key`, `.env`, `id_*`, `credentials*`) are refused with `copy_sensitive`, and each start caps laptop copies at `[sandbox] copy_max` (64 MiB by default) and 10,000 files.
+
+When a host restores a session after a reboot without your laptop connected, `ls` marks the row with `(copies not sent)`, and your next `attach` uploads the configured files again.
+
+## Seed repositories from your laptop
+
+Use `--seed <folder>` to bundle a git repository from your laptop with `git bundle create`, upload it over SFTP, and clone it into the session with your laptop's `origin` URL and git `user.name` / `user.email`:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --agent claude --seed .
+simstim new my-vps --agent claude --seed . --seed-dirty
+```
+
+With `--seed-dirty`, uncommitted working-tree changes and non-ignored untracked files are added as one extra commit without changing `git status`, writing any ref on your laptop or running repository clean filters. Untracked files sent are printed on stderr, and private names are refused with `copy_sensitive`. Bundles larger than `[sandbox] seed_max` (512 MiB by default) are refused.
+
+Pass `--seed` more than once to clone several repositories into the same session, and pick which one to bring back with `pull --repo <name>`:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --agent claude --seed ../api --seed ../web
+simstim pull my-vps/api --repo web
+```

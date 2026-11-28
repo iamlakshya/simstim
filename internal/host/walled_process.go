@@ -41,7 +41,7 @@ func newProcessWalled(a NewArgs) (_ *SessionInfo, err error) {
 }
 
 func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, err error) {
-	if err := checkMemoryMax(a.MemoryMax); err != nil {
+	if err := checkNewSessionArgs(a); err != nil {
 		return nil, err
 	}
 	ws, err := checkWalledSettings(a)
@@ -96,13 +96,13 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 
 	guestArg0, extraRO, extraPathDirs := mapAgentMounts(resolved, searchPath, agent)
 	argv[0] = guestArg0
-	env, term := processWalledEnv(a, id, extraPathDirs, agent, inline)
-
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
 		name = filepath.Base(wsGuest)
 	}
-	asked := max(a.MemoryMax, 0)
+	env, term := processWalledEnv(a, id, extraPathDirs, agent, inline)
+	env = applyUserAndIdentityEnvWithBrowser(env, a.Env, id, a.HostName, kind, name, process.GuestRunDir()+"/browser")
+
 	now := time.Now().UTC()
 	m := &Manifest{
 		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
@@ -110,7 +110,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 		Cwd:     wsGuest,
 		Env:     env,
 		Term:    TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:  Limits{MemoryMax: sessionMemoryMax(asked), MemoryAsked: asked},
+		Limits:  resolveSessionLimits(a.MemoryMax, a.CPUs, a.DiskMax, kind, true),
 		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
@@ -130,10 +130,13 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			MinReleaseAge:   ws.minAge,
 			ModelBudget:     ws.modelBudget,
 			UploadBudget:    ws.uploadBudget,
-			SandboxEnv:      maps.Clone(a.SandboxEnv),
+			SandboxEnv:      filterSandboxEnv(a.Env, a.SandboxEnv),
 			BoundSecrets:    boundSecrets,
 			ExposedSecrets:  exposedSecrets,
 		},
+		HostName:    a.HostName,
+		SandboxName: name,
+		CopyIn:      a.CopyIn,
 	}
 	if ws.modelBudget > 0 {
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
@@ -141,6 +144,9 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 	m.Git = gi
 	m.Secrets = secrets
 	fillAgentManifest(m, a.Argv, argv, agent, known, inline, hooks, sessionUUID)
+	if a.DeferStart {
+		return saveDeferredSession(m)
+	}
 	return startSession(m, a.Secrets)
 }
 
@@ -322,11 +328,4 @@ func processWalledEnv(a NewArgs, id string, extraPathDirs []string, agent agents
 		env = append(env, k+"="+vars[k])
 	}
 	return env, term
-}
-
-func appendUnique(list []string, v string) []string {
-	if v == "" || v == "." || slices.Contains(list, v) {
-		return list
-	}
-	return append(list, v)
 }

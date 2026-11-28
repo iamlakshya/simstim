@@ -17,15 +17,16 @@ import (
 )
 
 func pullCmd() *cobra.Command {
-	var into string
+	var into, repo string
 	var force, allowFlagged bool
 	cmd := &cobra.Command{
 		Use:   "pull <host>/<session>",
 		Short: "Bring a session's branch into the git repository you are in",
 		Long: "Fetches the branch that the session's folder has checked out, as a git bundle verified into a quarantine ref,\n" +
 			"reviews flagged files, and updates a branch of the current repository: the same name, or --into.\n" +
-			"It changes neither working tree and works over any host transport.",
-		Example: "  " + brand.Name + " pull my-vps/auth-fix\n  " + brand.Name + " pull my-vps/auth-fix --into review/auth-fix",
+			"It changes neither working tree and works over any host transport. Use --repo when a session holds\n" +
+			"more than one repository.",
+		Example: "  " + brand.Name + " pull my-vps/auth-fix\n  " + brand.Name + " pull my-vps/auth-fix --into review/auth-fix\n  " + brand.Name + " pull my-vps/auth-fix --repo api",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := gitHere(cmd.Context(), "rev-parse", "--show-toplevel"); err != nil {
@@ -33,19 +34,20 @@ func pullCmd() *cobra.Command {
 			}
 			return withSession(cmd, args[0], func(ctx context.Context, h client.Host, conn *client.Conn, s *client.Session) error {
 				if conn.HasFeature(api.FeaturePullBundle) {
-					return pullBundle(cmd, ctx, h, s, into, force, allowFlagged)
+					return pullBundle(cmd, ctx, h, s, into, repo, force, allowFlagged)
 				}
 				return pull(ctx, h, s, into, force)
 			})
 		},
 	}
 	cmd.Flags().StringVar(&into, "into", "", "the local branch to fetch into (default: the session's branch name)")
+	cmd.Flags().StringVar(&repo, "repo", "", "the repository base name to pull when the session holds more than one")
 	addForce(cmd, &force, "move the local branch even when the fetch is not a fast-forward")
 	cmd.Flags().BoolVar(&allowFlagged, "allow-flagged", false, "update the branch even when the diff touches flagged files")
 	return cmd
 }
 
-func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *client.Session, into string, force, allowFlagged bool) error {
+func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *client.Session, into, repo string, force, allowFlagged bool) error {
 	p := prompts(cmd)
 	confirm := func(res review.Result) (bool, error) {
 		if !p.on {
@@ -57,6 +59,7 @@ func pullBundle(cmd *cobra.Command, ctx context.Context, h client.Host, s *clien
 	res, err := client.PullBundle(ctx, h, s, client.PullBundleOptions{
 		LocalRepo:      ".",
 		Into:           into,
+		Repo:           repo,
 		Force:          force,
 		AllowFlagged:   allowFlagged,
 		ConfirmFlagged: confirm,

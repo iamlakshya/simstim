@@ -30,14 +30,15 @@ const (
 	Restored    = "restored"     // the session started again after a host restart
 	LinkSilent  = "link_silent"  // the guest init stopped sending heartbeats
 	ModelBudget = "model_budget" // the session reached its model token budget
+	DiskFull    = "disk_full"    // the session exceeded disk_max or the host fell below 5% free disk
 	Test        = "test"         // sent by the test command only
 )
 
 // Kinds lists the events a config may name.
-var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored, LinkSilent, ModelBudget}
+var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored, LinkSilent, ModelBudget, DiskFull}
 
 // DefaultEvents are sent when a config names none.
-var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory, LinkSilent, ModelBudget}
+var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory, LinkSilent, ModelBudget, DiskFull}
 
 // Version is the version of the event's JSON. It changes only when a field
 // changes meaning or goes away; new fields may appear at any time.
@@ -133,6 +134,8 @@ func summary(ev Event) string {
 		if ev.Usage != "" {
 			s += " (" + ev.Usage + ")"
 		}
+	case DiskFull:
+		s = on + " ran out of disk space and was stopped"
 	case Test:
 		return "Test alert from " + ev.Host
 	default:

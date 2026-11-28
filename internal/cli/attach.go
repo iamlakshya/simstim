@@ -55,24 +55,28 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 
 func attachCmd() *cobra.Command {
 	var restart bool
+	var cpus int
+	var memory string
 	cmd := &cobra.Command{
 		Use:     "attach [<host>/<session>|-]",
 		Aliases: []string{"a"},
 		Short:   "Attach to a session",
 		Long: "Attaches this terminal to a session. A stopped host that its provider script can start wakes first,\n" +
-			"and a stopped session wakes on attach. When the session's agent has ended, attach asks to start it\n" +
-			"again, as resume does. --restart answers yes. The host may be left out when no other host has a\n" +
-			"session of that name.",
+			"and a stopped session wakes on attach (with --cpus and --memory when given). When the session's\n" +
+			"agent has ended, attach asks to start it again, as resume does. --restart answers yes. The host may\n" +
+			"be left out when no other host has a session of that name.",
 		Example: "  " + brand.Name + " attach my-vps/auth-fix\n" +
 			"  " + brand.Name + " attach -          # the last session you attached to\n" +
 			"  " + brand.Name + " attach auth-fix   # the host is found when the name is unique\n" +
 			"  " + brand.Name + " attach            # pick one from a list",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runAttach(cmd, args, restart)
+			return runAttachOpts(cmd, args, restart, cpus, memory)
 		},
 	}
 	addRestart(cmd, &restart)
+	addCPUs(cmd, &cpus, 0, "when waking a stopped session, cap its CPUs through systemd")
+	addMemory(cmd, &memory, "", "when waking a stopped session, cap its memory: auto, or a `size` such as 4G")
 	return cmd
 }
 
@@ -89,6 +93,14 @@ func addRestart(cmd *cobra.Command, p *bool) {
 // and no host wakes for nothing. On an ended agent it asks to start the
 // agent again, and then does what resume does.
 func runAttach(cmd *cobra.Command, args []string, restart bool) error {
+	return runAttachOpts(cmd, args, restart, 0, "")
+}
+
+func runAttachOpts(cmd *cobra.Command, args []string, restart bool, cpus int, memory string) error {
+	wakeArgs, err := parseAttachWakeArgs(cmd, cpus, memory)
+	if err != nil {
+		return err
+	}
 	if len(args) > 0 && (!isTerminal(os.Stdin) || !isTerminal(os.Stdout)) {
 		// No lookup comes first, so the hint repeats the address only when
 		// it means one session as it is.
@@ -103,19 +115,27 @@ func runAttach(cmd *cobra.Command, args []string, restart bool) error {
 	err = a.open(cmd.Context(), cmd, func(ctx context.Context, f found) error {
 		s = *f.s
 		if s.State == api.StateStopped {
-			r, err := restartAgent(ctx, cmd, f, true)
+			r, err := restartAgent(ctx, cmd, f, true, wakeArgs)
 			if err == nil {
 				s = *r
 			}
 			return err
 		}
 		if !client.Ended(s) {
+			if s.CopiesPending {
+				if err := resendPendingCopies(ctx, f.conn, f.host, &s); err != nil {
+					return err
+				}
+			}
 			if restart {
 				say(cmd, "The agent of %s on %s runs, so attach did not restart it.\n", shown(nameOf(s)), shown(f.host.Name))
 			}
+			if wakeArgs.MemoryMax != 0 || wakeArgs.CPUs != 0 {
+				say(cmd, "%s on %s is already running; its size was not changed. Pass the size flags again at the next wake.\n", shown(nameOf(s)), shown(f.host.Name))
+			}
 			return nil
 		}
-		r, err := restartAgent(ctx, cmd, f, restart)
+		r, err := restartAgent(ctx, cmd, f, restart, wakeArgs)
 		if err == nil {
 			s = *r
 		}
@@ -127,12 +147,31 @@ func runAttach(cmd *cobra.Command, args []string, restart bool) error {
 	return attach(cmd.Context(), a.host, s.ID, s.Name)
 }
 
+func parseAttachWakeArgs(cmd *cobra.Command, cpus int, memory string) (client.ResumeArgs, error) {
+	var wakeArgs client.ResumeArgs
+	if cmd.Flags().Changed("memory") {
+		n, err := client.ParseMemoryFlagNamed("--memory", memory)
+		if err != nil {
+			return wakeArgs, err
+		}
+		wakeArgs.MemoryMax = n
+	}
+	cpusFlag, hasCPUs, err := parseCPUsFlag(cmd, cpus)
+	if err != nil {
+		return wakeArgs, err
+	}
+	if hasCPUs {
+		wakeArgs.CPUs = cpusFlag
+	}
+	return wakeArgs, nil
+}
+
 // restartAgent starts again the ended agent of the session f found, as
 // resume does, after a yes or with restart. With input off and without
 // restart, the question fails with exit code 4. The answer no says why the
 // agent ended, and cancels. A helper that cannot resume gets the error of
 // an ended agent.
-func restartAgent(ctx context.Context, cmd *cobra.Command, f found, restart bool) (*client.Session, error) {
+func restartAgent(ctx context.Context, cmd *cobra.Command, f found, restart bool, wakeArgs client.ResumeArgs) (*client.Session, error) {
 	if !f.conn.HasFeature("resume") {
 		return nil, endedError(f.host, *f.s)
 	}
@@ -145,7 +184,7 @@ func restartAgent(ctx context.Context, cmd *cobra.Command, f found, restart bool
 			return nil, declined(f.host, *f.s)
 		}
 	}
-	res, now, err := resumeRacing(ctx, f, client.ResumeArgs{}, nil, secretTerminal(cmd))
+	res, now, err := resumeRacing(ctx, f, wakeArgs, nil, secretTerminal(cmd))
 	if now != nil {
 		say(cmd, "Another client started the agent of %s on %s again first, so this attaches.\n", shown(nameOf(*now)), shown(f.host.Name))
 		return now, nil

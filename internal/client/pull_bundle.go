@@ -26,6 +26,7 @@ const DefaultPullMaxBytes int64 = 512 << 20
 type PullBundleOptions struct {
 	LocalRepo      string
 	Into           string
+	Repo           string
 	Force          bool
 	AllowFlagged   bool
 	MaxBytes       int64
@@ -71,6 +72,7 @@ func PullBundleOn(ctx context.Context, t Transport, h Host, s *Session, opt Pull
 	hdr, tmpPath, err := fetchBundleStream(ctx, t, h, s, api.PullBundleArgs{
 		Base:     base,
 		MaxBytes: opt.MaxBytes,
+		Repo:     opt.Repo,
 	})
 	if err != nil {
 		return PullBundleResult{}, err
@@ -204,6 +206,7 @@ func verifyOrRetryBundle(ctx context.Context, t Transport, h Host, s *Session, o
 	hdr, newPath, err := fetchBundleStream(ctx, t, h, s, api.PullBundleArgs{
 		Full:     true,
 		MaxBytes: opt.MaxBytes,
+		Repo:     opt.Repo,
 	})
 	if err != nil {
 		return api.PullBundleHeader{}, "", err

@@ -113,6 +113,7 @@ func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 		_ = conn.Close()
 		return err
 	}
+	_ = writeBrowserHelper(runDir)
 	sess := link.New(conn, link.Guest, link.Options{})
 	r := &runner{
 		runDir:       runDir,
@@ -336,6 +337,7 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	}
 	agentEnv = withEnvVar(agentEnv, brand.Env("HOOK_SOCK"), hookPath)
 	agentEnv = withEnvVar(agentEnv, brand.Env("SESSION"), a.Session)
+	agentEnv = withEnvVar(agentEnv, "BROWSER", filepath.Join(r.runDir, "browser"))
 
 	m := host.Manifest{
 		Schema:  1,

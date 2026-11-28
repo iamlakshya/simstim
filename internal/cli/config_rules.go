@@ -226,6 +226,7 @@ func validateSettings(abbrev string, s client.Settings, ins *client.TOMLInspecti
 	out = append(out, validateSandboxCaches(abbrev, s.Sandbox.Caches, ins.Pos("sandbox", "caches"), "sandbox.caches")...)
 	out = append(out, validateKeymap(abbrev, s.Keymap, ins)...)
 	out = append(out, validateSecrets(abbrev, s.Secrets, ins)...)
+	out = append(out, validateSandboxSettings(abbrev, s, ins)...)
 	return out
 }
 
@@ -376,6 +377,7 @@ func validateHostEntry(abbrev string, idx int, h client.Host, seenNames map[stri
 	if h.Machine != nil {
 		out = append(out, validateMachine(abbrev, idx, h, ins)...)
 	}
+	out = append(out, validateHostSandbox(abbrev, idx, h, ins)...)
 	for _, sec := range h.Secrets {
 		if !client.ValidSecretName(sec) {
 			addPos(ins.HostPos(idx, "secrets"), "bad_value",

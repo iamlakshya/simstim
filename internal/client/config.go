@@ -4,7 +4,6 @@ package client
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -47,7 +46,9 @@ type Host struct {
 	// Trusted marks a host where you control root. Untrusted hosts default to
 	// false and do not receive secrets unless explicitly allowed.
 	Trusted bool `toml:"trusted,omitempty" json:"-"`
-	// Sandbox overrides [sandbox] defaults from config.toml for this host.
+	// Sandbox holds per-host defaults for session sizes, environment variables,
+	// laptop copies and kept caches. Host settings win over config.toml's
+	// [sandbox] table, and command-line flags win over both.
 	Sandbox *HostSandbox `toml:"sandbox,omitempty" json:"-"`
 }
 
@@ -94,7 +95,8 @@ type Settings struct {
 		// `new --memory-max` sets it for one session.
 		MemoryMax string `toml:"memory_max"`
 	} `toml:"sessions"`
-	// Sandbox holds defaults for walled sessions.
+	// Sandbox holds defaults for walled sessions: paste types, sizes,
+	// environment variables, files copied from this laptop and repository seeds.
 	Sandbox struct {
 		// Paste sets which file types image paste and drag-and-drop may upload
 		// into a walled session: "images-and-pdf" (PNG, JPEG, GIF, WebP and
@@ -107,14 +109,36 @@ type Settings struct {
 		// proxy settings), "strict" (also blocks pip and uv source builds), or
 		// "off".
 		PackageManagers string `toml:"package_managers"`
-		// Env sets extra environment variables inside a sandbox. A name set
-		// here replaces the guest init's value for that name.
+		// CPUs caps the CPU quota of each new session through systemd (100% per
+		// CPU). 0 uses the agent's default on walled sessions and leaves
+		// unwalled sessions unbounded. `new --cpus` overrides it.
+		CPUs int `toml:"cpus"`
+		// Memory caps the memory of each new session, such as "4G" or "auto".
+		// `new --memory` overrides it.
+		Memory string `toml:"memory"`
+		// DiskMax sets the soft disk cap for a walled session's folder, such as
+		// "10G". The supervisor stops a session past this cap with disk_full.
+		DiskMax string `toml:"disk_max"`
+		// Env sets non-secret environment variables for each new session,
+		// replacing guest init defaults for those names. A name listed in
+		// [secrets] is refused with env_is_secret. `new --env` and `--env-file`
+		// override it.
 		Env map[string]string `toml:"env"`
 		// KeepCaches keeps package and build caches across starts of a
 		// sandbox, inside that sandbox only.
 		KeepCaches *bool `toml:"keep_caches"`
 		// Caches adds relative paths under /home/agent, or drops one with "!".
 		Caches []string `toml:"caches"`
+		// CopyIn lists laptop paths (or laptop:guest pairs) copied into each
+		// new session at start over SFTP. Paths under your home land under
+		// /home/agent; other paths land under /mnt/<name>. `new --copy` adds more.
+		CopyIn []string `toml:"copy_in"`
+		// CopyMax caps the total bytes copied by copy_in and --copy at one
+		// start (default "64M").
+		CopyMax string `toml:"copy_max"`
+		// SeedMax caps the size of each git bundle created by --seed (default
+		// "512M").
+		SeedMax string `toml:"seed_max"`
 	} `toml:"sandbox"`
 	// Network holds defaults for sandbox network policy.
 	Network struct {
@@ -163,6 +187,8 @@ func DefaultSettings() Settings {
 	s.Sandbox.Paste = "images-and-pdf"
 	s.Sandbox.PackageManagers = api.DefaultPackageManagers
 	s.Sandbox.KeepCaches = boolPtr(true)
+	s.Sandbox.CopyMax = "64M"
+	s.Sandbox.SeedMax = "512M"
 	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
 	s.Network.UploadBudget = api.DefaultUploadBudget
 	s.Images.Fetch = api.ImagesFetchAuto
@@ -405,29 +431,3 @@ var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 // ValidHostName reports whether n can name a host.
 func ValidHostName(n string) bool { return hostNameRE.MatchString(n) }
-
-// UserError is an error with a suggested next step: the message, and the
-// "Try:" line (docs/contributing/cli-spec.md, section 4).
-type UserError struct {
-	Msg  string
-	Hint string
-	// Code names the error, such as host_not_found. A host sends its own
-	// codes, and the client acts on some of them, such as a repository's
-	// setup script that needs the user's answer. Data carries what the
-	// client needs for that.
-	Code string
-	Data json.RawMessage
-	// Kind sets the exit code. The zero Kind is KindFailed.
-	Kind Kind
-}
-
-func (e *UserError) Error() string { return e.Msg }
-
-// SplitTarget splits "host/session" into its parts.
-func SplitTarget(t string) (host, session string, err error) {
-	host, session, ok := strings.Cut(t, "/")
-	if !ok || host == "" || session == "" {
-		return "", "", &UserError{Msg: fmt.Sprintf("%q is not host/session", t), Hint: brand.Name + " ls", Code: "bad_address", Kind: KindUsage}
-	}
-	return host, session, nil
-}

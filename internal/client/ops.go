@@ -90,6 +90,39 @@ func (c *Conn) NewSession(ctx context.Context, a NewArgs) (*Session, error) {
 	return &s, nil
 }
 
+// StartDeferred finishes starting a session that was created with DeferStart
+// after uploading its copy-in files and seed bundles over SFTP.
+func (c *Conn) StartDeferred(ctx context.Context, a api.SessionStartArgs) (*Session, error) {
+	if !c.HasFeature(api.FeatureSeed) {
+		return nil, &UserError{
+			Msg:  "the helper on " + c.Host.Name + " is too old for seed bundles and laptop copies",
+			Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)",
+			Code: "helper_old",
+		}
+	}
+	var s Session
+	if err := c.Call(ctx, "session.start", a, &s); err != nil {
+		return nil, err
+	}
+	if err := checkSessionID(c.Host.Name, s.ID); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// ApplyCopyIn places staged copy-in files into an existing session (for
+// example on attach after a boot-time restore).
+func (c *Conn) ApplyCopyIn(ctx context.Context, a api.CopyApplyArgs) error {
+	if !c.HasFeature(api.FeatureSeed) {
+		return &UserError{
+			Msg:  "the helper on " + c.Host.Name + " is too old for laptop file copies",
+			Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)",
+			Code: "helper_old",
+		}
+	}
+	return c.Call(ctx, "copy.apply", a, nil)
+}
+
 // needMakeFolder fails when a start asks the host's helper to make its folder,
 // and the helper is too old to do that. An older helper ignores the request.
 func (c *Conn) needMakeFolder(a NewArgs) error {
@@ -113,6 +146,9 @@ func (c *Conn) DeleteSession(ctx context.Context, id string) error {
 func (c *Conn) Delete(ctx context.Context, id string) (DeleteResult, error) {
 	var r DeleteResult
 	err := c.Call(ctx, "delete", map[string]string{"id": id}, &r)
+	if err == nil && r.Deleted {
+		ForgetCopyIn(c.Host.Name, id)
+	}
 	return r, err
 }
 
@@ -124,6 +160,9 @@ func (c *Conn) Delete(ctx context.Context, id string) (DeleteResult, error) {
 func (c *Conn) DeleteNamed(ctx context.Context, id, name string) (DeleteResult, error) {
 	var r DeleteResult
 	err := c.Call(ctx, "delete", map[string]string{"id": id, "name": name}, &r)
+	if err == nil && r.Deleted {
+		ForgetCopyIn(c.Host.Name, id)
+	}
 	return r, err
 }
 

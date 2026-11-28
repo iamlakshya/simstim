@@ -2,7 +2,6 @@ package host
 
 import (
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -98,7 +97,7 @@ func newWalled(a NewArgs) (_ *SessionInfo, err error) {
 }
 
 func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
-	if err := checkMemoryMax(a.MemoryMax); err != nil {
+	if err := checkNewSessionArgs(a); err != nil {
 		return nil, err
 	}
 	ws, err := checkWalledSettings(a)
@@ -109,8 +108,8 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	cwd := expandHome(a.Cwd)
-	missing, err := checkFolder(cwd, a.Worktree)
+	id := NewID()
+	cwd, missing, err := resolveNewCwd(id, a)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +117,6 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		return nil, err
 	}
-	id := NewID()
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
 	argv, hooks, sessionUUID := agentArgv(argv, a, agent, known, inline)
 
@@ -129,16 +127,14 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err != nil {
 		return nil, UserError("agent_missing", argv[0]+" is not installed on this host", "Install it on the host, then try again.")
 	}
-	if len(missing) > 0 {
-		if !a.MakeFolder {
-			return nil, folderQuestion(cwd)
-		}
-		if err := makeFolders(cwd); err != nil {
-			return nil, err
-		}
+	cleanupDir, err := ensureNewCwd(cwd, missing, a)
+	if err != nil {
+		return nil, err
+	}
+	if cleanupDir != nil {
 		defer func() {
 			if err != nil {
-				removeFolders(missing)
+				cleanupDir()
 			}
 		}()
 	}
@@ -162,12 +158,12 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err := paths.EnsurePrivateDir(guestHome); err != nil {
 		return nil, err
 	}
-	env, term := walledEnv(a, id, guestHome, resolved, agent, inline)
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
 		name = filepath.Base(cwd)
 	}
-	asked := max(a.MemoryMax, 0)
+	env, term := walledEnv(a, id, guestHome, resolved, agent, inline)
+	env = applyUserAndIdentityEnv(env, a.Env, id, a.HostName, kind, name, true)
 	now := time.Now().UTC()
 	m := &Manifest{
 		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
@@ -175,7 +171,7 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 		Cwd:     cwd,
 		Env:     env,
 		Term:    TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:  Limits{MemoryMax: sessionMemoryMax(asked), MemoryAsked: asked},
+		Limits:  resolveSessionLimits(a.MemoryMax, a.CPUs, a.DiskMax, kind, true),
 		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
@@ -188,17 +184,23 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 			MinReleaseAge:   ws.minAge,
 			ModelBudget:     ws.modelBudget,
 			UploadBudget:    ws.uploadBudget,
-			SandboxEnv:      maps.Clone(a.SandboxEnv),
+			SandboxEnv:      filterSandboxEnv(a.Env, a.SandboxEnv),
 		},
+		HostName:    a.HostName,
+		SandboxName: name,
+		CopyIn:      a.CopyIn,
 	}
 	if ws.modelBudget > 0 {
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}
 	m.Git = gi
 	m.Secrets = secrets
-	m.SetupHook, m.ResumeHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.hash
+	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
 	m.RunHook = m.SetupHook
 	fillAgentManifest(m, a.Argv, argv, agent, known, inline, hooks, sessionUUID)
+	if a.DeferStart {
+		return saveDeferredSession(m)
+	}
 	return startSession(m, a.Secrets)
 }
 

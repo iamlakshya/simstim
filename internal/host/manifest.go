@@ -83,6 +83,17 @@ type Manifest struct {
 	// Usage records cumulative model token usage and budget for the session
 	// (isolation spec 17.8).
 	Usage *api.SessionUsage `json:"usage,omitempty"`
+	// HostName is the client's saved name for this host (spec 17.2).
+	HostName string `json:"host_name,omitempty"`
+	// SandboxName is the session's initial name, kept for the SANDBOX identity
+	// environment variable even after a rename (spec 17.2).
+	SandboxName string `json:"sandbox_name,omitempty"`
+	// CopyIn holds the laptop-to-session file copy paths configured at start.
+	// The host never stores file contents; CopiesPending marks a restored
+	// session whose files wait for the next client attach (spec 17.3).
+	CopyIn        []api.CopyInSpec     `json:"copy_in,omitempty"`
+	CopiesPending bool                 `json:"copies_pending,omitempty"`
+	SeedRepos     []api.SeedRepoRecord `json:"seed_repos,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -193,6 +204,13 @@ type Limits struct {
 	// default. Each start works MemoryMax out from it again, so a session
 	// that restore starts after a reboot gets the default of that time.
 	MemoryAsked int64 `json:"memory_asked,omitempty"`
+	// CPUs is the CPU cap that the session's unit got at its last start (as
+	// systemd CPUQuota=<CPUs*100>%).
+	CPUs int `json:"cpus,omitempty"`
+	// CPUsAsked is the CPU cap that the user asked for, or 0 for default.
+	CPUsAsked int `json:"cpus_asked,omitempty"`
+	// DiskMax is the soft disk cap for a walled session's folder, in bytes.
+	DiskMax int64 `json:"disk_max,omitempty"`
 }
 
 // Runtime is live process information.
@@ -243,7 +261,8 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
-		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true, "usage": true}
+		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true, "usage": true,
+		"host_name": true, "sandbox_name": true, "copy_in": true, "copies_pending": true, "seed_repos": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

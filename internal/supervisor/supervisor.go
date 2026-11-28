@@ -30,15 +30,18 @@ import (
 // Options tunes supervisor intervals, mostly for fast tests. Zero fields use
 // their spec defaults.
 type Options struct {
-	HeartbeatTimeout time.Duration // spec 10.3: 15s
-	TickInterval     time.Duration // 1s
-	SecretsWait      time.Duration // 30s
-	StopGrace        time.Duration // 5s
-	UploadTimeout    time.Duration // 15s
-	AlertsPath       string        // override alerts config path (optional)
-	Egress           *egress.Client
-	EgressStarter    func(ctx context.Context, id string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error)
-	EgressExe        string
+	HeartbeatTimeout  time.Duration                              // spec 10.3: 15s
+	TickInterval      time.Duration                              // 1s
+	SecretsWait       time.Duration                              // 30s
+	StopGrace         time.Duration                              // 5s
+	UploadTimeout     time.Duration                              // 15s
+	DiskCheckInterval time.Duration                              // 1m (spec 17.1)
+	DiskFreePercent   int                                        // 5% (spec 17.1)
+	DiskUsageFunc     func(string) (avail, total int64, ok bool) // optional override for tests
+	AlertsPath        string                                     // override alerts config path (optional)
+	Egress            *egress.Client
+	EgressStarter     func(ctx context.Context, id string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error)
+	EgressExe         string
 }
 
 func (o Options) withDefaults() Options {
@@ -88,6 +91,7 @@ type Supervisor struct {
 	stopping         bool
 	lastHB           time.Time
 	hbSilent         bool
+	lastDiskCheck    time.Time
 	budgetAlerted    bool
 	budgetAlertLimit int64
 

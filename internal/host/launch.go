@@ -81,6 +81,9 @@ func launchSessionProcess(m *Manifest, subcmd, logPath string, stopSec, tasksMax
 				"-p", fmt.Sprintf("MemoryMax=%d", m.Limits.MemoryMax),
 				"-p", "MemorySwapMax=0")
 		}
+		if m.Limits.CPUs > 0 {
+			args = append(args, "-p", fmt.Sprintf("CPUQuota=%d%%", m.Limits.CPUs*100))
+		}
 		args = append(args, exe, subcmd, m.ID)
 		from = logFileSize(logPath)
 		out, err := exec.CommandContext(context.Background(), "systemd-run", args...).CombinedOutput()
