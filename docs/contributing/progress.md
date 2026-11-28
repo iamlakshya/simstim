@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 37 |
-| To do | 62 |
+| Done | 39 |
+| To do | 60 |
 | **All** | **99** |
 
 ## Current focus
@@ -60,7 +60,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
 | P1.16 | 1 | Day 1 | To do | Runs for many sessions |
 | P2.1 | 2 | Day 1 | Done | DNS policy |
-| P2.3 | 2 | Day 1 | To do | Bound secrets |
+| P2.3 | 2 | Day 1 | Done | Bound secrets |
 | P2.4 | 2 | Day 1 | Done | The model API guard |
 | P2.13 | 2 | Day 1 | To do | SSH keys |
 | P2.16 | 2 | Day 1 | To do | Model usage and budgets |
@@ -99,7 +99,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P3.1 | 3 | Later | To do | The boot pair |
 | H9 | 3 | Later | To do | Runtime delivery and the host cache |
 | P3.2 | 3 | Later | Done | Images |
-| P3.3 | 3 | Later | To do | The Cloud Hypervisor driver |
+| P3.3 | 3 | Later | Done | The Cloud Hypervisor driver |
 | P3.4 | 3 | Later | To do | The guest init on a microvm |
 | P3.5 | 3 | Later | To do | The agents disk |
 | P3.6 | 3 | Later | To do | Lifecycle on a microvm |
