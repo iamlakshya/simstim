@@ -112,7 +112,12 @@ func TestPullBundleAndFoldersUseHostDirForWalledSession(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not installed")
 	}
-	home := t.TempDir()
+	// git names the repository by its real path, and on macOS the
+	// temporary folder is under /var, a link to /private/var.
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("HOME", home)
 	repo := filepath.Join(home, "myrepo")
 	if err := os.MkdirAll(repo, 0o700); err != nil {
