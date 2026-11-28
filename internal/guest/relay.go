@@ -1,6 +1,7 @@
 package guest
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -127,5 +128,49 @@ func cleanPasteDir(dir string, age time.Duration) {
 		if fi, err := e.Info(); err == nil && time.Since(fi.ModTime()) > age {
 			_ = os.Remove(filepath.Join(dir, e.Name()))
 		}
+	}
+}
+
+func (r *runner) readHolderEvents(sessionID string, evR *os.File, started chan<- host.GuestEvent) {
+	defer evR.Close()
+	sentStart := false
+	defer func() {
+		if !sentStart {
+			close(started)
+		}
+	}()
+	sc := bufio.NewScanner(evR)
+	sc.Buffer(make([]byte, 4096), 64<<10)
+	for sc.Scan() {
+		var ge host.GuestEvent
+		if json.Unmarshal(sc.Bytes(), &ge) != nil {
+			continue
+		}
+		if ge.Session == "" {
+			ge.Session = sessionID
+		}
+		if !sentStart && (ge.Type == "started" || ge.Type == "start_failed") {
+			sentStart = true
+			started <- ge
+			close(started)
+			continue
+		}
+		r.sendEvent(Event{
+			Type:       ge.Type,
+			Session:    ge.Session,
+			State:      ge.State,
+			Source:     ge.Source,
+			Reason:     ge.Reason,
+			FullScreen: ge.FullScreen,
+			Kind:       ge.Kind,
+			Detail:     ge.Detail,
+			TurnNS:     ge.TurnNS,
+			AgentID:    ge.AgentID,
+			IDSource:   ge.IDSource,
+			ExitCode:   ge.ExitCode,
+			Signal:     ge.Signal,
+			Cols:       ge.Cols,
+			Rows:       ge.Rows,
+		})
 	}
 }

@@ -11,3 +11,45 @@
 # commit = "<40 hex>"                # the verdict holds for this commit only
 # verdict = "fixed"                  # "fixed" or "not-affected"
 # why = "The pin holds 44c4c8f5."
+
+[[verdict]]
+advisory = "GHSA-3r3x-6hgg-2m38"
+pin = "cloud-hypervisor"
+commit = "96bd3afd6d618102dcd4ca4782276468bb62f3ab"
+verdict = "fixed"
+why = "Affects <= v54.0 (fixed in v53.1, v54.1 and v55.0); the pin is v55.0 and virtio-pmem is not used."
+
+[[verdict]]
+advisory = "GHSA-f47p-p25q-83rh"
+pin = "cloud-hypervisor"
+commit = "96bd3afd6d618102dcd4ca4782276468bb62f3ab"
+verdict = "fixed"
+why = "Affects v21.0 to v51.1 (fixed in v51.2 and v52.0); the pin is v55.0."
+
+[[verdict]]
+advisory = "GHSA-jmr4-g2hv-mjj6"
+pin = "cloud-hypervisor"
+commit = "96bd3afd6d618102dcd4ca4782276468bb62f3ab"
+verdict = "fixed"
+why = "Affects v34.0 to v50.0 (fixed in v50.1 and v51.0); the pin is v55.0 and every disk uses image_type=raw,backing_files=off."
+
+[[verdict]]
+advisory = "GHSA-g6mw-f26h-4jgp"
+pin = "cloud-hypervisor"
+commit = "96bd3afd6d618102dcd4ca4782276468bb62f3ab"
+verdict = "fixed"
+why = "Affects v30.0 and v31.0 (fixed in v30.1 and v31.1); the pin is v55.0."
+
+[[verdict]]
+advisory = "GHSA-q49m-57vm-c8cc"
+pin = "kata-kernel"
+commit = "f9cbda4d235b345340bf461e4aaba8c89e841d8d"
+verdict = "fixed"
+why = "Affects v0.9.0 to v0.19.0 and v3.4.0 to v3.28.0 (fixed in v3.29.0); the pin is 4.4.0 and only the prebuilt kernel is used."
+
+[[verdict]]
+advisory = "GHSA-989w-4xr2-ww9m"
+pin = "kata-kernel"
+commit = "f9cbda4d235b345340bf461e4aaba8c89e841d8d"
+verdict = "fixed"
+why = "Affects <= v0.15.0 and <= v3.20.0 (fixed in v3.21.0); the pin is 4.4.0 and only the prebuilt kernel is used."

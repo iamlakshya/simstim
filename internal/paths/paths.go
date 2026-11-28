@@ -115,6 +115,17 @@ func PortSocket(id string, port int) string {
 	return filepath.Join(PortDir(id), fmt.Sprintf("%d.sock", port))
 }
 
+// SessionDisk is the writable ext4 disk image of one microvm session
+// (isolation spec 10.7, 20.3).
+func SessionDisk(id string) string { return filepath.Join(SessionDir(id), "disk.img") }
+
+// VsockSocket is the host-side Unix socket that bridges virtio-vsock for one
+// microvm session. Kept under RuntimeDir() so it fits the Unix socket path limit.
+func VsockSocket(id string) string { return filepath.Join(RuntimeDir(), "v", id+".vsock") }
+
+// VMMSocket is the Cloud Hypervisor API Unix socket for one microvm session.
+func VMMSocket(id string) string { return filepath.Join(RuntimeDir(), "v", id+".vmm") }
+
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }
 
@@ -123,6 +134,10 @@ func ImagesDir() string { return filepath.Join(DataDir(), "images") }
 
 // ArtefactsDir holds host runtime files and temporary probe scratch files.
 func ArtefactsDir() string { return filepath.Join(DataDir(), "artefacts") }
+
+// RuntimeArtefactsDir holds pinned microvm runtimes (VMM, ch-remote, guest
+// kernel and tools images) on a host.
+func RuntimeArtefactsDir() string { return filepath.Join(ArtefactsDir(), "runtime") }
 
 // ArtefactsIncomingDir holds incoming artefacts and the sandbox probe's
 // temporary reflink test files (isolation spec 14.3).

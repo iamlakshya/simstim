@@ -133,8 +133,8 @@ func runSupervise(args []string) error {
 	return supervisor.Run(args[0])
 }
 
-func runWallInit([]string) error {
-	return guest.Run()
+func runWallInit(args []string) error {
+	return guest.RunArgs(args)
 }
 
 func runEgress(args []string) error {

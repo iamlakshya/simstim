@@ -8,3 +8,40 @@ ref = "release-20261123.1"
 commit = "81f68cb7d4661a9313d891a1758a765abe8eb27e"
 watch = "github"
 tag = "release-{version}"
+
+[[pin]]
+name = "cloud-hypervisor"
+repo = "cloud-hypervisor/cloud-hypervisor"
+ref = "v55.0"
+commit = "96bd3afd6d618102dcd4ca4782276468bb62f3ab"
+watch = "github"
+tag = "v{version}"
+
+[[pin]]
+name = "kata-kernel"
+repo = "kata-containers/kata-containers"
+ref = "4.4.0"
+commit = "f9cbda4d235b345340bf461e4aaba8c89e841d8d"
+watch = "github"
+tag = "{version}"
+
+[kernel]
+source = "kata-containers"
+kata_version = "4.4.0"
+version = "6.18.62"
+archive_member = "./opt/kata/share/kata-containers/vmlinux-6.18.62-211"
+config_member = "./opt/kata/share/kata-containers/config-6.18.62-211"
+amd64 = { url = "https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-substrate-4.4.0-amd64.tar.zst", archive_sha256 = "9f2596cd3aecf524be06036b6edf4991a8978b41a071f8676b3efd2c23d078a7", archive_size = 41962312, sha256 = "011100a36d401b7eff9c4ab132bd570c9a4f9bd7a70550d32b0aaa6cb1455027" }
+arm64 = { url = "https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-substrate-4.4.0-arm64.tar.zst", archive_sha256 = "227cb3de0e98da47d5d9b3c48f263aa81e232345e6b1ce56de4dc374cf178e41", archive_size = 38348343, sha256 = "daa09cde28472ee6afad203a20c94a6ce1c96c9d8dffafdd4c0e87c59262d64a" }
+
+[[vmm]]
+name = "cloud-hypervisor"
+version = "55.0"
+advisory_floor = "52.0"
+released = 2026-11-19
+eol = 2027-02-11
+amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v55.0/cloud-hypervisor-static", sha256 = "ce7133bf535ed5a4e2a63ea1f26025445a5b1241f73ddfb81ff2fbcb2e803a59", size = 7709448 }
+arm64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v55.0/cloud-hypervisor-static-aarch64", sha256 = "446de7552dacc83bc86d1137e7ffa7c2d204cdda4850eac4f2d2666d63c0f697", size = 6054008 }
+remote_amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v55.0/ch-remote-static", sha256 = "2a77651c6a628a5a0edf9ec07b79a2996104577662489ec670ae65511f17ba69", size = 1135192 }
+remote_arm64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v55.0/ch-remote-static-aarch64", sha256 = "b637ca7ecba7e1cbe020926a1137504ad59ff7936f005fe593a9d0353e8583fb", size = 970744 }
+source = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v55.0/cloud-hypervisor-v55.0.tar.xz", sha256 = "20cdf2d0cc5ff73d35ee978dab352563ccac78f83d14c686e204c07497771208", size = 32738340 }

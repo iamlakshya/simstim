@@ -4847,12 +4847,11 @@ The rule of phase 4 holds in every subsection: the laptop holds the digests, and
 
 **Behaviour.** Each release builds a guest kernel and a tools image for amd64 and arm64, in CI. The release manifest names each one by digest (14.9.1).
 
-**The kernel.**
+**The kernel (updated by [0053](decisions/0053-rebuild-with-open-source-parts.md)).**
 
-- The source is the latest 6.18 long-term release, as a kernel.org tarball. UNVERIFIED that 6.18 is a long-term line: P3.1 step 1 checks [kernel.org's releases page](https://www.kernel.org/category/releases.html). `guest/supply.lock` pins its version, URL and SHA-256. A pin bump checks the tarball once against kernel.org's signed `sha256sums.asc`, then records the hash.
-- `guest/kernel/config-amd64` and `guest/kernel/config-arm64` are full `.config` files. P3.1 step 1 takes Cloud Hypervisor's or Firecracker's published guest config for 6.18 as the start (UNVERIFIED that either exists: step 1 checks it). Without one, the start is `make defconfig`. The task then runs `make olddefconfig`, and commits the result.
-- `guest/kernel/check-config.sh <config> <arch>` reads a final `.config`. It fails when a required symbol is not `y`, or when a forbidden symbol is set. CI runs it before each build.
-- The build makes `vmlinux` on amd64, a PVH ELF, and `arch/arm64/boot/Image` on arm64. Cloud Hypervisor boots these formats ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)).
+- The default guest kernel is Kata Containers 4.4.0's prebuilt Linux 6.18.62 kernel from `kata-static-substrate-4.4.0-{amd64,arm64}.tar.zst` (`vmlinux-6.18.62-211`: a PVH ELF on `amd64`, and a Linux ARM64 boot `Image` on `arm64`), pinned by both archive SHA-256 and extracted kernel SHA-256 in `guest/supply.lock`. Both `amd64` and `arm64` configs pass `guest/kernel/check-config.sh`.
+- `guest/kernel/check-config.sh [--strict] <config> <arch>` reads a kernel `.config` and fails when any required symbol is not `y` or any forbidden symbol is set (`--strict` additionally requires `CONFIG_HW_RANDOM_VIRTIO=y`, `CONFIG_VMGENID=y`, and `CONFIG_IO_URING=n` for custom builds started from Firecracker's published 6.18 guest configs).
+- Cloud Hypervisor boots these formats directly ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)).
 
 Required symbols, each `=y`:
 
@@ -5014,22 +5013,15 @@ A root hash is a check value, not a pin. A host can make a start fail with it, b
 
 ### 20.3 The Cloud Hypervisor driver (P3.3)
 
-**The pin.** `guest/supply.lock` pins Cloud Hypervisor v54.0, the static build: `cloud-hypervisor-static` for amd64 and `cloud-hypervisor-static-aarch64` for arm64. The release mirrors both, and the release manifest names each as the `vmm` entry. The reasons, from [build facts 5](../research/build-facts.md#5-the-microvm-and-its-build):
+**The pin (updated by [0053](decisions/0053-rebuild-with-open-source-parts.md)).** `guest/supply.lock` and `internal/wall/chv` pin Cloud Hypervisor v55.0 (`cloud-hypervisor-static` and `ch-remote-static` for `amd64`, and `cloud-hypervisor-static-aarch64` and `ch-remote-static-aarch64` for `arm64`), alongside Kata Containers 4.4.0's prebuilt Linux 6.18.62 kernel:
 
-- v54.0 is the latest release, of 14 October 2026. It gets fixes until about 6 January 2027, which is the entry's `eol`.
-- It gives the main thread its own seccomp filter. Before v54.0 the main thread had none.
-- It requires `image_type` on every disk, which fits the rule of raw disks only.
-- It always adds the VM Generation ID device.
-- v52.0 is the advisory floor, and no pin goes below it. v51.2 and v52.0 fix GHSA-f47p-p25q-83rh, and v50.1 and v51.0 fix GHSA-jmr4-g2hv-mjj6. No newer advisory exists on 10 November 2026. The known-bad list holds both (20.9).
+- v55.0 (19 November 2026, supported until about 11 February 2027) keeps v54.0's main-thread seccomp filter, mandatory `image_type` on every non-`vhost-user` disk, and VM Generation ID device, and also includes the fix for GHSA-3r3x-6hgg-2m38 (virtio-pmem use-after-free in `<= v54.0`).
+- v52.0 remains the advisory floor (`GHSA-f47p-p25q-83rh` fixed in v51.2/v52.0; `GHSA-jmr4-g2hv-mjj6` fixed in v50.1/v51.0).
+- The driver invokes the shipped `ch-remote` binary (`ch-remote --api-socket <sock> power-button` and `info`) instead of maintaining a custom HTTP client.
 
 A pin bump follows the same reasons. The health item `runtime-eol` warns when the pinned VMM passes its `eol` (14.11.1).
 
-**The jail.** The VMM runs in a `vmm` jail (5.6):
-
-- `NetNone`, `PR_SET_DUMPABLE` 0, no core dumps, and the `vmm` seccomp profile of the jail.
-- A mount namespace with only the session folder, the store's files that the start names, `/dev/kvm` and `/dev/urandom`. Cloud Hypervisor always adds a virtio-rng device, which reads `/dev/urandom` by default.
-- A subuid where one is available, with its supplementary groups kept. Whether a subuid can open `/dev/kvm` follows 14.4.2 and [build facts 4](../research/build-facts.md#4-linux-walls). When it cannot, the VMM runs as the login user, and `host show` says so.
-- Cloud Hypervisor's own `--seccomp true` and `--landlock` as well.
+**Confinement (updated by [0053](decisions/0053-rebuild-with-open-source-parts.md)).** The VMM runs with Cloud Hypervisor's own `--seccomp true --landlock`, no `--net` device, and optional `bubblewrap` confinement (`--unshare-net --unshare-ipc --unshare-uts --unshare-pid --die-with-parent --new-session`, read-only artefact binds, writable session and socket folders, `/dev/kvm`, and `/dev/urandom`). There is no custom C launcher and no N5 custody or sealed-copy layer.
 
 **The command.** The supervisor builds the argv from the start request only. `<vmm>` and each `/proc/self/fd/<n>` come from 20.5. Until P4.2 lands, P3.3 passes the files' paths in the store.
 
@@ -5052,9 +5044,9 @@ A pin bump follows the same reasons. The health item `runtime-eol` warns when th
 
 - Every disk has `image_type=raw` and `backing_files=off`, so the VMM never reads a format header that a guest wrote ([threat model](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/docs/threat-model.md)).
 - Every disk has `direct=on`, so the VMM's reads add no host page cache to the session's cap (20.10).
-- v54.0 fails an unaligned request to a raw disk with `direct=on` with an I/O error. UNVERIFIED whether a guest's 512-byte direct write reaches the VMM unaligned: P3.3's test runs `dd bs=512 oflag=direct` on `/work`. If it fails, the session disk drops `direct=on`, and 20.10 counts its page cache.
-- At the first start, before it starts the VMM, the jail creates the session disk as the VMM's uid. It makes a sparse file of `sandbox.disk_max` bytes, 0600, under a temporary name. It formats the file with the host's `mkfs.ext4 -q -F -E root_owner=1000:1000`, then renames it to `SessionDisk(id)`. So a disk at that path is always whole, and no start formats it again. The guest init makes `/work` and the state folders on it when they are missing (P3.4). The microvm probes need `mkfs.ext4` on the host, from e2fsprogs.
-- Neither console reaches a file on the host, because a guest could fill it. The guest init sends its log over the link (P3.4).
+- Verified on Cloud Hypervisor v55.0 with Linux 6.18.62 on ext4: `dd bs=512 oflag=direct` on `/work` succeeds with `direct=on` on the session disk, so `direct=on` stays enabled for all four disks and host page cache stays zero in 20.10.
+- At the first start, before it starts the VMM, the driver creates the session disk as a sparse file of `sandbox.disk_max` bytes, mode 0600, under a temporary name. It formats the file with the host's `mkfs.ext4 -q -F -E root_owner=1000:1000`, then renames it atomically to `SessionDisk(id)`. So a disk at that path is always whole, and no start formats an existing disk again. The guest init makes `/work` on it when missing. The microvm probe requires `mkfs.ext4` on the host (from `e2fsprogs`, searching `PATH`, `/sbin`, and `/usr/sbin`).
+- Neither console reaches a file on the host, because a guest could fill it.
 
 **The kernel command line.**
 
@@ -5067,21 +5059,21 @@ ro quiet root=/dev/dm-0 rootfstype=erofs init=/init dm-mod.waitfor=/dev/vda,/dev
 - `<salt>` is 64 zeros in hex. The algorithm is `sha256`, and both block sizes are 4096 ([dm-init](https://docs.kernel.org/admin-guide/device-mapper/dm-init.html), [verity](https://docs.kernel.org/admin-guide/device-mapper/verity.html)).
 - The kernel passes each word after `--` to init as an argument ([kernel parameters](https://docs.kernel.org/admin-guide/kernel-parameters.html)). So `/init`, the helper, runs `wall-init`, the guest init of 4.1.
 - The line has no `panic=` value, so a guest that panics halts. The link then goes silent. After 15 s the supervisor raises `link_silent` (10.8), kills the VMM and raises `sandbox_error`.
-- The guest names the disks `vda` to `vdd` in the order of `--disk`. UNVERIFIED: P3.3's boot test reads `/sys/block/vd*/serial` and checks the order. The guest init checks each serial before it mounts the agents disk and the session disk.
+- Verified on Cloud Hypervisor v55.0: the guest assigns `vda` to `vdd` in `--disk` order (`/sys/block/vd*/serial` reads `vda=tools`, `vdb=image`, `vdc=agents`, `vdd=session`). The guest init still matches each disk by its `serial` attribute before mounting `/opt/agents` and `/work`.
 
 **The link.**
 
-1. The supervisor connects to `VsockSocket(id)` and writes `CONNECT 1024\n`. The guest init listens on vsock port 1024.
-2. The supervisor reads one line. `OK <port>` means the link is up. UNVERIFIED for Cloud Hypervisor, whose docs show no reply: P3.3's link test reads it.
+1. The supervisor connects to `VsockSocket(id)` and writes `CONNECT 1024\n`. The guest init listens on `AF_VSOCK` port 1024.
+2. Verified on Cloud Hypervisor v55.0: the VMM replies with `OK <host_port>\n` (for example `OK 1073741828`) once guest init accepts the connection, matching Firecracker's hybrid vsock protocol.
 3. Any other answer, or a closed socket, means that the guest init does not listen yet. The supervisor closes that connection, and starts again at step 1 every 50 ms, until the boot timeout.
 4. The supervisor never creates a `<VsockSocket(id)>_<port>` listener, so a guest's own connection to the host reaches nothing ([question 23](#15-open-questions)).
 
 **Start and stop.**
 
-- The boot timeout is 60 s, from the VMM's start to the guest init's hello. Past it, the supervisor kills the VMM, and `new` fails with `sandbox_boot`.
-- The supervisor keeps the last 64 KiB of the VMM's standard error in `SupervisorLog(id)`. A VMM that exits with an error raises `sandbox_error`, with the last line.
-- The supervisor uses the API socket for two things only. It reads the VM's state, and it presses the power button when the guest init does not answer `stop` (6.6).
-- Stop follows 6.6. After the grace, the supervisor kills the VMM.
+- The boot timeout is 60 s, from the VMM's start to the guest init's answer. Past it, the supervisor kills the VMM, and `new` fails with `sandbox_boot`.
+- The supervisor keeps the last 64 KiB of the VMM's standard error. A VMM that exits with an error raises `sandbox_error`, with the last line.
+- The driver uses the shipped `ch-remote` binary over the API socket for two actions only: `ch-remote --api-socket <sock> info` and `ch-remote --api-socket <sock> power-button` (6.6). Inside the guest, `wall-init` subscribes to Linux's Generic Netlink `acpi_event` (`acpi_mc_group`) as well as `/dev/input/event*` so an ACPI power-button press stops holders cleanly and powers the VM off with `reboot(LINUX_REBOOT_CMD_POWER_OFF)`.
+- Stop follows 6.6. After the grace period, the driver kills the VMM process group.
 
 **Memory.** Guest RAM is the session's size. The unit's cap is the size plus the reserve of 20.10.
 

@@ -30,11 +30,16 @@ var HeartbeatInterval = 5 * time.Second
 // linkFD is the file descriptor inherited from the supervisor's socket pair.
 const linkFD = 3
 
-// Run is the entry point of `<helper> wall-init`. When Landlock configuration is
-// present in the environment, it applies Landlock as its very first act before
-// attaching to fd 3. It then serves ctl, holder, put and (when enabled) guest
-// loopback proxy streams until stopped or the link ends.
-func Run() error {
+// Run is the entry point of `<helper> wall-init` with no extra arguments.
+func Run() error { return RunArgs(nil) }
+
+// RunArgs is the entry point of `<helper> wall-init [args...]`. Inside a
+// microvm (PID 1 or --self-test) it mounts the verified rootfs and serves over
+// AF_VSOCK; otherwise it applies Landlock (when configured) and attaches fd 3.
+func RunArgs(args []string) error {
+	if handled, err := maybeRunMicroVM(args); handled {
+		return err
+	}
 	if err := applyWallLandlock(); err != nil {
 		return err
 	}
@@ -297,9 +302,13 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	if a.Session == "" {
 		return nil, &proto.Error{Code: "bad_request", Message: "missing session id", Hint: "Pass a session id in start."}
 	}
-	exe, err := os.Executable()
-	if err != nil {
-		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the host helper installation."}
+	exe := os.Getenv(brand.Env("GUEST_HELPER"))
+	if exe == "" {
+		var err error
+		exe, err = os.Executable()
+		if err != nil {
+			return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the host helper installation."}
+		}
 	}
 	r.mu.Lock()
 	first := len(r.holders) == 0
@@ -345,6 +354,7 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check file descriptor limits on the host."}
 	}
 
+	//nolint:gosec // G702: exe is set by guest init itself (/run/<brand>/tools/init or os.Executable)
 	cmd := exec.CommandContext(context.WithoutCancel(ctx), exe, "holder", a.Session)
 	cmd.Stdin = bytes.NewReader(cfgBytes)
 	devnull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
@@ -399,50 +409,6 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	case <-time.After(10 * time.Second):
 		_ = cmd.Process.Kill()
 		return nil, &proto.Error{Code: "start_failed", Message: "the guest holder did not start in time", Hint: "Try again."}
-	}
-}
-
-func (r *runner) readHolderEvents(sessionID string, evR *os.File, started chan<- host.GuestEvent) {
-	defer evR.Close()
-	sentStart := false
-	defer func() {
-		if !sentStart {
-			close(started)
-		}
-	}()
-	sc := bufio.NewScanner(evR)
-	sc.Buffer(make([]byte, 4096), 64<<10)
-	for sc.Scan() {
-		var ge host.GuestEvent
-		if json.Unmarshal(sc.Bytes(), &ge) != nil {
-			continue
-		}
-		if ge.Session == "" {
-			ge.Session = sessionID
-		}
-		if !sentStart && (ge.Type == "started" || ge.Type == "start_failed") {
-			sentStart = true
-			started <- ge
-			close(started)
-			continue
-		}
-		r.sendEvent(Event{
-			Type:       ge.Type,
-			Session:    ge.Session,
-			State:      ge.State,
-			Source:     ge.Source,
-			Reason:     ge.Reason,
-			FullScreen: ge.FullScreen,
-			Kind:       ge.Kind,
-			Detail:     ge.Detail,
-			TurnNS:     ge.TurnNS,
-			AgentID:    ge.AgentID,
-			IDSource:   ge.IDSource,
-			ExitCode:   ge.ExitCode,
-			Signal:     ge.Signal,
-			Cols:       ge.Cols,
-			Rows:       ge.Rows,
-		})
 	}
 }
 
