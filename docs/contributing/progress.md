@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 39 |
-| To do | 60 |
+| Done | 40 |
+| To do | 59 |
 | **All** | **99** |
 
 ## Current focus
@@ -64,7 +64,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P2.3 | 2 | Day 1 | Done | Bound secrets |
 | P2.4 | 2 | Day 1 | Done | The model API guard |
 | P2.13 | 2 | Day 1 | To do | SSH keys |
-| P2.16 | 2 | Day 1 | To do | Model usage and budgets |
+| P2.16 | 2 | Day 1 | Done | Model usage and budgets |
 | P2.8 | 2 | Day 1 | Done | Package managers in the guest |
 | P2.10 | 2 | Day 1 | To do | Walls by default |
 | P4.1 | 3 | Day 1 | Done | The release manifest and the check before the bridge |
