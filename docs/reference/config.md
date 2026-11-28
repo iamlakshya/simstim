@@ -24,7 +24,7 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sandbox.env` | table | — | Sets extra environment variables inside a sandbox. A name set here replaces the guest init's value for that name. |
 | `network.min_release_age` | string | `"7d"` | Sets the minimum release age for package managers inside a sandbox, as a whole number of days from "0d" to "365d". "0d" turns the age check off. |
 | `keymap` | table | — | Rebinds launcher commands by name ("session: delete"). A value is a key, a list of keys, or "" to unbind. `config keymap` lists the names. |
-| `secrets` | table | — | Names environment variables for sessions, each with a command that prints its value on this computer, such as a keychain or password manager read: OPENAI_API_KEY = "op read op://dev/openai/key". A session gets one only when asked (`new --secret`, or a host's secrets). The value goes to that session's environment and is never stored. |
+| `secrets` | table | — | Names secrets for sessions, each as a command string or a [secrets.NAME] table with run (the command that prints the value) and optional hosts, header, format and route bindings. In a walled session, secrets whose hosts come from [secrets.NAME] or the agent table stay in the egress process and never enter the sandbox. Values are never stored. |
 
 ## hosts.toml
 

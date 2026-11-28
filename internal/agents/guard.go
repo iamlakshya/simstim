@@ -139,6 +139,38 @@ func FindSecretBinding(a Agent, envName string) (SecretBinding, bool) {
 	return SecretBinding{}, false
 }
 
+// FindSecretBindingAnywhere searches the built-in agent table for a
+// SecretBinding matching envName (for example when a user runs a shell sandbox
+// with --secret ANTHROPIC_API_KEY).
+func FindSecretBindingAnywhere(envName string) (Agent, SecretBinding, bool) {
+	if envName == "" {
+		return Agent{}, SecretBinding{}, false
+	}
+	for _, a := range Table {
+		for _, b := range a.Secrets {
+			if b.Env == envName {
+				return a, b, true
+			}
+		}
+	}
+	return Agent{}, SecretBinding{}, false
+}
+
+// FindGatewayForHost looks up the built-in ModelGateway whose UpstreamHost
+// matches rawHost.
+func FindGatewayForHost(rawHost string) (Agent, *ModelGateway, bool) {
+	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(rawHost), "."))
+	if want == "" {
+		return Agent{}, nil, false
+	}
+	for _, a := range Table {
+		if a.ModelGateway != nil && a.ModelGateway.UpstreamHost() == want {
+			return a, a.ModelGateway, true
+		}
+	}
+	return Agent{}, nil, false
+}
+
 var claudeSecrets = []SecretBinding{
 	{
 		Env:    "ANTHROPIC_API_KEY",

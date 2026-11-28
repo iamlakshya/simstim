@@ -49,9 +49,17 @@ type NewArgs struct {
 	Base     string `json:"base,omitempty"`
 	// Inline starts the agent in its inline mode, when it has one.
 	Inline bool `json:"inline,omitempty"`
-	// Secrets go into the agent's environment only. The client fetches them
-	// for this start; the host never writes them down (host/secrets.go).
+	// Secrets carry secret values for this start; the host never writes them
+	// down (host/secrets.go). In a walled session, bound secrets stay in the
+	// egress process's memory and only explicitly exposed secrets enter the
+	// sandbox environment.
 	Secrets map[string]Secret `json:"secrets,omitempty"`
+	// SecretBinds carries destination-binding metadata (hosts, header, format)
+	// from [secrets.NAME] tables in config.toml. It never holds secret values.
+	SecretBinds map[string]SecretBind `json:"secret_binds,omitempty"`
+	// ExposedSecrets names secrets explicitly allowed into a walled session's
+	// environment (--expose NAME).
+	ExposedSecrets []string `json:"exposed_secrets,omitempty"`
 	// Setup says whether the repository's setup script runs: SetupRun,
 	// SetupSkip, or "" to follow the user's answers for this host by
 	// repository (host/setup.go).
@@ -121,6 +129,12 @@ type SessionInfo struct {
 	// Secrets names the secrets the session asked for at its start, never
 	// their values. A resume fetches them again.
 	Secrets []string `json:"secrets,omitempty"`
+	// BoundSecrets names the secrets held only on the trusted egress gateway
+	// for a walled session (never inside the sandbox).
+	BoundSecrets []string `json:"bound_secrets,omitempty"`
+	// ExposedSecrets names the secrets explicitly placed in a walled session's
+	// environment (--expose).
+	ExposedSecrets []string `json:"exposed_secrets,omitempty"`
 	// DebugUntil is when the session's debug stops by itself, while
 	// `debug start` has it on.
 	DebugUntil *time.Time `json:"debug_until,omitempty"`

@@ -23,6 +23,24 @@ The command runs with `sh -c` on your laptop. What it prints is the value, less 
 | Bitwarden CLI | `bw get password <item>` |
 | Linux Secret Service | `secret-tool lookup <attribute> <value>` |
 
+## Bound secrets in a sandbox
+
+In a walled session (`--wall process`), secrets do not enter the sandbox environment. The host's egress process holds bound secrets in memory only and injects them into outbound requests over verified TLS on its gateway route (`/gw/<route>`):
+
+- **Model API keys bind automatically.** For Claude Code (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`) and Codex (`OPENAI_API_KEY`, `CODEX_API_KEY`), define the secret under `[secrets]` in `config.toml`. When you run `simstim new my-server --wall process --agent claude` or `--agent codex`, the client fetches the matching secret automatically, the egress process injects the real key on `/gw/anthropic` or `/gw/openai`, and the sandbox receives only a non-secret placeholder plus `ANTHROPIC_BASE_URL` or a session-local `.codex/config.toml` (`supports_websockets = false`). The user's own `~/.codex/config.toml` on the host is never touched.
+- **Custom destination bindings.** Use a `[secrets.NAME]` table in `config.toml` to bind any secret to its allowed hosts:
+
+```toml
+[secrets.ACME_TOKEN]
+run = "op read op://dev/acme/token"
+hosts = ["api.acme.example"]
+header = "Authorization"       # optional; default is "Authorization"
+format = "Bearer {value}"      # optional; also supports "{value}" and "basic:user:{value}"
+route = "acme"                 # optional; defaults to a slug derived from the host
+```
+
+- **Unbound secrets fail closed.** In a walled session, passing `--secret NAME` for a secret with no bound hosts fails with `secret_unbound`. Add `hosts` under `[secrets.NAME]`, or pass `--expose NAME` to place that secret in the sandbox environment explicitly.
+
 ## Ask for secrets when you start a session
 
 <!-- test: help (needs a host and a secret) -->

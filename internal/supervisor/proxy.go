@@ -73,7 +73,7 @@ func (s *Supervisor) serveConn(conn net.Conn) {
 		Protocol: version.Protocol,
 		Version:  version.Version,
 		Role:     "supervisor",
-		Features: []string{"put", "port.grant", "sftp", "ssh.exec"},
+		Features: []string{"put", "port.grant", "sftp", "ssh.exec", "arm"},
 	}); err != nil {
 		return
 	}
@@ -192,6 +192,8 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 	case "secrets":
 		reply(nil, &proto.Error{Code: "forbidden", Message: "the session has already started", Hint: "Pass secrets when starting or resuming a session."})
 		return false
+	case "arm":
+		s.handleArm(w, req)
 	case "kill":
 		reply(map[string]bool{"killed": true}, nil)
 		go s.requestStop("killed by request", false)

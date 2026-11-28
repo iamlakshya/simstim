@@ -119,12 +119,12 @@ type Settings struct {
 	// Keymap rebinds launcher commands by name ("session: delete"). A value is
 	// a key, a list of keys, or "" to unbind. `config keymap` lists the names.
 	Keymap map[string]any `toml:"keymap"`
-	// Secrets names environment variables for sessions, each with a command
-	// that prints its value on this computer, such as a keychain or password
-	// manager read: OPENAI_API_KEY = "op read op://dev/openai/key". A session
-	// gets one only when asked (`new --secret`, or a host's secrets). The
-	// value goes to that session's environment and is never stored.
-	Secrets map[string]string `toml:"secrets"`
+	// Secrets names secrets for sessions, each as a command string or a
+	// [secrets.NAME] table with run (the command that prints the value) and
+	// optional hosts, header, format and route bindings. In a walled session,
+	// secrets whose hosts come from [secrets.NAME] or the agent table stay in
+	// the egress process and never enter the sandbox. Values are never stored.
+	Secrets map[string]any `toml:"secrets"`
 }
 
 // DefaultSettings are the settings with nothing in config.toml.

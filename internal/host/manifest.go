@@ -111,6 +111,11 @@ type WallRecord struct {
 	PackageManagers string            `json:"package_managers,omitempty"`
 	MinReleaseAge   string            `json:"min_release_age,omitempty"`
 	SandboxEnv      map[string]string `json:"sandbox_env,omitempty"`
+	// BoundSecrets records destination-binding metadata for secrets held only
+	// on the trusted egress gateway. Values are never stored here.
+	BoundSecrets []api.SecretBind `json:"bound_secrets,omitempty"`
+	// ExposedSecrets names secrets explicitly allowed into the sandbox env.
+	ExposedSecrets []string `json:"exposed_secrets,omitempty"`
 }
 
 // GuestClaims holds the latest reports from the guest inside the wall.

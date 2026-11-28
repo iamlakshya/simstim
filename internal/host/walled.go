@@ -41,6 +41,15 @@ func fillWallInfo(info *SessionInfo, m *Manifest) {
 			PackageManagers: m.Wall.PackageManagers,
 			MinReleaseAge:   m.Wall.MinReleaseAge,
 		}
+		if len(m.Wall.BoundSecrets) > 0 {
+			info.BoundSecrets = make([]string, 0, len(m.Wall.BoundSecrets))
+			for _, b := range m.Wall.BoundSecrets {
+				info.BoundSecrets = append(info.BoundSecrets, b.Name)
+			}
+		}
+		if len(m.Wall.ExposedSecrets) > 0 {
+			info.ExposedSecrets = slices.Clone(m.Wall.ExposedSecrets)
+		}
 	}
 	info.Claimed = m.Status.Claimed && info.Alive && info.State != StateLost
 	if info.Alive && len(m.GrantedPorts) > 0 {

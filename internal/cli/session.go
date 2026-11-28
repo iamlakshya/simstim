@@ -31,7 +31,7 @@ func termSize() (int, int) {
 type newOpts struct {
 	agent, dir, name, base, memoryMax, wallLevel            string
 	detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
-	secrets                                                 []string
+	secrets, expose                                         []string
 }
 
 func newCmd() *cobra.Command {
@@ -60,7 +60,8 @@ func newCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&o.inline, "inline", false, "start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml)")
 	cmd.Flags().StringVar(&o.base, "base", "", "the commit or branch the worktree starts from (default: HEAD)")
 	cmd.Flags().StringVar(&o.memoryMax, "memory-max", "", "cap the session's memory: auto, or a `size` such as 4G (default: sessions.memory_max in config.toml)")
-	cmd.Flags().StringArrayVar(&o.secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
+	cmd.Flags().StringArrayVar(&o.secrets, "secret", nil, "pass a secret from config.toml's [secrets] to the session (repeatable)")
+	cmd.Flags().StringArrayVar(&o.expose, "expose", nil, "expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable)")
 	cmd.Flags().BoolVar(&o.setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
 	cmd.Flags().BoolVar(&o.noSetup, "no-setup", false, "do not run the repository's setup script this time")
 	cmd.Flags().StringVar(&o.wallLevel, "wall", "", "sandbox wall level: none, process or gvisor")
@@ -94,10 +95,13 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 	}
 	// Fetch the secrets first: a password manager may want a touch,
 	// and a failing command should not cost a connection.
-	values, err := client.FetchSecrets(cmd.Context(), client.LoadSettings(), client.SecretNames(h, o.secrets), secretTerminal(cmd))
+	settings := client.LoadSettings()
+	secretNames := client.GatewaySecretNames(settings, h, o.agent, wl, o.secrets, o.expose)
+	values, err := client.FetchSecrets(cmd.Context(), settings, secretNames, secretTerminal(cmd))
 	if err != nil {
 		return err
 	}
+	secretBinds := client.SecretBindsFor(settings, secretNames)
 	ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
 	conn, err := client.Dial(ctx, h, true)
 	if err != nil {
@@ -107,7 +111,8 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 	cols, rows := termSize()
 	a := client.TerminalArgs(client.NewArgs{
 		Agent: o.agent, Cwd: client.RemotePath(o.dir), MakeFolder: o.mkdir, Name: o.name,
-		Worktree: o.worktree, Base: o.base, Inline: o.inline, MemoryMax: memMax, Secrets: values, Wall: wl,
+		Worktree: o.worktree, Base: o.base, Inline: o.inline, MemoryMax: memMax,
+		Secrets: values, SecretBinds: secretBinds, ExposedSecrets: o.expose, Wall: wl,
 	}, cols, rows)
 	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 		a.Argv = args[dash:]

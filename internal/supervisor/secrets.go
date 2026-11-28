@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -22,17 +23,32 @@ func (s *Supervisor) secretsBeforeStart(restored bool) (secretEnv, notes []strin
 	if len(want) == 0 {
 		return nil, nil
 	}
+	var received map[string]api.Secret
 	if !restored {
-		secretEnv = s.awaitSecrets(want, s.opt.SecretsWait)
+		received = s.awaitSecrets(want, s.opt.SecretsWait)
 	}
-	if secretEnv == nil {
+	if received == nil {
 		s.m.MissingSecrets = append([]string(nil), want...)
 		notes = append(notes, host.MissingSecretsNote(want, restored))
+		return nil, notes
 	}
-	return secretEnv, notes
+	exposedEnv, err := s.splitAndArmSecrets(want, received)
+	if err != nil {
+		s.log.Error("arm bound secrets failed", "err", err)
+		boundMap := s.boundSecretMap()
+		for _, k := range want {
+			if _, ok := boundMap[k]; ok {
+				s.m.MissingSecrets = append(s.m.MissingSecrets, k)
+			}
+		}
+		if len(s.m.MissingSecrets) > 0 {
+			notes = append(notes, host.MissingSecretsNote(s.m.MissingSecrets, restored))
+		}
+	}
+	return exposedEnv, notes
 }
 
-func (s *Supervisor) awaitSecrets(want []string, timeout time.Duration) []string {
+func (s *Supervisor) awaitSecrets(want []string, timeout time.Duration) map[string]api.Secret {
 	ul, ok := s.ln.(*net.UnixListener)
 	if !ok {
 		return nil
@@ -46,16 +62,16 @@ func (s *Supervisor) awaitSecrets(want []string, timeout time.Duration) []string
 			s.log.Warn("secrets did not arrive, starting without them", "waited", timeout)
 			return nil
 		}
-		env, err := s.readSecrets(conn, want, deadline)
+		vals, err := s.readSecrets(conn, want, deadline)
 		_ = conn.Close()
 		if err == nil {
-			s.log.Info("secrets received", "count", len(env))
-			return env
+			s.log.Info("secrets received", "count", len(vals))
+			return vals
 		}
 	}
 }
 
-func (s *Supervisor) readSecrets(conn net.Conn, want []string, deadline time.Time) ([]string, error) {
+func (s *Supervisor) readSecrets(conn net.Conn, want []string, deadline time.Time) (map[string]api.Secret, error) {
 	dl := time.Now().Add(3 * time.Second)
 	if deadline.Before(dl) {
 		dl = deadline
@@ -94,16 +110,16 @@ func (s *Supervisor) readSecrets(conn net.Conn, want []string, deadline time.Tim
 	if err := json.Unmarshal(req.Args, &msg); err != nil {
 		return nil, fail("bad_request", "the secrets are not valid JSON")
 	}
-	env := make([]string, 0, len(want))
+	vals := make(map[string]api.Secret, len(want))
 	for _, k := range want {
 		v, ok := msg.Env[k]
 		if !ok {
 			return nil, fail("bad_request", "the secret "+k+" is missing")
 		}
-		env = append(env, k+"="+string(v))
+		vals[k] = v
 	}
 	_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, OK: true, Result: json.RawMessage(`{"ok":true}`)})
-	return env, nil
+	return vals, nil
 }
 
 func (s *Supervisor) requestStop(reason string, system bool) {

@@ -4,11 +4,12 @@ import (
 	"sort"
 
 	"github.com/iamlakshya/simstim/internal/guest"
+	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
 func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
-	var pkgLevel, minAge string
-	var userEnv []string
+	var pkgLevel, minAge, proxyURL, boundSecretEnv string
+	var userEnv, boundPlaceholders []string
 	if s.m.Wall != nil {
 		pkgLevel = s.m.Wall.PackageManagers
 		minAge = s.m.Wall.MinReleaseAge
@@ -23,24 +24,32 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 				userEnv = append(userEnv, k+"="+s.m.Wall.SandboxEnv[k])
 			}
 		}
+		if s.m.Wall.Driver == process.DriverName && !s.m.Wall.ShareNet {
+			proxyURL = process.GuestProxyURL
+			boundSecretEnv = s.agentBoundSecretEnv()
+			boundPlaceholders = s.boundPlaceholders(boundSecretEnv)
+		}
 	}
 	return guest.StartReq{
-		Session:         s.id,
-		Name:            s.m.Name,
-		Agent:           s.m.Agent.Kind,
-		Argv:            s.m.Agent.Argv,
-		Env:             s.m.Env,
-		Secrets:         secretEnv,
-		Cwd:             s.m.Cwd,
-		Term:            s.m.Term.Term,
-		Cols:            s.m.Term.Cols,
-		Rows:            s.m.Term.Rows,
-		RunHook:         s.m.RunHook,
-		Notes:           notes,
-		AgentID:         s.m.Agent.AgentSessionID,
-		IDSource:        s.m.Agent.IDSource,
-		PackageManagers: pkgLevel,
-		MinReleaseAge:   minAge,
-		UserEnv:         userEnv,
+		Session:           s.id,
+		Name:              s.m.Name,
+		Agent:             s.m.Agent.Kind,
+		Argv:              s.m.Agent.Argv,
+		Env:               s.m.Env,
+		Secrets:           secretEnv,
+		Cwd:               s.m.Cwd,
+		Term:              s.m.Term.Term,
+		Cols:              s.m.Term.Cols,
+		Rows:              s.m.Term.Rows,
+		RunHook:           s.m.RunHook,
+		Notes:             notes,
+		AgentID:           s.m.Agent.AgentSessionID,
+		IDSource:          s.m.Agent.IDSource,
+		PackageManagers:   pkgLevel,
+		MinReleaseAge:     minAge,
+		UserEnv:           userEnv,
+		ProxyURL:          proxyURL,
+		BoundSecretEnv:    boundSecretEnv,
+		BoundPlaceholders: boundPlaceholders,
 	}
 }

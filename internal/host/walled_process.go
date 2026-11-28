@@ -61,6 +61,10 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 	if err != nil {
 		return nil, err
 	}
+	boundSecrets, exposedSecrets, err := resolveProcessSecrets(agent, known, secrets, a.SecretBinds, a.ExposedSecrets)
+	if err != nil {
+		return nil, err
+	}
 
 	id := NewID()
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
@@ -116,6 +120,8 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			PackageManagers: pkgLevel,
 			MinReleaseAge:   minAge,
 			SandboxEnv:      maps.Clone(a.SandboxEnv),
+			BoundSecrets:    boundSecrets,
+			ExposedSecrets:  exposedSecrets,
 		},
 	}
 	m.Git = gi

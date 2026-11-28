@@ -19,7 +19,7 @@ func TestFetchSecrets(t *testing.T) {
 		t.Skip("the commands are sh")
 	}
 	var s Settings
-	s.Secrets = map[string]string{
+	s.Secrets = map[string]any{
 		"OPENAI_API_KEY": "printf '%s\\n' " + testSecret,
 		"MULTI":          "printf 'line one\\nline two\\r\\n'",
 	}
@@ -44,7 +44,7 @@ func TestFetchSecretsErrorsShowNoValue(t *testing.T) {
 	defer func() { SecretTimeout = old }()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	var s Settings
-	s.Secrets = map[string]string{
+	s.Secrets = map[string]any{
 		"FAILS":   "echo " + testSecret + "; echo " + testSecret + " >&2; exit 3",
 		"EMPTY":   "true",
 		"SLOW":    "echo " + testSecret + "; sleep 5",
@@ -93,5 +93,117 @@ func TestRequireSecrets(t *testing.T) {
 	c.Features = []string{"secrets"}
 	if err := c.RequireSecrets(NewArgs{Secrets: map[string]api.Secret{"A": "x"}}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSecretTableConfigDecodeAndBind(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the commands are sh")
+	}
+	rawTOML := `
+[secrets]
+PLAIN_KEY = "printf 'plain-val'"
+
+[secrets.ANTHROPIC_API_KEY]
+run = "printf 'ant-val'"
+hosts = ["API.Anthropic.com."]
+header = "x-api-key"
+format = "{value}"
+
+[secrets.CUSTOM_API_KEY]
+command = "printf 'custom-val'"
+hosts = ["api.acme.example"]
+header = "X-Acme-Key"
+route = "acme"
+
+[secrets.MULTI_HOST_KEY]
+run = "printf 'multi-val'"
+hosts = ["api.acme.example", "uploads.acme.example"]
+header = "X-Multi-Key"
+`
+	var s Settings
+	strictErr, _, err := DecodeConfigStrict("config.toml", []byte(rawTOML), &s)
+	if err != nil || strictErr != nil {
+		t.Fatalf("DecodeConfigStrict: err=%v strict=%v", err, strictErr)
+	}
+
+	got, err := FetchSecrets(context.Background(), s, []string{"PLAIN_KEY", "ANTHROPIC_API_KEY", "CUSTOM_API_KEY", "MULTI_HOST_KEY"}, false)
+	if err != nil {
+		t.Fatalf("FetchSecrets: %v", err)
+	}
+	if string(got["PLAIN_KEY"]) != "plain-val" || string(got["ANTHROPIC_API_KEY"]) != "ant-val" || string(got["CUSTOM_API_KEY"]) != "custom-val" || string(got["MULTI_HOST_KEY"]) != "multi-val" {
+		t.Fatalf("unexpected fetched values: %v", got)
+	}
+
+	binds := SecretBindsFor(s, []string{"PLAIN_KEY", "ANTHROPIC_API_KEY", "CUSTOM_API_KEY", "MULTI_HOST_KEY"})
+	if _, hasPlain := binds["PLAIN_KEY"]; hasPlain {
+		t.Fatalf("plain secret should not appear in SecretBindsFor: %+v", binds)
+	}
+	ab, ok := binds["ANTHROPIC_API_KEY"]
+	if !ok || len(ab.Hosts) != 1 || ab.Hosts[0] != "api.anthropic.com" || ab.Header != "x-api-key" {
+		t.Fatalf("unexpected ANTHROPIC_API_KEY bind: %+v", ab)
+	}
+	cb, ok := binds["CUSTOM_API_KEY"]
+	if !ok || len(cb.Hosts) != 1 || cb.Hosts[0] != "api.acme.example" || cb.Route != "acme" {
+		t.Fatalf("unexpected CUSTOM_API_KEY bind: %+v", cb)
+	}
+	mb, ok := binds["MULTI_HOST_KEY"]
+	if !ok || len(mb.Hosts) != 2 || mb.Hosts[1] != "uploads.acme.example" || mb.Route != "" {
+		t.Fatalf("unexpected MULTI_HOST_KEY bind: %+v", mb)
+	}
+
+	// Reject CR/LF in format and explicit route with multiple hosts.
+	if _, err := ParseSecretConfig("BAD_FMT", map[string]any{
+		"run": "echo x", "hosts": []any{"api.example.com"}, "format": "Bearer {value}\r\nX-Evil: 1",
+	}); err == nil {
+		t.Error("expected error for CR/LF in format")
+	}
+	if _, err := ParseSecretConfig("BAD_ROUTE", map[string]any{
+		"run": "echo x", "hosts": []any{"a.example.com", "b.example.com"}, "route": "shared",
+	}); err == nil {
+		t.Error("expected error for explicit route with multiple hosts")
+	}
+}
+
+func TestGatewaySecretNamesAutoBindsAgentSecret(t *testing.T) {
+	var s Settings
+	s.Secrets = map[string]any{
+		"ANTHROPIC_API_KEY":       "echo a",
+		"CLAUDE_CODE_OAUTH_TOKEN": "echo o",
+		"OPENAI_API_KEY":          "echo x",
+		"EXTRA":                   "echo e",
+	}
+	h := Host{Name: "devbox"}
+
+	// Walled claude session auto-selects first matching agent secret from config.toml.
+	got := GatewaySecretNames(s, h, "claude", "process", nil, nil)
+	if strings.Join(got, ",") != "ANTHROPIC_API_KEY" {
+		t.Fatalf("claude process wall auto secrets = %v, want [ANTHROPIC_API_KEY]", got)
+	}
+
+	// Explicit --secret CLAUDE_CODE_OAUTH_TOKEN does not also add ANTHROPIC_API_KEY.
+	got = GatewaySecretNames(s, h, "claude", "process", []string{"CLAUDE_CODE_OAUTH_TOKEN"}, nil)
+	if strings.Join(got, ",") != "CLAUDE_CODE_OAUTH_TOKEN" {
+		t.Fatalf("claude explicit oauth = %v, want [CLAUDE_CODE_OAUTH_TOKEN]", got)
+	}
+
+	// Walled codex session auto-selects OPENAI_API_KEY and keeps --expose names.
+	got = GatewaySecretNames(s, h, "codex", "process", nil, []string{"EXTRA"})
+	if strings.Join(got, ",") != "EXTRA,OPENAI_API_KEY" {
+		t.Fatalf("codex process wall secrets = %v, want [EXTRA OPENAI_API_KEY]", got)
+	}
+
+	// Unwalled session does NOT auto-select agent secrets.
+	got = GatewaySecretNames(s, h, "claude", "none", nil, nil)
+	if len(got) != 0 {
+		t.Fatalf("unwalled session auto secrets = %v, want empty", got)
+	}
+
+	// Host with wall_floor="process" and empty wallLevel starts an unwalled
+	// session in host.New, so GatewaySecretNames must NOT auto-fetch secrets.
+	hFloor := Host{Name: "devbox", WallFloor: "process"}
+	got = GatewaySecretNames(s, hFloor, "codex", "", nil, nil)
+	if len(got) != 0 {
+		t.Fatalf("empty wallLevel with host floor auto-fetched secrets = %v, want empty", got)
 	}
 }

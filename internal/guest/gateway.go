@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/iamlakshya/simstim/internal/agents"
@@ -109,4 +110,39 @@ func WriteGatewayConfig(homeDir string, env map[string]string, proxyURL string, 
 		return "", fmt.Errorf("guest gateway: install %s: %w. Try: check sandbox home permissions", target, err)
 	}
 	return filepath.Join(dir, base), nil
+}
+
+// applyStartGateway wires an agent's ModelGateway environment variables and
+// per-session config file (such as Codex's /home/agent/.codex/config.toml) plus
+// any non-secret placeholders for custom bound secrets before starting the
+// guest holder. Nothing touches the host user's own config files.
+func applyStartGateway(a StartReq, env []string) ([]string, error) {
+	if a.ProxyURL == "" {
+		return env, nil
+	}
+	setKeys := map[string]bool{}
+	if agent, ok := agents.Find(a.Agent); ok && agent.ModelGateway != nil {
+		gwEnv := GatewayEnv(a.ProxyURL, agent, a.BoundSecretEnv)
+		keys := make([]string, 0, len(gwEnv))
+		for k := range gwEnv {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			env = withEnvVar(env, k, gwEnv[k])
+			setKeys[k] = true
+		}
+		envMap := parseEnvSlice(env)
+		if homeDir := envMap["HOME"]; homeDir != "" {
+			if _, err := WriteGatewayConfig(homeDir, envMap, a.ProxyURL, agent, a.BoundSecretEnv); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, kv := range a.BoundPlaceholders {
+		if k, v, ok := strings.Cut(kv, "="); ok && k != "" && !setKeys[k] {
+			env = withEnvVar(env, k, v)
+		}
+	}
+	return env, nil
 }

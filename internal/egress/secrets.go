@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strings"
@@ -92,9 +93,17 @@ func (s *SecretStore) Lookup(route string) (name, header, headerVal string, ok b
 	}
 	name = sc.name
 	header = sc.header
-	headerVal = strings.ReplaceAll(sc.format, "{value}", string(sc.value))
+	headerVal = formatCredentialHeader(sc.format, string(sc.value))
 	s.mu.RUnlock()
 	return name, header, headerVal, true
+}
+
+func formatCredentialHeader(format, val string) string {
+	if rest, ok := strings.CutPrefix(format, "basic:"); ok {
+		raw := strings.ReplaceAll(rest, "{value}", val)
+		return "Basic " + base64.StdEncoding.EncodeToString([]byte(raw))
+	}
+	return strings.ReplaceAll(format, "{value}", val)
 }
 
 // RedactMap returns a map of secret names to raw values for registering with

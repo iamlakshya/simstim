@@ -57,7 +57,14 @@ func FetchSecrets(ctx context.Context, s Settings, names []string, terminal bool
 		if !secretNameRE.MatchString(name) {
 			return nil, &UserError{Msg: fmt.Sprintf("%q cannot name a secret", name), Hint: "Use letters, digits and underscores, as in OPENAI_API_KEY.", Code: "bad_secret", Kind: KindUsage}
 		}
-		command := strings.TrimSpace(s.Secrets[name])
+		cfg, ok, err := s.SecretConfig(name)
+		if err != nil {
+			return nil, &UserError{Msg: err.Error(), Hint: configCheckHint(), Code: "bad_config", Kind: KindUsage}
+		}
+		command := ""
+		if ok {
+			command = cfg.Run
+		}
 		if command == "" {
 			return nil, &UserError{Msg: fmt.Sprintf("no secret named %s in config.toml", name),
 				Hint: fmt.Sprintf("Add %s = \"<the command that prints it>\" under [secrets] in %s.", name, settingsPath()), Code: "secret_not_found", Kind: KindNotFound}

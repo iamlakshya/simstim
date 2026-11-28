@@ -27,9 +27,10 @@ func (s *Supervisor) initEgress() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	args := egress.StartArgs{
-		Session:    s.id,
-		Agent:      s.m.Agent.Kind,
-		PolicyTOML: s.m.Wall.PolicyTOML,
+		Session:       s.id,
+		Agent:         s.m.Agent.Kind,
+		PolicyTOML:    s.m.Wall.PolicyTOML,
+		GatewayRoutes: s.gatewayRoutes(),
 	}
 	client, stopFn, err := startEgressProcess(ctx, s.id, s.opt.EgressExe, args, s.recordEgressAudit)
 	if err != nil {

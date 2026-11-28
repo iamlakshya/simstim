@@ -50,23 +50,26 @@ type PutResp struct {
 
 // StartReq is the arguments object of the ctl "start" request.
 type StartReq struct {
-	Session         string   `json:"session"`
-	Name            string   `json:"name,omitempty"`
-	Agent           string   `json:"agent"`
-	Argv            []string `json:"argv"`
-	Env             []string `json:"env"`
-	Secrets         []string `json:"secrets,omitempty"`
-	Cwd             string   `json:"cwd"`
-	Term            string   `json:"term,omitempty"`
-	Cols            int      `json:"cols"`
-	Rows            int      `json:"rows"`
-	RunHook         string   `json:"run_hook,omitempty"`
-	Notes           []string `json:"notes,omitempty"`
-	AgentID         string   `json:"agent_session_id,omitempty"`
-	IDSource        string   `json:"id_source,omitempty"`
-	PackageManagers string   `json:"package_managers,omitempty"`
-	MinReleaseAge   string   `json:"min_release_age,omitempty"`
-	UserEnv         []string `json:"user_env,omitempty"`
+	Session           string   `json:"session"`
+	Name              string   `json:"name,omitempty"`
+	Agent             string   `json:"agent"`
+	Argv              []string `json:"argv"`
+	Env               []string `json:"env"`
+	Secrets           []string `json:"secrets,omitempty"`
+	Cwd               string   `json:"cwd"`
+	Term              string   `json:"term,omitempty"`
+	Cols              int      `json:"cols"`
+	Rows              int      `json:"rows"`
+	RunHook           string   `json:"run_hook,omitempty"`
+	Notes             []string `json:"notes,omitempty"`
+	AgentID           string   `json:"agent_session_id,omitempty"`
+	IDSource          string   `json:"id_source,omitempty"`
+	PackageManagers   string   `json:"package_managers,omitempty"`
+	MinReleaseAge     string   `json:"min_release_age,omitempty"`
+	UserEnv           []string `json:"user_env,omitempty"`
+	ProxyURL          string   `json:"proxy_url,omitempty"`
+	BoundSecretEnv    string   `json:"bound_secret_env,omitempty"`
+	BoundPlaceholders []string `json:"bound_placeholders,omitempty"`
 }
 
 // StartResp is the result object of the ctl "start" request.

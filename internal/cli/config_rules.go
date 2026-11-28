@@ -331,43 +331,6 @@ func validateKeymapValue(abbrev, name string, val any, pos client.ConfigPos) []c
 	return out
 }
 
-func validateSecrets(abbrev string, secrets map[string]string, ins *client.TOMLInspection) []configFinding {
-	if len(secrets) == 0 {
-		return nil
-	}
-	names := make([]string, 0, len(secrets))
-	for k := range secrets {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-
-	var out []configFinding
-	for _, name := range names {
-		pos := ins.Pos("secrets", name)
-		if !client.ValidSecretName(name) {
-			out = append(out, configFinding{
-				Path:     abbrev,
-				Line:     pos.Line,
-				Column:   pos.Column,
-				Severity: "error",
-				Code:     "bad_value",
-				Message:  fmt.Sprintf("%q cannot name a secret in [secrets]", name),
-			})
-		}
-		if strings.TrimSpace(secrets[name]) == "" {
-			out = append(out, configFinding{
-				Path:     abbrev,
-				Line:     pos.Line,
-				Column:   pos.Column,
-				Severity: "error",
-				Code:     "bad_value",
-				Message:  fmt.Sprintf("secret %q in [secrets] has an empty command", name),
-			})
-		}
-	}
-	return out
-}
-
 func validateHosts(abbrev string, hosts []client.Host, ins *client.TOMLInspection) []configFinding {
 	out := make([]configFinding, 0, len(hosts))
 	seenNames := map[string]bool{}

@@ -329,6 +329,10 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 	if err != nil {
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check sandbox.package_managers and network.min_release_age."}
 	}
+	agentEnv, err = applyStartGateway(a, agentEnv)
+	if err != nil {
+		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the agent's model gateway configuration."}
+	}
 	agentEnv = withEnvVar(agentEnv, brand.Env("HOOK_SOCK"), hookPath)
 	agentEnv = withEnvVar(agentEnv, brand.Env("SESSION"), a.Session)
 

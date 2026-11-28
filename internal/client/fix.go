@@ -61,7 +61,12 @@ func LocalChecks() []Check {
 	}
 	sort.Strings(names)
 	for _, k := range names {
-		prog := strings.Fields(s.Secrets[k])
+		cfg, _, err := s.SecretConfig(k)
+		if err != nil {
+			out = append(out, Check{Name: "secret " + k, Detail: err.Error(), Fix: configCheckHint()})
+			continue
+		}
+		prog := strings.Fields(cfg.Run)
 		switch {
 		case len(prog) == 0:
 			out = append(out, Check{Name: "secret " + k, Detail: "it has no command", Fix: "give it a command in " + settingsPath()})
