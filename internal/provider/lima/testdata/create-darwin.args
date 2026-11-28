@@ -5,6 +5,7 @@ create
 --vm-type=vz
 --set=.networkOpts.hostLoopback = false
 --nested-virt
+--set=.provision += [{"mode":"system","script":"#!/bin/sh\nset -eux\nexport DEBIAN_FRONTEND=noninteractive\napt-get update && apt-get install -y bubblewrap apparmor-profiles apparmor-utils\nif [ ! -f /etc/apparmor.d/bwrap-userns-restrict ] && [ ! -f /etc/apparmor.d/bwrap ] && [ -f /usr/share/apparmor/extra-profiles/bwrap-userns-restrict ]; then\n  install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict\nfi\nif [ -d /sys/kernel/security/apparmor ]; then\n  if [ -f /etc/apparmor.d/bwrap-userns-restrict ]; then\n    apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict\n  elif [ -f /etc/apparmor.d/bwrap ]; then\n    apparmor_parser -r /etc/apparmor.d/bwrap\n  fi\nfi\nif getent group kvm >/dev/null 2>&1; then\n  for u in $(awk -F: '$6 ~ /^\\/home\\// && $7 !~ /(nologin|false)$/ {print $1}' /etc/passwd); do\n    usermod -aG kvm \"$u\"\n  done\nfi\n"}]
 --cpus=2
 --memory=4
 --disk=40

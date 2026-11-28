@@ -25,7 +25,7 @@ What `host add --local` does:
 
 1. Checks that this Mac has Apple silicon and macOS 15 or later.
 2. Downloads the pinned Lima 2.3.0 release archive, verifies its SHA-256 digest and extracts it under `~/.local/share/simstim/lima/2.3.0/`. Homebrew updates cannot change the pinned binary.
-3. Creates a plain `vz` Ubuntu LTS VM (`--plain`, no home-folder mounts and no automatic port forwards) with `networkOpts.hostLoopback: false` and fewer than half of the Mac's CPUs and memory.
+3. Creates a plain `vz` Ubuntu LTS VM (`--plain`, no home-folder mounts and no automatic port forwards) with `networkOpts.hostLoopback: false` and fewer than half of the Mac's CPUs and memory. At create time, a system provisioning script installs `bubblewrap`, loads Ubuntu's `bwrap-userns-restrict` AppArmor profile, and adds the VM user to the `kvm` group so process walls work out of the box (`Level now: process`) and `/dev/kvm` is ready for nested virtualisation.
 4. Registers automatic startup through `limactl autostart enable`:
    - `boot` (the default) uses `limactl autostart enable --condition=boot --keep-alive`, which installs Lima's LaunchDaemon with `sudo` so the VM starts at boot before login.
    - `login` uses `limactl autostart enable --condition=login --keep-alive`, which installs Lima's LaunchAgent with no `sudo` so the VM starts when you log in. When input is off without passwordless `sudo`, an implicit default falls back to `login` and prints the `boot` command.

@@ -118,6 +118,7 @@ func CreateArgs(inst string, req provider.Request, system string) []string {
 	if system == "darwin" {
 		args = append(args, "--vm-type=vz", "--set=.networkOpts.hostLoopback = false", "--nested-virt")
 	}
+	args = append(args, provisionSetArg())
 	return append(args, fmt.Sprintf("--cpus=%d", cpus), "--memory="+formatGiB(mem), "--disk="+formatGiB(disk), Template)
 }
 
