@@ -29,15 +29,19 @@ tag = "{version}"
 source = "kata-containers"
 kata_version = "4.4.0"
 version = "6.18.62"
+licence = "GPL-2.0-only"
 archive_member = "./opt/kata/share/kata-containers/vmlinux-6.18.62-211"
 config_member = "./opt/kata/share/kata-containers/config-6.18.62-211"
-amd64 = { url = "https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-substrate-4.4.0-amd64.tar.zst", archive_sha256 = "9f2596cd3aecf524be06036b6edf4991a8978b41a071f8676b3efd2c23d078a7", archive_size = 41962312, sha256 = "011100a36d401b7eff9c4ab132bd570c9a4f9bd7a70550d32b0aaa6cb1455027" }
-arm64 = { url = "https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-substrate-4.4.0-arm64.tar.zst", archive_sha256 = "227cb3de0e98da47d5d9b3c48f263aa81e232345e6b1ce56de4dc374cf178e41", archive_size = 38348343, sha256 = "daa09cde28472ee6afad203a20c94a6ce1c96c9d8dffafdd4c0e87c59262d64a" }
+source_tarball = { url = "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.62.tar.xz", sha256 = "490a7aedf1b355c565d3a6c05333ccccb5da82064eca46b590448a7099d7d651", size = 155352516 }
+amd64 = { url = "https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-substrate-4.4.0-amd64.tar.zst", archive_sha256 = "9f2596cd3aecf524be06036b6edf4991a8978b41a071f8676b3efd2c23d078a7", archive_size = 41962312, sha256 = "011100a36d401b7eff9c4ab132bd570c9a4f9bd7a70550d32b0aaa6cb1455027", size = 40868128, config_sha256 = "0127c096083a883f9701a44249cb343f1c33f137d05f6e6184d1b3b833f26de6", config_size = 97258 }
+arm64 = { url = "https://github.com/kata-containers/kata-containers/releases/download/4.4.0/kata-static-substrate-4.4.0-arm64.tar.zst", archive_sha256 = "227cb3de0e98da47d5d9b3c48f263aa81e232345e6b1ce56de4dc374cf178e41", archive_size = 38348343, sha256 = "daa09cde28472ee6afad203a20c94a6ce1c96c9d8dffafdd4c0e87c59262d64a", size = 18883072, config_sha256 = "5a38f40e5bd7003ebfdab61cbf473974364ca6e2bc07611b40b84aa07eb38efe", config_size = 95915 }
 
 [[vmm]]
 name = "cloud-hypervisor"
 version = "55.0"
 advisory_floor = "52.0"
+licence = "Apache-2.0 AND BSD-3-Clause"
+host_kernel = ">=6.8"
 released = 2026-11-19
 eol = 2027-02-11
 amd64 = { url = "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/v55.0/cloud-hypervisor-static", sha256 = "ce7133bf535ed5a4e2a63ea1f26025445a5b1241f73ddfb81ff2fbcb2e803a59", size = 7709448 }

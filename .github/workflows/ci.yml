@@ -63,6 +63,10 @@ jobs:
         run: python3 test/e2e/test_session_sockets.py
       - name: Pins watch tests (offline, with recorded answers)
         run: python3 scripts/test-pins-watch.py
+      - name: Guest kernel config check tests and supply lock check
+        run: |
+          guest/kernel/test-check-config.sh
+          go run ./cmd/supply check-lock --lock guest/supply.lock
       - name: Benchmark confirmation matcher tests (offline)
         run: python3 scripts/test-bench-pattern.py
       - name: The release job's signed-tag gate, in a temporary repository

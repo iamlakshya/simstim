@@ -40,11 +40,15 @@ type FilePin struct {
 }
 
 // KernelPin describes the pinned prebuilt Kata 6.18 guest kernel archive and
-// extracted vmlinux image for one architecture.
+// extracted vmlinux image and config for one architecture.
 type KernelPin struct {
 	Archive       FilePin
 	ArchiveMember string
+	ConfigMember  string
 	KernelSHA256  string
+	KernelSize    int64
+	ConfigSHA256  string
+	ConfigSize    int64
 }
 
 // ArchPins holds all pinned microvm runtime artefacts for one architecture.
@@ -76,7 +80,11 @@ var Pins = map[string]ArchPins{
 				Size:   41962312,
 			},
 			ArchiveMember: "./opt/kata/share/kata-containers/vmlinux-6.18.62-211",
+			ConfigMember:  "./opt/kata/share/kata-containers/config-6.18.62-211",
 			KernelSHA256:  "011100a36d401b7eff9c4ab132bd570c9a4f9bd7a70550d32b0aaa6cb1455027",
+			KernelSize:    40868128,
+			ConfigSHA256:  "0127c096083a883f9701a44249cb343f1c33f137d05f6e6184d1b3b833f26de6",
+			ConfigSize:    97258,
 		},
 	},
 	"arm64": {
@@ -98,7 +106,11 @@ var Pins = map[string]ArchPins{
 				Size:   38348343,
 			},
 			ArchiveMember: "./opt/kata/share/kata-containers/vmlinux-6.18.62-211",
+			ConfigMember:  "./opt/kata/share/kata-containers/config-6.18.62-211",
 			KernelSHA256:  "daa09cde28472ee6afad203a20c94a6ce1c96c9d8dffafdd4c0e87c59262d64a",
+			KernelSize:    18883072,
+			ConfigSHA256:  "5a38f40e5bd7003ebfdab61cbf473974364ca6e2bc07611b40b84aa07eb38efe",
+			ConfigSize:    95915,
 		},
 	},
 }

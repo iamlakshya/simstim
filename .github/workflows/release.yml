@@ -75,6 +75,39 @@ jobs:
           # repository exists; until then the cask is built into dist/ and
           # not pushed.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      - name: Build and verify the microvm boot pair and release manifest (spec 20.1)
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GUEST_MIRROR_SOURCE: "1"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq erofs-utils zstd
+          ver="${TAG#v}"
+          GUEST_RELEASE_VERSION="$ver" \
+            GUEST_RELEASE_BASE_URL="https://${MODULE}/releases/download/${TAG}" \
+            guest/build.sh all
+          (cd build/guest && sha256sum \
+            vmlinux-amd64 Image-arm64 \
+            config-amd64 config-arm64 \
+            tools-amd64.erofs tools-arm64.erofs \
+            linux-*.tar.xz \
+            cloud-hypervisor-*-linux-* ch-remote-*-linux-* \
+            cloud-hypervisor-*.tar.xz \
+            release-manifest.json) >> dist/checksums.txt
+          gh release upload "$TAG" \
+            build/guest/vmlinux-amd64 \
+            build/guest/Image-arm64 \
+            build/guest/config-amd64 \
+            build/guest/config-arm64 \
+            build/guest/tools-amd64.erofs \
+            build/guest/tools-arm64.erofs \
+            build/guest/linux-*.tar.xz \
+            build/guest/cloud-hypervisor-*-linux-* \
+            build/guest/ch-remote-*-linux-* \
+            build/guest/cloud-hypervisor-*.tar.xz \
+            build/guest/release-manifest.json \
+            dist/checksums.txt --clobber
       - name: Sign the checksums with the release SSH key
         # install.sh checks this signature with ssh-keygen, which every host
         # with OpenSSH has; the public key is .github/release-signers.

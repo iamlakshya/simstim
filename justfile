@@ -83,10 +83,24 @@ build: helpers _vt-if-zig
 install: build
     install -m 0755 bin/{{name}} ~/.local/bin/{{name}}
 
+# Build the microvm boot pair (guest kernel, configs, dm-verity tools image, mirrored VMM and release-manifest.json).
+guest arch="all": helpers _vt-if-zig
+    guest/build.sh {{arch}}
+
+# Boot the built microvm guest kernel and tools image under pinned Cloud Hypervisor (--self-test).
+guest-boot arch="amd64":
+    go run ./cmd/supply boot-test --arch {{arch}} --dir build/guest
+
+# Download and verify the pinned VMM binaries against guest/supply.lock.
+mirror-vmm arch="all":
+    go run ./cmd/supply mirror-vmm --lock guest/supply.lock --arch {{arch}} --out build/guest
+
 # Unit tests with the race detector.
 test:
     go test -race -count=1 ./...
     LINK_TEST_PIPE=1 go test -race -count=1 ./internal/link
+    guest/kernel/test-check-config.sh
+    go run ./cmd/supply check-lock --lock guest/supply.lock
     python3 scripts/test-scorecard-check.py
     python3 test/e2e/test_sandbox_hosts.py
     python3 test/e2e/test_session_sockets.py

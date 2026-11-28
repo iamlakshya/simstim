@@ -4,17 +4,17 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	"github.com/Microsoft/hcsshim/ext4/dmverity"
+	"github.com/iamlakshya/simstim/internal/supply"
 )
 
 // ToolsRecord describes a built dm-verity EROFS tools image (spec 20.1).
@@ -32,6 +32,7 @@ type ToolsBuildOptions struct {
 	MkfsErofs string // path to mkfs.erofs; defaults to exec.LookPath("mkfs.erofs")
 	ShadowVT  string // optional path to shadow-vt binary installed at /bin/<vtName>
 	VTName    string // basename under /bin/ when ShadowVT is set
+	Epoch     int64  // SOURCE_DATE_EPOCH timestamp for deterministic EROFS metadata
 }
 
 // toolsMountDirs are the empty mountpoint directories in the tools EROFS image
@@ -85,14 +86,10 @@ func BuildToolsImage(ctx context.Context, helperBin, outPath string, opts ToolsB
 		}
 	}()
 
-	if err := buildToolsEROFS(ctx, mkfsBin, helperBin, opts.ShadowVT, opts.VTName, tmpPath); err != nil {
+	if err := buildToolsEROFS(ctx, mkfsBin, helperBin, opts.ShadowVT, opts.VTName, opts.Epoch, tmpPath); err != nil {
 		return ToolsRecord{}, err
 	}
-	dataBlocks, rootHash, totalSize, err := appendRawVerity(tmpPath)
-	if err != nil {
-		return ToolsRecord{}, err
-	}
-	hexSHA, err := fileSHA256(tmpPath)
+	vi, err := supply.AppendRawVerity(tmpPath)
 	if err != nil {
 		return ToolsRecord{}, err
 	}
@@ -106,26 +103,26 @@ func BuildToolsImage(ctx context.Context, helperBin, outPath string, opts ToolsB
 	cleanup = false
 	return ToolsRecord{
 		Path:       cleanOut,
-		SHA256:     hexSHA,
-		Size:       totalSize,
-		RootHash:   rootHash,
-		Salt:       ZeroSaltHex,
-		DataBlocks: dataBlocks,
+		SHA256:     vi.SHA256,
+		Size:       vi.Size,
+		RootHash:   vi.RootHash,
+		Salt:       vi.Salt,
+		DataBlocks: vi.DataBlocks,
 	}, nil
 }
 
-func buildToolsEROFS(ctx context.Context, mkfsBin, helperBin, vtBin, vtName, outPath string) error {
+func buildToolsEROFS(ctx context.Context, mkfsBin, helperBin, vtBin, vtName string, epoch int64, outPath string) error {
 	pr, pw := io.Pipe()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- writeToolsTar(pw, helperBin, vtBin, vtName)
+		errCh <- writeToolsTar(pw, helperBin, vtBin, vtName, epoch)
 	}()
 
 	cmd := exec.CommandContext(ctx, mkfsBin,
 		"--tar=f",
 		"--all-root",
 		"-U", "clear",
-		"-T", "0",
+		"-T", strconv.FormatInt(epoch, 10),
 		"--mkfs-time",
 		"-b", "4096",
 		"--quiet",
@@ -146,9 +143,9 @@ func buildToolsEROFS(ctx context.Context, mkfsBin, helperBin, vtBin, vtName, out
 	return nil
 }
 
-func writeToolsTar(w *io.PipeWriter, helperBin, vtBin, vtName string) error {
+func writeToolsTar(w *io.PipeWriter, helperBin, vtBin, vtName string, epochSec int64) error {
 	tw := tar.NewWriter(w)
-	epoch := time.Unix(0, 0).UTC()
+	epoch := time.Unix(epochSec, 0).UTC()
 
 	for _, d := range toolsMountDirs {
 		if err := tw.WriteHeader(&tar.Header{
@@ -204,55 +201,4 @@ func addFileToTar(tw *tar.Writer, tarName, hostPath string, mode int64, modTime 
 		return fmt.Errorf("copy %s into tar: %w", hostPath, err)
 	}
 	return nil
-}
-
-// appendRawVerity pads path to a 4096-byte boundary and appends a raw SHA-256
-// dm-verity Merkle tree (no superblock, 32-zero-byte salt) per spec 20.1.
-func appendRawVerity(path string) (dataBlocks uint64, rootHash string, totalSize int64, err error) {
-	f, err := os.OpenFile(filepath.Clean(path), os.O_RDWR, 0)
-	if err != nil {
-		return 0, "", 0, fmt.Errorf("open tools image for verity: %w", err)
-	}
-	defer f.Close()
-
-	fi, err := f.Stat()
-	if err != nil {
-		return 0, "", 0, fmt.Errorf("stat tools image: %w", err)
-	}
-	dataSize := fi.Size()
-	if rem := dataSize % verityBlockBytes; rem != 0 {
-		pad := make([]byte, verityBlockBytes-rem)
-		if _, err := f.Seek(0, io.SeekEnd); err != nil {
-			return 0, "", 0, fmt.Errorf("seek tools image end: %w", err)
-		}
-		if _, err := f.Write(pad); err != nil {
-			return 0, "", 0, fmt.Errorf("pad tools image: %w", err)
-		}
-		dataSize += int64(len(pad))
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return 0, "", 0, fmt.Errorf("rewind tools image: %w", err)
-	}
-
-	tree, err := dmverity.MerkleTree(io.LimitReader(f, dataSize))
-	if err != nil {
-		return 0, "", 0, fmt.Errorf("compute tools dm-verity tree: %w", err)
-	}
-	if len(tree) < verityBlockBytes {
-		return 0, "", 0, fmt.Errorf("tools dm-verity tree unexpectedly short (%d bytes)", len(tree))
-	}
-	root := dmverity.RootHash(tree[:verityBlockBytes])
-	if _, err := f.Seek(dataSize, io.SeekStart); err != nil {
-		return 0, "", 0, fmt.Errorf("seek tools verity offset: %w", err)
-	}
-	if _, err := f.Write(tree); err != nil {
-		return 0, "", 0, fmt.Errorf("write tools verity tree: %w", err)
-	}
-	if err := f.Sync(); err != nil {
-		return 0, "", 0, fmt.Errorf("sync tools image: %w", err)
-	}
-	totalSize = dataSize + int64(len(tree))
-	//nolint:gosec // G115: dataSize is non-negative file size
-	dataBlocks = uint64(dataSize / verityBlockBytes)
-	return dataBlocks, hex.EncodeToString(root), totalSize, nil
 }
