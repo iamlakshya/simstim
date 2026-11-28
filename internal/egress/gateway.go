@@ -56,29 +56,34 @@ type GatewayOptions struct {
 // SecretStore, forwards over verified upstream TLS via httputil.ReverseProxy
 // without TLS interception, and counts token usage.
 type Gateway struct {
-	engine   *Engine
-	dialer   *SafeDialer
-	secrets  *SecretStore
-	usage    *UsageTracker
-	redactor *Redactor
-	audit    AuditSink
-	routes   map[string]*gatewayRoute
-	proxy    *httputil.ReverseProxy
+	engine      *Engine
+	dialer      *SafeDialer
+	secrets     *SecretStore
+	usage       *UsageTracker
+	redactor    *Redactor
+	audit       AuditSink
+	routes      map[string]*gatewayRoute
+	oauthClient *http.Client
+	proxy       *httputil.ReverseProxy
 }
 
 type gatewayStateKey struct{}
 
 type gatewayReqState struct {
-	route        *gatewayRoute
-	upstreamPath string
-	redactedPath string
-	credName     string
-	credHeader   string
-	credValue    string
-	decRule      string
-	reqBytes     int64
-	method       string
-	audited      atomic.Bool
+	route           *gatewayRoute
+	upstreamPath    string
+	redactedPath    string
+	credName        string
+	credHeader      string
+	credValue       string
+	credExtra       map[string]string
+	rawAccessToken  string
+	hasOAuthRefresh bool
+	bodyBytes       []byte
+	decRule         string
+	reqBytes        int64
+	method          string
+	audited         atomic.Bool
 }
 
 // NewGateway constructs a Gateway from opts and registers every route's
@@ -148,9 +153,16 @@ func NewGateway(opts GatewayOptions) (*Gateway, error) {
 		redactor: redactor,
 		audit:    opts.Audit,
 		routes:   routes,
+		oauthClient: &http.Client{
+			Transport: tr,
+			Timeout:   oauthRefreshTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return errors.New("egress oauth: refusing redirect on OAuth token refresh")
+			},
+		},
 	}
 	g.proxy = &httputil.ReverseProxy{
-		Transport:      tr,
+		Transport:      &refreshRoundTripper{base: tr, gw: g},
 		FlushInterval:  -1, // flush SSE chunks immediately
 		Rewrite:        g.rewriteRequest,
 		ModifyResponse: g.modifyResponse,
@@ -263,22 +275,31 @@ func (g *Gateway) prepareRequest(
 			return nil, nil, false
 		}
 	}
-	credName, credHeader, credValue, armed := g.secrets.Lookup(route.slug)
+	rc, armed, rerr := g.resolveCredential(r.Context(), route)
 	if !armed {
 		msg := fmt.Sprintf("%s: no bound credential is armed for model gateway route %q (%s). Try: arm the session secret from the laptop", brand.Name, route.slug, route.upstreamHost)
 		g.rejectRequest(w, r, route, redactedPath, http.StatusUnauthorized, "secret_unarmed", "bound secret not armed", providerAuthErrorType(wire), msg)
 		return nil, nil, false
 	}
+	if rerr != nil {
+		msg := fmt.Sprintf("%s: OAuth token for %s expired and refresh failed (%s). Try: run %s agents login codex <host> or update CODEX_AUTH_JSON in config.toml", brand.Name, route.upstreamHost, rerr.Error(), brand.Name)
+		g.rejectRequest(w, r, route, redactedPath, http.StatusUnauthorized, "oauth_refresh", rerr.Error(), providerAuthErrorType(wire), msg)
+		return nil, nil, false
+	}
 	return &gatewayReqState{
-		route:        route,
-		upstreamPath: upstreamPath,
-		redactedPath: redactedPath,
-		credName:     credName,
-		credHeader:   credHeader,
-		credValue:    credValue,
-		decRule:      dec.Rule,
-		reqBytes:     int64(len(bodyBytes)),
-		method:       r.Method,
+		route:           route,
+		upstreamPath:    upstreamPath,
+		redactedPath:    redactedPath,
+		credName:        rc.name,
+		credHeader:      rc.header,
+		credValue:       rc.headerVal,
+		credExtra:       rc.extraHeaders,
+		rawAccessToken:  rc.rawValue,
+		hasOAuthRefresh: rc.hasRefresh,
+		bodyBytes:       bodyBytes,
+		decRule:         dec.Rule,
+		reqBytes:        int64(len(bodyBytes)),
+		method:          r.Method,
 	}, bodyBytes, true
 }
 
@@ -308,6 +329,9 @@ func (g *Gateway) rewriteRequest(pr *httputil.ProxyRequest) {
 	// sandbox never reaches the provider.
 	stripGuestCredentials(out.Header, state.credHeader)
 	out.Header.Set(state.credHeader, state.credValue)
+	for k, v := range state.credExtra {
+		out.Header.Set(k, v)
+	}
 	out.Header.Set("Accept-Encoding", "identity")
 	out.Header.Del("Content-Encoding")
 }

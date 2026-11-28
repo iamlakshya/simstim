@@ -13,7 +13,7 @@ The rules for the note:
 
 ## Summary
 
-1. **Agent data.** Codex session IDs are UUIDv7, `--yolo` is an alias, and Codex uses WebSockets by default. Only secondary sources give Claude Code's OAuth header. The six new agents are partly verified (section 1).
+1. **Agent data.** Codex session IDs are UUIDv7, `--yolo` is an alias, and Codex uses WebSockets by default. Claude Code's OAuth header and Codex's ChatGPT gateway headers and JSON refresh body were recorded against Claude Code 2.1.332 and Codex 0.172.0. The six new agents are partly verified (section 1).
 2. **Model APIs.** Clients retry a bare 429. A refusal that must stop a client needs `x-should-retry: false` and an error body that the client treats as final. Anthropic's usage in `message_delta` is cumulative (section 2).
 3. **Holds and timeouts.** Behind a transparent proxy, many clients give up in 5 to 15 s, and pip gives up at 15 s with either proxy (section 2.6).
 4. **Package managers.** Each tool has its own setting and unit for a minimum release age. Cargo has none that is stable. For Go, the risk is a toolchain download, and only the index's timestamp is a publish time that a gate can trust (section 3).
@@ -33,7 +33,7 @@ Docs read on 10 November 2026, release 2.1.3xx.
 - Install: `curl -fsSL https://claude.ai/install.sh | bash`. The npm package `@anthropic-ai/claude-code` needs Node 22 or later, and installs the same native binary ([setup](https://code.claude.com/docs/en/setup)).
 - Login: `claude auth login`. `claude auth status` exits 0 or 1. On Linux the token is in `~/.claude/.credentials.json` (0600), or under `CLAUDE_CONFIG_DIR`. A keyless Console sign-in keeps a profile in `~/.config/anthropic/`, outside the config folder ([authentication](https://code.claude.com/docs/en/authentication)).
 - Headers: `ANTHROPIC_API_KEY` goes in `X-Api-Key`, and `ANTHROPIC_AUTH_TOKEN` in `Authorization: Bearer`. The docs name no header for `CLAUDE_CODE_OAUTH_TOKEN` ([authentication](https://code.claude.com/docs/en/authentication)).
-- The OAuth token has the prefix `sk-ant-oat01-`. It goes in `Authorization: Bearer`, with `anthropic-beta: oauth-2025-04-20`. Secondary: pi 1.5.2 sends these ([anthropic-messages.ts](https://github.com/earendil-works/pi/blob/v1.5.2/packages/ai/src/api/anthropic-messages.ts)). UNVERIFIED in a first-party source.
+- The OAuth token from `claude setup-token` has the prefix `sk-ant-oat01-`. Recorded on 28 November 2026 against Claude Code 2.1.332 using `CLAUDE_CODE_OAUTH_TOKEN` and a local `ANTHROPIC_BASE_URL` mock upstream: `claude` sends `POST /v1/messages?beta=true` with `Authorization: Bearer <token>`, no `x-api-key` header, `anthropic-version: 2023-06-01`, `x-app: cli`, `anthropic-dangerous-direct-browser-access: true`, and `anthropic-beta` containing `oauth-2025-04-20` (alongside `claude-code-20250219` and feature betas). The same headers are sent when `CLAUDE_CODE_OAUTH_TOKEN` holds a non-secret gateway placeholder without the `sk-ant-oat01-` prefix.
 - Hosts: `api.anthropic.com` (the API). `platform.claude.com` (OAuth exchange, refresh and revoke). `claude.ai`, `claude.com` and `sso.claude.com` (sign-in). `downloads.claude.ai` (the updater). `mcp-proxy.anthropic.com` (claude.ai connectors). Two Datadog hosts are optional ([network config](https://code.claude.com/docs/en/network-config)).
 - Resume: `claude --resume <id>` also takes a name or a `.jsonl` path. `--session-id` "must be a valid UUID" ([CLI reference](https://code.claude.com/docs/en/cli-reference)).
 - Danger flags: `--dangerously-skip-permissions` equals `--permission-mode bypassPermissions`, and both spellings parse. `--allow-dangerously-skip-permissions` adds bypass to the Shift+Tab cycle. `permissions.defaultMode: "bypassPermissions"` in user settings or in `--settings` also starts bypass. Project settings cannot. Managed `permissions.disableBypassPermissionsMode: "disable"` blocks it ([permission modes](https://code.claude.com/docs/en/permission-modes)).
@@ -96,15 +96,16 @@ Docs at [v26.13.0](https://github.com/nodejs/node/blob/v26.13.0/doc/api/cli.md).
 - WebSocket: the docs say nothing. Node's global `WebSocket` uses the global dispatcher, so it is probably covered. The `ws` package is UNVERIFIED.
 - On Node: pi and Kimi Code, which set their own dispatcher, and Copilot CLI and Droid when installed with npm. Not on Node: Claude Code, Codex and Mistral Vibe. Kiro is UNVERIFIED. So `NODE_USE_ENV_PROXY` does nothing for the two first-class agents.
 
-### 1.5 ChatGPT logins in Docker Sandboxes
+### 1.5 ChatGPT logins in Docker Sandboxes and Codex 0.172.0
 
 - Traffic leaves through a host proxy: a forward proxy, or a transparent proxy for clients that ignore proxy settings. The proxy swaps a stand-in for the real credential in a header ([credentials](https://docs.docker.com/ai/sandboxes/configuration/credentials/), [isolation](https://docs.docker.com/ai/sandboxes/security/isolation/), 10 November 2026).
 - For Codex, the sign-in runs on the host, and "the proxy handles token refresh" ([credentials](https://docs.docker.com/ai/sandboxes/configuration/credentials/)). So a header swap can carry a ChatGPT login when the trusted side also refreshes the token.
-- UNVERIFIED: whether OpenAI rotates the refresh token at each refresh, which would end the laptop's own login when the same token is shared.
+- Recorded on 28 November 2026 against Codex 0.172.0 with `cli_auth_credentials_store = "file"`, `chatgpt_base_url = "<proxy>/gw/chatgpt/backend-api"`, and `[model_providers.gateway]` (`base_url = "<proxy>/gw/chatgpt/backend-api/codex"`, `wire_api = "responses"`, `requires_openai_auth = true`, `supports_websockets = false`) plus a placeholder `auth.json` with a far-future JWT `exp`: Codex calls `POST /backend-api/codex/responses` and `GET /backend-api/codex/models` carrying both `Authorization: Bearer <access_token>` and `Chatgpt-Account-Id: <account_id>`, and completes `codex exec` cleanly even when non-model paths (`/wham/*`, `/ps/mcp`, `/codex/analytics-events/events`) return HTTP 403.
+- Recorded on 28 November 2026 against Codex 0.172.0 via `CODEX_REFRESH_TOKEN_URL_OVERRIDE`: Codex refreshes expired tokens with `POST /oauth/token`, `Content-Type: application/json`, and body `{"client_id":"app_EMoamEEZ73f0CkXaXp7hrann","grant_type":"refresh_token","refresh_reason":"proactive_expiry","refresh_token":"<token>"}`. Codex's own auth manager handles OpenAI's single-use refresh token rotation (`refresh_token_reused`) by persisting rotated tokens back to `auth.json`.
 
 ### 1.6 Still UNVERIFIED
 
-- Claude Code: the OAuth header in a first-party source. Whether `--settings` can set `disableBypassPermissionsMode`.
+- Claude Code: whether `--settings` can set `disableBypassPermissionsMode`.
 - Codex: whether a resume by UUID needs `state_5.sqlite`. Whether the TUI reads `auth.json` without `-c cli_auth_credentials_store="file"` when no keyring exists.
 - Copilot CLI: the header, any token exchange host, WebSocket use, its runtime, a status command.
 - Kiro CLI: the header for `KIRO_API_KEY`, CA settings, WebSocket use, its runtime, a first-party page for its store.

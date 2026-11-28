@@ -28,6 +28,18 @@ The command runs with `sh -c` on your laptop. What it prints is the value, less 
 In a walled session (`--wall process`), secrets do not enter the sandbox environment. The host's egress process holds bound secrets in memory only and injects them into outbound requests over verified TLS on its gateway route (`/gw/<route>`):
 
 - **Model API keys bind automatically.** For Claude Code (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`) and Codex (`OPENAI_API_KEY`, `CODEX_API_KEY`), define the secret under `[secrets]` in `config.toml`. When you run `simstim new my-server --wall process --agent claude` or `--agent codex`, the client fetches the matching secret automatically, the egress process injects the real key on `/gw/anthropic` or `/gw/openai`, and the sandbox receives only a non-secret placeholder plus `ANTHROPIC_BASE_URL` or a session-local `.codex/config.toml` (`supports_websockets = false`). The user's own `~/.codex/config.toml` on the host is never touched.
+- **Claude Code subscription token (`claude setup-token`).** To use a Claude Pro or Max subscription inside a walled session without an API key, run `claude setup-token` once on your laptop, store the resulting `sk-ant-oat01-...` token in your password manager, and configure `CLAUDE_CODE_OAUTH_TOKEN` under `[secrets]`:
+
+  ```toml
+  [secrets]
+  CLAUDE_CODE_OAUTH_TOKEN = "op read op://dev/claude/oauth-token"
+  ```
+
+  When `ANTHROPIC_API_KEY` is not configured (or when you pass `--secret CLAUDE_CODE_OAUTH_TOKEN`), simstim binds `CLAUDE_CODE_OAUTH_TOKEN` to `api.anthropic.com` on `/gw/anthropic`. The egress process injects `Authorization: Bearer <token>`, strips any `x-api-key` header, and preserves Claude Code's `anthropic-beta` header (`oauth-2025-04-20`).
+
+- **Codex with ChatGPT sign-in.** A ChatGPT subscription reaches a walled Codex session through `/gw/chatgpt` (`chatgpt.com`), where the egress process injects `Authorization: Bearer` and `Chatgpt-Account-Id`, refreshes expired access tokens at `auth.openai.com/oauth/token`, and allows only Codex model endpoints (`/backend-api/codex/responses`, `/responses/compact`, `/responses/input_tokens` and `/models`). The sandbox receives only a non-secret placeholder `.codex/auth.json` and gateway `.codex/config.toml`. Two setups work:
+  1. **Sign in on the host (recommended).** Run `simstim agents login codex my-server` (which runs `codex login --device-auth` on the host and saves `~/.codex/auth.json`). When you start a walled Codex session with no `OPENAI_API_KEY`, `CODEX_API_KEY` or `CODEX_AUTH_JSON`, the supervisor arms the egress gateway from the host's `~/.codex/auth.json`. When tokens rotate, egress coordinates concurrent sessions with an advisory lock and atomically updates that pre-existing file (mode `0600`) without ever putting real tokens into the sandbox.
+  2. **Push from your laptop (`CODEX_AUTH_JSON`).** Define `CODEX_AUTH_JSON` under `[secrets]` with a command that prints a ChatGPT `auth.json` document (for example `op read op://dev/codex/auth-json`). simstim holds the tokens strictly in egress memory and writes nothing to the host disk. Because OpenAI rotates single-use refresh tokens on every refresh, use a dedicated login for laptop-pushed `CODEX_AUTH_JSON` (otherwise the first refresh on the host invalidates your laptop's own copy), or sign in on the host instead.
 - **Custom destination bindings.** Use a `[secrets.NAME]` table in `config.toml` to bind any secret to its allowed hosts:
 
 ```toml

@@ -56,5 +56,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0056](0056-bubblewrap-process-wall.md) | Build the process wall with bubblewrap, `go-seccomp-bpf` and `go-landlock` instead of a custom namespace launcher (applies 0053) | Proposed |
 | [0057](0057-model-gateway-route.md) | Route sandboxed model API calls through plain-HTTP `/gw/<route>` paths on the egress process with verified upstream TLS, no TLS interception and no direct `CONNECT` to model hosts | Proposed |
 | [0058](0058-upstream-runsc-gvisor-wall.md) | Build the gVisor wall on pinned upstream `runsc` without patches, with single-entry OCI user namespaces and an Ubuntu AppArmor profile when required (applies 0053) | Proposed |
+| [0059](0059-codex-chatgpt-gateway.md) | Route Codex ChatGPT sign-in through `/gw/chatgpt` on the egress process with trusted OAuth refresh, non-secret sandbox placeholders and narrow host `auth.json` write-back under `flock` (extends 0032 and 0057) | Proposed |
 
 Write a new record from [the template](template.md).

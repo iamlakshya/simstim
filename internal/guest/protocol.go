@@ -71,6 +71,7 @@ type StartReq struct {
 	ProxyURL          string   `json:"proxy_url,omitempty"`
 	BoundSecretEnv    string   `json:"bound_secret_env,omitempty"`
 	BoundPlaceholders []string `json:"bound_placeholders,omitempty"`
+	SubscriptionRoute string   `json:"subscription_route,omitempty"`
 }
 
 // StartResp is the result object of the ctl "start" request.

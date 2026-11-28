@@ -18,10 +18,13 @@ import (
 )
 
 func (s *Supervisor) secretsBeforeStart(restored bool) (secretEnv, notes []string) {
+	if note := s.armHostSubscription(); note != "" {
+		notes = append(notes, note)
+	}
 	want := s.m.Secrets
 	s.m.MissingSecrets = nil
 	if len(want) == 0 {
-		return nil, nil
+		return nil, notes
 	}
 	var received map[string]api.Secret
 	if !restored {

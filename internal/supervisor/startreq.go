@@ -9,7 +9,7 @@ import (
 )
 
 func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
-	var pkgLevel, minAge, proxyURL, boundSecretEnv string
+	var pkgLevel, minAge, proxyURL, boundSecretEnv, subscriptionRoute string
 	var userEnv, boundPlaceholders, cacheDirs []string
 	if s.m.Wall != nil {
 		pkgLevel = s.m.Wall.PackageManagers
@@ -26,9 +26,10 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 				userEnv = append(userEnv, k+"="+s.m.Wall.SandboxEnv[k])
 			}
 		}
-		if (s.m.Wall.Driver == process.DriverName || s.m.Wall.Driver == "chv") && !s.m.Wall.ShareNet {
+		if (s.m.Wall.Driver == process.DriverName || s.m.Wall.Driver == "chv" || s.m.Wall.Driver == "gvisor") && !s.m.Wall.ShareNet {
 			proxyURL = process.GuestProxyURL
 			boundSecretEnv = s.agentBoundSecretEnv()
+			subscriptionRoute = s.subscriptionRoute()
 			boundPlaceholders = s.boundPlaceholders(boundSecretEnv)
 		}
 	}
@@ -53,6 +54,7 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 		CacheDirs:         cacheDirs,
 		ProxyURL:          proxyURL,
 		BoundSecretEnv:    boundSecretEnv,
+		SubscriptionRoute: subscriptionRoute,
 		BoundPlaceholders: boundPlaceholders,
 	}
 }

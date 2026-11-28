@@ -30,7 +30,7 @@ func shouldCountUsage(wire, method, cleanPath string, status int) bool {
 	case WireAnthropicMessages:
 		return cleanPath == "/v1/messages"
 	case WireOpenAIResponses, WireOpenAIChat:
-		return cleanPath == "/v1/responses" || cleanPath == "/v1/chat/completions"
+		return cleanPath == "/v1/responses" || cleanPath == "/backend-api/codex/responses" || cleanPath == "/v1/chat/completions"
 	default:
 		return false
 	}

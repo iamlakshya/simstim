@@ -70,6 +70,40 @@ func (g *ModelGateway) UpstreamHost() string {
 	return strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
 }
 
+// SubscriptionGateway describes an OAuth subscription model gateway route
+// (such as Codex's ChatGPT sign-in) where the trusted egress process injects
+// and refreshes OAuth tokens on Upstream while the sandbox receives only a
+// placeholder config and placeholder auth file (decision 0059, spec 7.3).
+type SubscriptionGateway struct {
+	Route         string      `json:"route"`
+	Upstream      string      `json:"upstream"`
+	BaseURLPath   string      `json:"base_url_path,omitempty"`
+	RootURLPath   string      `json:"root_url_path,omitempty"`
+	SecretEnv     string      `json:"secret_env,omitempty"`
+	AuthFile      string      `json:"auth_file,omitempty"`
+	AuthFormat    string      `json:"auth_format"`
+	TokenURL      string      `json:"token_url"`
+	ClientID      string      `json:"client_id"`
+	AccountHeader string      `json:"account_header,omitempty"`
+	ConfigFile    string      `json:"config_file,omitempty"`
+	ConfigEnv     string      `json:"config_env,omitempty"`
+	ConfigTmpl    string      `json:"config_tmpl,omitempty"`
+	Guard         *ModelGuard `json:"guard,omitempty"`
+	Source        string      `json:"source,omitempty"`
+}
+
+// UpstreamHost returns the lower-case hostname of g.Upstream, or "".
+func (g *SubscriptionGateway) UpstreamHost() string {
+	if g == nil || g.Upstream == "" {
+		return ""
+	}
+	u, err := url.Parse(g.Upstream)
+	if err != nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
+}
+
 // ModelGuard describes what the egress gateway permits on an agent's model API
 // route (spec 7.2 and 8.6). Anything not listed fails closed.
 type ModelGuard struct {
@@ -115,6 +149,14 @@ func ModelHosts() []string {
 		}
 		if a.ModelGateway != nil {
 			add(a.ModelGateway.UpstreamHost())
+		}
+		if a.SubscriptionGateway != nil {
+			add(a.SubscriptionGateway.UpstreamHost())
+			if a.SubscriptionGateway.Guard != nil {
+				for _, h := range a.SubscriptionGateway.Guard.Hosts {
+					add(h)
+				}
+			}
 		}
 	}
 	slices.Sort(out)
@@ -171,6 +213,38 @@ func FindGatewayForHost(rawHost string) (Agent, *ModelGateway, bool) {
 	return Agent{}, nil, false
 }
 
+// FindGatewayRouteForHost returns the built-in gateway route slug for rawHost
+// across both ModelGateway and SubscriptionGateway entries in Table.
+func FindGatewayRouteForHost(rawHost string) (string, bool) {
+	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(rawHost), "."))
+	if want == "" {
+		return "", false
+	}
+	for _, a := range Table {
+		if a.ModelGateway != nil && a.ModelGateway.UpstreamHost() == want {
+			return a.ModelGateway.Route, true
+		}
+		if a.SubscriptionGateway != nil && a.SubscriptionGateway.UpstreamHost() == want {
+			return a.SubscriptionGateway.Route, true
+		}
+	}
+	return "", false
+}
+
+// FindSubscriptionGatewayBySecret looks up an agent's SubscriptionGateway
+// matching secretEnv (for example "CODEX_AUTH_JSON").
+func FindSubscriptionGatewayBySecret(secretEnv string) (Agent, *SubscriptionGateway, bool) {
+	if secretEnv == "" {
+		return Agent{}, nil, false
+	}
+	for _, a := range Table {
+		if a.SubscriptionGateway != nil && a.SubscriptionGateway.SecretEnv == secretEnv {
+			return a, a.SubscriptionGateway, true
+		}
+	}
+	return Agent{}, nil, false
+}
+
 var claudeSecrets = []SecretBinding{
 	{
 		Env:    "ANTHROPIC_API_KEY",
@@ -187,6 +261,9 @@ var claudeSecrets = []SecretBinding{
 		Source: "https://code.claude.com/docs/en/authentication",
 	},
 	{
+		// Verified against real claude 2.1.332 on host-a: sends POST /v1/messages?beta=true
+		// with Authorization: Bearer <CLAUDE_CODE_OAUTH_TOKEN>, anthropic-beta containing
+		// oauth-2025-04-20, and no x-api-key header.
 		Env:    "CLAUDE_CODE_OAUTH_TOKEN",
 		Hosts:  []string{"api.anthropic.com"},
 		Header: "Authorization",
@@ -245,6 +322,15 @@ var codexSecrets = []SecretBinding{
 		Format: "Bearer {value}",
 		Source: "https://learn.chatgpt.com/docs/auth",
 	},
+	{
+		// ChatGPT sign-in bundle (~/.codex/auth.json JSON) pushed from the
+		// laptop when not using a host-side codex login --device-auth (decision 0059).
+		Env:    "CODEX_AUTH_JSON",
+		Hosts:  []string{"chatgpt.com"},
+		Header: "Authorization",
+		Format: "Bearer {value}",
+		Source: "https://learn.chatgpt.com/docs/auth",
+	},
 }
 
 const codexGatewayConfigTmpl = `model_provider = "gateway"
@@ -256,6 +342,63 @@ env_key = "{env_key}"
 wire_api = "responses"
 supports_websockets = false
 `
+
+const codexSubscriptionConfigTmpl = `cli_auth_credentials_store = "file"
+model_provider = "gateway"
+chatgpt_base_url = "{root_url}"
+
+[model_providers.gateway]
+name = "gateway"
+base_url = "{base_url}"
+wire_api = "responses"
+requires_openai_auth = true
+supports_websockets = false
+`
+
+//nolint:gosec // G101: public OAuth client_id and endpoint URL from openai/codex, not a secret
+var codexSubscriptionGateway = &SubscriptionGateway{
+	Route:         "chatgpt",
+	Upstream:      "https://chatgpt.com",
+	BaseURLPath:   "/backend-api/codex",
+	RootURLPath:   "/backend-api",
+	SecretEnv:     "CODEX_AUTH_JSON",
+	AuthFile:      ".codex/auth.json",
+	AuthFormat:    "codex-chatgpt",
+	TokenURL:      "https://auth.openai.com/oauth/token",
+	ClientID:      "app_EMoamEEZ73f0CkXaXp7hrann",
+	AccountHeader: "Chatgpt-Account-Id",
+	ConfigFile:    ".codex/config.toml",
+	ConfigEnv:     "CODEX_HOME",
+	ConfigTmpl:    codexSubscriptionConfigTmpl,
+	Guard:         codexChatGPTGuard,
+	Source:        "https://learn.chatgpt.com/docs/auth",
+}
+
+var codexChatGPTGuard = &ModelGuard{
+	Wire:  "openai-responses",
+	Hosts: []string{"chatgpt.com"},
+	Paths: []string{
+		"POST /backend-api/codex/responses",
+		"POST /backend-api/codex/responses/compact",
+		"POST /backend-api/codex/responses/input_tokens",
+		"GET /backend-api/codex/models",
+	},
+	Tools: []string{
+		"function",
+		"custom",
+		"namespace",
+		"local_shell",
+		"apply_patch",
+		"shell",
+		"computer",
+	},
+	Search: []string{
+		"web_search",
+		"web_search_2025_08_26",
+		"web_search_preview",
+		"web_search_preview_2025_03_11",
+	},
+}
 
 var codexGateway = &ModelGateway{
 	Route:       "openai",

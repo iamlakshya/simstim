@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -13,9 +15,11 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -100,6 +104,7 @@ func (s *Supervisor) buildBoundCredentials(
 		if rerr != nil {
 			return nil, nil, nil, fmt.Errorf("bound secret %s: %w", b.Name, rerr)
 		}
+		_, sub, isSub := agents.FindSubscriptionGatewayBySecret(b.Name)
 		for _, target := range targets {
 			upHost, exists := registered[target.Slug]
 			if !exists || upHost != target.Host || !slices.Contains(b.Hosts, upHost) {
@@ -109,6 +114,32 @@ func (s *Supervisor) buildBoundCredentials(
 				return nil, nil, nil, fmt.Errorf("bound secrets %s and %s both claim route %q", prev, b.Name, target.Slug)
 			}
 			claimedBy[target.Slug] = b.Name
+			if isSub && sub != nil && sub.AuthFormat == egress.AuthFormatCodexChatGPT {
+				toks, perr := egress.ParseCodexAuthJSON([]byte(val))
+				if perr != nil {
+					return nil, nil, nil, fmt.Errorf("bound secret %s: %w", b.Name, perr)
+				}
+				creds = append(creds, egress.BoundCredential{
+					Route:  target.Slug,
+					Name:   b.Name,
+					Header: b.Header,
+					Format: b.Format,
+					Value:  toks.AccessToken,
+					OAuth: &egress.OAuthConfig{
+						Format:        sub.AuthFormat,
+						TokenURL:      sub.TokenURL,
+						ClientID:      sub.ClientID,
+						AccountHeader: sub.AccountHeader,
+						AccountID:     toks.AccountID,
+						RefreshToken:  toks.RefreshToken,
+						IDToken:       toks.IDToken,
+						ExpiresAt:     toks.ExpiresAt,
+						// AuthFile intentionally empty: laptop-pushed secrets never touch host disk (decision 0032).
+					},
+				})
+				toks.Clear()
+				continue
+			}
 			creds = append(creds, egress.BoundCredential{
 				Route:  target.Slug,
 				Name:   b.Name,
@@ -122,18 +153,25 @@ func (s *Supervisor) buildBoundCredentials(
 	return creds, armedNames, exposedEnv, nil
 }
 
+func clearBoundCredentials(creds []egress.BoundCredential) {
+	for i := range creds {
+		creds[i].Value = ""
+		if creds[i].OAuth != nil {
+			creds[i].OAuth.RefreshToken = ""
+			creds[i].OAuth.IDToken = ""
+			creds[i].OAuth = nil
+		}
+	}
+	clear(creds)
+}
+
 // splitAndArmSecrets separates bound secrets (sent only to the egress process
 // in memory) from explicitly exposed secrets (passed to the guest holder's env).
 // Every bound secret value is cleared from supervisor memory before returning.
 func (s *Supervisor) splitAndArmSecrets(want []string, received map[string]api.Secret) (exposedEnv []string, err error) {
 	defer clear(received)
 	creds, _, exposedEnv, err := s.buildBoundCredentials(s.boundSecretMap(), want, received)
-	defer func() {
-		for i := range creds {
-			creds[i].Value = ""
-		}
-		clear(creds)
-	}()
+	defer clearBoundCredentials(creds)
 	if err != nil {
 		clear(exposedEnv)
 		return nil, err
@@ -160,6 +198,80 @@ func (s *Supervisor) splitAndArmSecrets(want []string, received map[string]api.S
 	return exposedEnv, nil
 }
 
+// hostSubscriptionCredential loads the host user's pre-existing subscription
+// login file (such as ~/.codex/auth.json) for arming on the egress gateway.
+func (s *Supervisor) hostSubscriptionCredential() (egress.BoundCredential, bool, error) {
+	if s.m.Wall == nil || s.m.Wall.SubscriptionAuth != "host" {
+		return egress.BoundCredential{}, false, nil
+	}
+	agent, ok := agents.Find(s.m.Agent.Kind)
+	if !ok || agent.SubscriptionGateway == nil {
+		return egress.BoundCredential{}, false, nil
+	}
+	sub := agent.SubscriptionGateway
+	if sub.AuthFile == "" || sub.AuthFormat != egress.AuthFormatCodexChatGPT {
+		return egress.BoundCredential{}, false, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return egress.BoundCredential{}, true, fmt.Errorf("locate home directory for %s: %w. Try: set HOME or configure %s", sub.AuthFile, err, sub.SecretEnv)
+	}
+	authPath := filepath.Join(home, filepath.FromSlash(sub.AuthFile))
+	toks, err := egress.ReadCodexAuthFile(authPath)
+	if err != nil {
+		return egress.BoundCredential{}, true, err
+	}
+	defer toks.Clear()
+	lockPath := filepath.Join(paths.StateDir(), "locks", sub.Route+"-auth.lock")
+	return egress.BoundCredential{
+		Route:  sub.Route,
+		Name:   sub.SecretEnv,
+		Header: "Authorization",
+		Format: "Bearer {value}",
+		Value:  toks.AccessToken,
+		OAuth: &egress.OAuthConfig{
+			Format:        sub.AuthFormat,
+			TokenURL:      sub.TokenURL,
+			ClientID:      sub.ClientID,
+			AccountHeader: sub.AccountHeader,
+			AccountID:     toks.AccountID,
+			RefreshToken:  toks.RefreshToken,
+			IDToken:       toks.IDToken,
+			ExpiresAt:     toks.ExpiresAt,
+			AuthFile:      authPath,
+			LockFile:      lockPath,
+		},
+	}, true, nil
+}
+
+func (s *Supervisor) armHostSubscription() string {
+	cred, needed, err := s.hostSubscriptionCredential()
+	if !needed {
+		return ""
+	}
+	creds := []egress.BoundCredential{cred}
+	defer clearBoundCredentials(creds)
+	if err != nil {
+		s.log.Warn("host subscription login unavailable", "err", err)
+		return fmt.Sprintf("ChatGPT sign-in could not be loaded on the host (%s). Try: run %s agents login codex <host> or configure CODEX_AUTH_JSON.", err.Error(), brand.Name)
+	}
+	if s.egress == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := s.egress.ArmSecrets(ctx, creds); err != nil {
+		s.log.Error("arm host subscription failed", "err", err)
+		return fmt.Sprintf("ChatGPT sign-in could not be armed on the gateway (%s). Try: restart the session.", err.Error())
+	}
+	s.audit.Record(AuditEntry{
+		Event:   "secrets_armed",
+		Session: s.id,
+		Detail:  "subscription=host route=" + cred.Route,
+	})
+	return ""
+}
+
 // agentBoundSecretEnv returns the bound secret name that supplies credentials
 // for this session's agent ModelGateway (such as ANTHROPIC_API_KEY,
 // CLAUDE_CODE_OAUTH_TOKEN or OPENAI_API_KEY), or "" to use the agent's DummyEnv.
@@ -173,7 +285,7 @@ func (s *Supervisor) agentBoundSecretEnv() string {
 	}
 	gwHost := agent.ModelGateway.UpstreamHost()
 	for _, b := range s.m.Wall.BoundSecrets {
-		if _, matched := agents.FindSecretBinding(agent, b.Name); matched {
+		if binding, matched := agents.FindSecretBinding(agent, b.Name); matched && slices.Contains(binding.Hosts, gwHost) {
 			return b.Name
 		}
 	}
@@ -185,15 +297,35 @@ func (s *Supervisor) agentBoundSecretEnv() string {
 	return ""
 }
 
+// subscriptionRoute returns the agent's SubscriptionGateway route slug when
+// this session is configured for subscription login (host or client-pushed).
+func (s *Supervisor) subscriptionRoute() string {
+	if s.m.Wall == nil || s.m.Wall.SubscriptionAuth == "" {
+		return ""
+	}
+	agent, ok := agents.Find(s.m.Agent.Kind)
+	if !ok || agent.SubscriptionGateway == nil {
+		return ""
+	}
+	return agent.SubscriptionGateway.Route
+}
+
 // boundPlaceholders returns non-secret NAME=placeholder pairs for bound secrets
-// that are not already covered by the agent's own ModelGateway env.
+// that are not already covered by the agent's own ModelGateway env or
+// SubscriptionGateway auth file.
 func (s *Supervisor) boundPlaceholders(agentEnv string) []string {
 	if s.m.Wall == nil || len(s.m.Wall.BoundSecrets) == 0 {
 		return nil
 	}
+	subSecret := ""
+	if s.subscriptionRoute() != "" {
+		if agent, ok := agents.Find(s.m.Agent.Kind); ok && agent.SubscriptionGateway != nil {
+			subSecret = agent.SubscriptionGateway.SecretEnv
+		}
+	}
 	var out []string
 	for _, b := range s.m.Wall.BoundSecrets {
-		if b.Name == "" || b.Name == agentEnv {
+		if b.Name == "" || b.Name == agentEnv || b.Name == subSecret {
 			continue
 		}
 		out = append(out, b.Name+"="+guest.GatewayPlaceholder(b.Name))
@@ -233,12 +365,7 @@ func (s *Supervisor) handleArm(w *proto.Writer, req proto.Request) {
 	sort.Strings(names)
 
 	creds, armed, _, err := s.buildBoundCredentials(boundMap, names, msg.Env)
-	defer func() {
-		for i := range creds {
-			creds[i].Value = ""
-		}
-		clear(creds)
-	}()
+	defer clearBoundCredentials(creds)
 	if err != nil {
 		reply(nil, &proto.Error{Code: "bad_secret", Message: err.Error(), Hint: "Fix colliding bound secret routes in config.toml."})
 		return

@@ -206,4 +206,21 @@ func TestGatewaySecretNamesAutoBindsAgentSecret(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("empty wallLevel with host floor auto-fetched secrets = %v, want empty", got)
 	}
+
+	// Codex with only CODEX_AUTH_JSON configured auto-selects CODEX_AUTH_JSON.
+	var sSub Settings
+	sSub.Secrets = map[string]any{
+		"CODEX_AUTH_JSON": "cat ~/.codex/auth.json",
+	}
+	got = GatewaySecretNames(sSub, h, "codex", "process", nil, nil)
+	if strings.Join(got, ",") != "CODEX_AUTH_JSON" {
+		t.Fatalf("codex subscription auto secret = %v, want [CODEX_AUTH_JSON]", got)
+	}
+
+	// Explicit --secret CODEX_AUTH_JSON does not also pull OPENAI_API_KEY.
+	s.Secrets["CODEX_AUTH_JSON"] = "cat ~/.codex/auth.json"
+	got = GatewaySecretNames(s, h, "codex", "process", []string{"CODEX_AUTH_JSON"}, nil)
+	if strings.Join(got, ",") != "CODEX_AUTH_JSON" {
+		t.Fatalf("codex explicit CODEX_AUTH_JSON = %v, want [CODEX_AUTH_JSON]", got)
+	}
 }

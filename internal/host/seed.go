@@ -106,6 +106,10 @@ func RunStageSFTP(id string, in io.Reader, out io.Writer) error {
 	return nil
 }
 
+// startDeferredSession launches a deferred session after its manifest and
+// staged inputs are applied; tests may override it to inspect the final manifest.
+var startDeferredSession = startSession
+
 // StartDeferred applies staged seed bundles and copy-in files for a session
 // created with DeferStart=true, cleans up the staging folder, and launches the
 // session's holder or supervisor (spec 17.3, 17.4).
@@ -133,14 +137,20 @@ func StartDeferred(a api.SessionStartArgs) (*SessionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if isSandboxedWall(m) && len(secretNames) > 0 {
+	if isSandboxedWall(m) {
 		agent, known := agents.Find(m.Agent.Kind)
-		boundSecrets, exposedSecrets, err := resolveProcessSecrets(agent, known, secretNames, a.SecretBinds, a.ExposedSecrets)
-		if err != nil {
-			return nil, err
+		if len(secretNames) > 0 {
+			boundSecrets, exposedSecrets, err := resolveProcessSecrets(agent, known, secretNames, a.SecretBinds, a.ExposedSecrets)
+			if err != nil {
+				return nil, err
+			}
+			m.Wall.BoundSecrets = boundSecrets
+			m.Wall.ExposedSecrets = exposedSecrets
+		} else {
+			m.Wall.BoundSecrets = nil
+			m.Wall.ExposedSecrets = nil
 		}
-		m.Wall.BoundSecrets = boundSecrets
-		m.Wall.ExposedSecrets = exposedSecrets
+		m.Wall.SubscriptionAuth = detectSubscriptionAuth(agent, known, m.Wall.BoundSecrets, m.Wall.ExposedSecrets)
 	}
 
 	stageDir := paths.StageDir(a.ID)
@@ -159,7 +169,7 @@ func StartDeferred(a api.SessionStartArgs) (*SessionInfo, error) {
 	m.Secrets = secretNames
 	m.CopiesPending = false
 	m.Status = Status{State: StateStarting, Since: time.Now().UTC()}
-	return startSession(m, a.Secrets)
+	return startDeferredSession(m, a.Secrets)
 }
 
 func applyStagedSeeds(m *Manifest, stageDir string, seeds []api.SeedRepoSpec) error {

@@ -112,30 +112,40 @@ func WriteGatewayConfig(homeDir string, env map[string]string, proxyURL string, 
 	return filepath.Join(dir, base), nil
 }
 
-// applyStartGateway wires an agent's ModelGateway environment variables and
-// per-session config file (such as Codex's /home/agent/.codex/config.toml) plus
-// any non-secret placeholders for custom bound secrets before starting the
-// guest holder. Nothing touches the host user's own config files.
+// applyStartGateway wires an agent's ModelGateway or SubscriptionGateway
+// environment variables and per-session config file (such as Codex's
+// /home/agent/.codex/config.toml and placeholder auth.json) plus any non-secret
+// placeholders for custom bound secrets before starting the guest holder.
+// Nothing touches the host user's own config files.
 func applyStartGateway(a StartReq, env []string) ([]string, error) {
 	if a.ProxyURL == "" {
 		return env, nil
 	}
 	setKeys := map[string]bool{}
-	if agent, ok := agents.Find(a.Agent); ok && agent.ModelGateway != nil {
-		gwEnv := GatewayEnv(a.ProxyURL, agent, a.BoundSecretEnv)
-		keys := make([]string, 0, len(gwEnv))
-		for k := range gwEnv {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			env = withEnvVar(env, k, gwEnv[k])
-			setKeys[k] = true
-		}
-		envMap := parseEnvSlice(env)
-		if homeDir := envMap["HOME"]; homeDir != "" {
-			if _, err := WriteGatewayConfig(homeDir, envMap, a.ProxyURL, agent, a.BoundSecretEnv); err != nil {
-				return nil, err
+	if agent, ok := agents.Find(a.Agent); ok {
+		if a.SubscriptionRoute != "" && agent.SubscriptionGateway != nil && agent.SubscriptionGateway.Route == a.SubscriptionRoute {
+			envMap := parseEnvSlice(env)
+			if homeDir := envMap["HOME"]; homeDir != "" {
+				if _, _, err := WriteSubscriptionGatewayConfig(homeDir, envMap, a.ProxyURL, agent); err != nil {
+					return nil, err
+				}
+			}
+		} else if agent.ModelGateway != nil {
+			gwEnv := GatewayEnv(a.ProxyURL, agent, a.BoundSecretEnv)
+			keys := make([]string, 0, len(gwEnv))
+			for k := range gwEnv {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				env = withEnvVar(env, k, gwEnv[k])
+				setKeys[k] = true
+			}
+			envMap := parseEnvSlice(env)
+			if homeDir := envMap["HOME"]; homeDir != "" {
+				if _, err := WriteGatewayConfig(homeDir, envMap, a.ProxyURL, agent, a.BoundSecretEnv); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}

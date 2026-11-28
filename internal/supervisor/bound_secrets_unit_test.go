@@ -1,10 +1,13 @@
 package supervisor
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/host"
 )
 
@@ -87,5 +90,92 @@ func TestSupervisorBuildBoundCredentialsDefenseInDepth(t *testing.T) {
 	}
 	if len(creds) != 2 || len(armed) != 2 || len(exposed) != 1 || exposed[0] != "PLAIN_EXPOSED=exp-val" {
 		t.Fatalf("unexpected valid result: creds=%d armed=%v exposed=%v", len(creds), armed, exposed)
+	}
+}
+
+func TestSupervisorCodexSubscriptionCredentialsAndStartReq(t *testing.T) {
+	// 1. Laptop-pushed CODEX_AUTH_JSON parses into memory-only OAuthConfig (AuthFile == "").
+	supSecret := &Supervisor{
+		id: "test-sub-secret",
+		m: &host.Manifest{
+			ID:    "test-sub-secret",
+			Agent: host.AgentInfo{Kind: "codex"},
+			Wall: &host.WallRecord{
+				Driver:           "process",
+				SubscriptionAuth: "secret:CODEX_AUTH_JSON",
+				BoundSecrets: []api.SecretBind{
+					{Name: "CODEX_AUTH_JSON", Hosts: []string{"chatgpt.com"}, Header: "Authorization", Format: "Bearer {value}", Route: "chatgpt"},
+					{Name: "ACME_TOKEN", Hosts: []string{"api.acme.example"}, Header: "X-Acme", Format: "{value}", Route: "acme"},
+				},
+			},
+		},
+	}
+	rawAuth := `{"auth_mode":"chatgpt","tokens":{"access_token":"acc-tok","refresh_token":"ref-tok","id_token":"id-tok","account_id":"acct_laptop"}}`
+	creds, armed, _, err := supSecret.buildBoundCredentials(supSecret.boundSecretMap(), []string{"CODEX_AUTH_JSON", "ACME_TOKEN"}, map[string]api.Secret{
+		"CODEX_AUTH_JSON": api.Secret(rawAuth),
+		"ACME_TOKEN":      "acme-val",
+	})
+	if err != nil {
+		t.Fatalf("buildBoundCredentials(CODEX_AUTH_JSON): %v", err)
+	}
+	if len(creds) != 2 || len(armed) != 2 {
+		t.Fatalf("creds=%d armed=%v", len(creds), armed)
+	}
+	subCred := creds[0]
+	if subCred.Route != "chatgpt" || string(subCred.Value) != "acc-tok" || subCred.OAuth == nil ||
+		subCred.OAuth.Format != egress.AuthFormatCodexChatGPT ||
+		subCred.OAuth.AccountHeader != "Chatgpt-Account-Id" ||
+		subCred.OAuth.AccountID != "acct_laptop" ||
+		string(subCred.OAuth.RefreshToken) != "ref-tok" ||
+		subCred.OAuth.AuthFile != "" {
+		t.Fatalf("unexpected laptop subscription cred: %+v", subCred)
+	}
+	// buildStartReq sets SubscriptionRoute="chatgpt" and omits CODEX_AUTH_JSON from BoundPlaceholders.
+	startReq := supSecret.buildStartReq(nil, nil)
+	if startReq.SubscriptionRoute != "chatgpt" || startReq.BoundSecretEnv != "" {
+		t.Errorf("startReq subscription=%q boundSecretEnv=%q", startReq.SubscriptionRoute, startReq.BoundSecretEnv)
+	}
+	if len(startReq.BoundPlaceholders) != 1 || !strings.HasPrefix(startReq.BoundPlaceholders[0], "ACME_TOKEN=") {
+		t.Errorf("BoundPlaceholders = %v, want only ACME_TOKEN", startReq.BoundPlaceholders)
+	}
+
+	// Malformed CODEX_AUTH_JSON fails with a Try: hint.
+	_, _, _, err = supSecret.buildBoundCredentials(supSecret.boundSecretMap(), []string{"CODEX_AUTH_JSON"}, map[string]api.Secret{
+		"CODEX_AUTH_JSON": "not-json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "Try:") {
+		t.Fatalf("malformed CODEX_AUTH_JSON err = %v, want Try: hint", err)
+	}
+
+	// 2. Host sign-in reads ~/.codex/auth.json and attaches AuthFile + LockFile.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("XDG_STATE_HOME", filepath.Join(tmpHome, "state"))
+	codexDir := filepath.Join(tmpHome, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	authPath := filepath.Join(codexDir, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"host-acc","refresh_token":"host-ref","account_id":"acct_host"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	supHost := &Supervisor{
+		id: "test-sub-host",
+		m: &host.Manifest{
+			ID:    "test-sub-host",
+			Agent: host.AgentInfo{Kind: "codex"},
+			Wall: &host.WallRecord{
+				Driver:           "process",
+				SubscriptionAuth: "host",
+			},
+		},
+	}
+	hcred, needed, err := supHost.hostSubscriptionCredential()
+	if err != nil || !needed {
+		t.Fatalf("hostSubscriptionCredential: needed=%v err=%v", needed, err)
+	}
+	if hcred.Route != "chatgpt" || string(hcred.Value) != "host-acc" || hcred.OAuth == nil ||
+		hcred.OAuth.AccountID != "acct_host" || hcred.OAuth.AuthFile != authPath || hcred.OAuth.LockFile == "" {
+		t.Fatalf("unexpected host subscription cred: %+v", hcred)
 	}
 }

@@ -32,11 +32,11 @@ func BoundSecretRoutes(b api.SecretBind) ([]BoundRouteTarget, error) {
 	slugHost := make(map[string]string, len(b.Hosts))
 	for _, h := range b.Hosts {
 		slug := ""
-		if _, gw, ok := agents.FindGatewayForHost(h); ok && gw != nil {
-			if b.Route != "" && b.Route != gw.Route {
-				return nil, fmt.Errorf("secret %s route %q conflicts with built-in route %q for %s", b.Name, b.Route, gw.Route, h)
+		if builtInRoute, ok := agents.FindGatewayRouteForHost(h); ok && builtInRoute != "" {
+			if b.Route != "" && b.Route != builtInRoute {
+				return nil, fmt.Errorf("secret %s route %q conflicts with built-in route %q for %s", b.Name, b.Route, builtInRoute, h)
 			}
-			slug = gw.Route
+			slug = builtInRoute
 		} else if b.Route != "" {
 			slug = b.Route
 		} else {
@@ -233,8 +233,8 @@ func agentSecretBind(name string, agent agents.Agent, known bool) (api.SecretBin
 		return api.SecretBind{}, false
 	}
 	route := ""
-	if _, gw, ok := agents.FindGatewayForHost(hosts[0]); ok && gw != nil {
-		route = gw.Route
+	if builtInRoute, ok := agents.FindGatewayRouteForHost(hosts[0]); ok && builtInRoute != "" {
+		route = builtInRoute
 	}
 	return api.SecretBind{
 		Name:   name,
@@ -243,6 +243,47 @@ func agentSecretBind(name string, agent agents.Agent, known bool) (api.SecretBin
 		Format: ab.Format,
 		Route:  route,
 	}, true
+}
+
+// detectSubscriptionAuth determines whether a walled session should arm the
+// agent's SubscriptionGateway (such as Codex ChatGPT sign-in on chatgpt.com)
+// rather than its API-key ModelGateway. A bound subscription secret (such as
+// CODEX_AUTH_JSON) always selects subscription mode; otherwise explicit API-key
+// credentials win over a host-side login file.
+func detectSubscriptionAuth(agent agents.Agent, known bool, bound []api.SecretBind, exposed []string) string {
+	if !known || agent.SubscriptionGateway == nil {
+		return ""
+	}
+	sub := agent.SubscriptionGateway
+	if sub.SecretEnv != "" {
+		for _, b := range bound {
+			if b.Name == sub.SecretEnv {
+				return "secret:" + sub.SecretEnv
+			}
+		}
+	}
+	if agent.ModelGateway != nil {
+		gwHost := agent.ModelGateway.UpstreamHost()
+		for _, b := range bound {
+			if slices.Contains(b.Hosts, gwHost) {
+				return ""
+			}
+		}
+		for _, binding := range agent.Secrets {
+			if slices.Contains(binding.Hosts, gwHost) && slices.Contains(exposed, binding.Env) {
+				return ""
+			}
+		}
+	}
+	if sub.AuthFile == "" || sub.AuthFormat != egress.AuthFormatCodexChatGPT {
+		return ""
+	}
+	toks, err := egress.ReadCodexAuthFile(expandHome("~/" + sub.AuthFile))
+	if err != nil {
+		return ""
+	}
+	toks.Clear()
+	return "host"
 }
 
 func lookupAgentSecret(name string, agent agents.Agent, known bool) (agents.SecretBinding, bool) {

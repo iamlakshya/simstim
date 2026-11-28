@@ -41,36 +41,44 @@ func compileGatewayRoute(rc GatewayRouteConfig) (*gatewayRoute, error) {
 
 // DefaultGatewayRoutes returns the built-in model gateway routes derived from
 // the agent table (no agent-name branching). If agentKind names an agent with
-// a ModelGateway, its route is included; otherwise all built-in agent routes
-// are available so multi-agent sessions and shell checks work out of the box.
+// a ModelGateway or SubscriptionGateway, its routes are included; otherwise all
+// built-in agent routes are available so multi-agent sessions and shell checks
+// work out of the box.
 func DefaultGatewayRoutes(agentKind string) []GatewayRouteConfig {
-	if agentKind != "" {
-		if a, ok := agents.Find(agentKind); ok && a.ModelGateway != nil {
-			return []GatewayRouteConfig{{
+	addAgent := func(out []GatewayRouteConfig, seen map[string]bool, a agents.Agent) []GatewayRouteConfig {
+		if a.ModelGateway != nil && !seen[a.ModelGateway.Route] {
+			seen[a.ModelGateway.Route] = true
+			out = append(out, GatewayRouteConfig{
 				Route:    a.ModelGateway.Route,
 				Upstream: a.ModelGateway.Upstream,
 				Guard:    a.ModelGuard,
-			}}
+			})
+		}
+		if a.SubscriptionGateway != nil && !seen[a.SubscriptionGateway.Route] {
+			seen[a.SubscriptionGateway.Route] = true
+			out = append(out, GatewayRouteConfig{
+				Route:    a.SubscriptionGateway.Route,
+				Upstream: a.SubscriptionGateway.Upstream,
+				Guard:    a.SubscriptionGateway.Guard,
+			})
+		}
+		return out
+	}
+	seen := map[string]bool{}
+	var out []GatewayRouteConfig
+	if agentKind != "" {
+		if a, ok := agents.Find(agentKind); ok && (a.ModelGateway != nil || a.SubscriptionGateway != nil) {
+			return addAgent(out, seen, a)
 		}
 	}
-	var out []GatewayRouteConfig
-	seen := map[string]bool{}
 	for _, a := range agents.Table {
-		if a.ModelGateway == nil || seen[a.ModelGateway.Route] {
-			continue
-		}
-		seen[a.ModelGateway.Route] = true
-		out = append(out, GatewayRouteConfig{
-			Route:    a.ModelGateway.Route,
-			Upstream: a.ModelGateway.Upstream,
-			Guard:    a.ModelGuard,
-		})
+		out = addAgent(out, seen, a)
 	}
 	return out
 }
 
 func stripGuestCredentials(h http.Header, extraHeader string) {
-	for _, k := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "Api-Key"} {
+	for _, k := range []string{"Authorization", "X-Api-Key", "Proxy-Authorization", "Api-Key", "Chatgpt-Account-Id"} {
 		h.Del(k)
 	}
 	if extraHeader != "" {

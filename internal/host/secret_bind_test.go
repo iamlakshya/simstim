@@ -2,11 +2,15 @@ package host
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 )
 
@@ -159,4 +163,177 @@ func TestResolveProcessSecretsRejectsRouteCollisionsAndBadFormat(t *testing.T) {
 	}
 	_, _, err = resolveProcessSecrets(shell, true, []string{"BAD_FMT"}, badFmtBinds, nil)
 	assertBadSecret(t, "CR/LF in format", err, "CR or LF")
+
+	// 8. Custom secret cannot hijack the built-in "chatgpt" subscription route.
+	hijackChatGPT := map[string]api.SecretBind{
+		"ACME_CHAT": {Name: "ACME_CHAT", Hosts: []string{"api.acme.example"}, Route: "chatgpt"},
+	}
+	_, _, err = resolveProcessSecrets(shell, true, []string{"ACME_CHAT"}, hijackChatGPT, nil)
+	assertBadSecret(t, "hijack chatgpt route", err, "collides")
+}
+
+func TestCodexSubscriptionAuthDetectionAndBinding(t *testing.T) {
+	codex, ok := agents.Find("codex")
+	if !ok {
+		t.Fatal("codex agent missing")
+	}
+
+	// 1. CODEX_AUTH_JSON auto-binds to chatgpt.com on the built-in "chatgpt" route.
+	bound, exposed, err := resolveProcessSecrets(codex, true, []string{"CODEX_AUTH_JSON"}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolve CODEX_AUTH_JSON: %v", err)
+	}
+	if len(exposed) != 0 || len(bound) != 1 || bound[0].Route != "chatgpt" || bound[0].Hosts[0] != "chatgpt.com" {
+		t.Fatalf("CODEX_AUTH_JSON bound=%+v exposed=%v", bound, exposed)
+	}
+	if got := detectSubscriptionAuth(codex, true, bound, exposed); got != "secret:CODEX_AUTH_JSON" {
+		t.Errorf("detectSubscriptionAuth(CODEX_AUTH_JSON) = %q, want secret:CODEX_AUTH_JSON", got)
+	}
+
+	// 2. Host ~/.codex/auth.json with auth_mode="chatgpt" selects "host" when no API key is passed.
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	if got := detectSubscriptionAuth(codex, true, nil, nil); got != "" {
+		t.Errorf("detectSubscriptionAuth without auth.json = %q, want empty", got)
+	}
+	codexDir := filepath.Join(tmpHome, ".codex")
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	authPath := filepath.Join(codexDir, "auth.json")
+	if err := os.WriteFile(authPath, []byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"tok","refresh_token":"rt","account_id":"acct_1"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := detectSubscriptionAuth(codex, true, nil, nil); got != "host" {
+		t.Errorf("detectSubscriptionAuth with host auth.json = %q, want host", got)
+	}
+
+	// 3. Explicit OPENAI_API_KEY (bound or exposed) takes precedence over host ChatGPT login.
+	apiBound, _, err := resolveProcessSecrets(codex, true, []string{"OPENAI_API_KEY"}, nil, nil)
+	if err != nil {
+		t.Fatalf("resolve OPENAI_API_KEY: %v", err)
+	}
+	if got := detectSubscriptionAuth(codex, true, apiBound, nil); got != "" {
+		t.Errorf("detectSubscriptionAuth with bound OPENAI_API_KEY = %q, want empty", got)
+	}
+	if got := detectSubscriptionAuth(codex, true, nil, []string{"OPENAI_API_KEY"}); got != "" {
+		t.Errorf("detectSubscriptionAuth with exposed OPENAI_API_KEY = %q, want empty", got)
+	}
+
+	// 4. auth.json with auth_mode="apikey" does NOT select ChatGPT subscription mode.
+	if err := os.WriteFile(authPath, []byte(`{"auth_mode":"apikey","OPENAI_API_KEY":"sk-test"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := detectSubscriptionAuth(codex, true, nil, nil); got != "" {
+		t.Errorf("detectSubscriptionAuth with apikey auth.json = %q, want empty", got)
+	}
+}
+
+func TestStartDeferredRecomputesSubscriptionAuth(t *testing.T) {
+	runCase := func(
+		t *testing.T,
+		name string,
+		hostAuth bool,
+		initialSubAuth string,
+		args api.SessionStartArgs,
+		wantSubAuth string,
+		wantBound []string,
+		wantExposed []string,
+	) {
+		t.Helper()
+		t.Run(name, func(t *testing.T) {
+			tmpHome := t.TempDir()
+			t.Setenv("HOME", tmpHome)
+			t.Setenv("XDG_STATE_HOME", filepath.Join(tmpHome, "state"))
+			t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tmpHome, "run"))
+			if hostAuth {
+				codexDir := filepath.Join(tmpHome, ".codex")
+				if err := os.MkdirAll(codexDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(codexDir, "auth.json"),
+					[]byte(`{"auth_mode":"chatgpt","tokens":{"access_token":"host-tok","refresh_token":"host-rt","account_id":"acct_host"}}`), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			id := NewID()
+			now := time.Now().UTC()
+			m := &Manifest{
+				Schema:    1,
+				ID:        id,
+				Name:      "deferred-codex",
+				CreatedAt: now,
+				Agent:     AgentInfo{Kind: "codex", Argv: []string{"codex"}},
+				Cwd:       "/work/repo",
+				Run:       Runtime{Socket: paths.Socket(id)},
+				Status:    Status{State: StateStarting, Since: now},
+				Wall: &WallRecord{
+					Level:            "process",
+					Driver:           "process",
+					WorkspaceHost:    filepath.Join(tmpHome, "repo"),
+					WorkspaceGuest:   "/work/repo",
+					SubscriptionAuth: initialSubAuth,
+				},
+			}
+			if err := m.Save(); err != nil {
+				t.Fatal(err)
+			}
+
+			var launched *Manifest
+			prev := startDeferredSession
+			startDeferredSession = func(lm *Manifest, _ map[string]api.Secret) (*SessionInfo, error) {
+				launched = lm
+				info := infoFrom(lm, true)
+				return &info, nil
+			}
+			t.Cleanup(func() { startDeferredSession = prev })
+
+			args.ID = id
+			if _, err := StartDeferred(args); err != nil {
+				t.Fatalf("StartDeferred: %v", err)
+			}
+			if launched == nil || launched.Wall == nil {
+				t.Fatal("startDeferredSession was not called with a walled manifest")
+			}
+			if launched.Wall.SubscriptionAuth != wantSubAuth {
+				t.Errorf("SubscriptionAuth = %q, want %q", launched.Wall.SubscriptionAuth, wantSubAuth)
+			}
+			var gotBound []string
+			for _, b := range launched.Wall.BoundSecrets {
+				gotBound = append(gotBound, b.Name)
+			}
+			if strings.Join(gotBound, ",") != strings.Join(wantBound, ",") {
+				t.Errorf("BoundSecrets = %v, want %v", gotBound, wantBound)
+			}
+			if strings.Join(launched.Wall.ExposedSecrets, ",") != strings.Join(wantExposed, ",") {
+				t.Errorf("ExposedSecrets = %v, want %v", launched.Wall.ExposedSecrets, wantExposed)
+			}
+		})
+	}
+
+	const sampleAuth = `{"auth_mode":"chatgpt","tokens":{"access_token":"laptop-tok","refresh_token":"laptop-rt","account_id":"acct_laptop"}}`
+
+	runCase(t, "codex_auth_json_without_host_file", false, "",
+		api.SessionStartArgs{Secrets: map[string]api.Secret{"CODEX_AUTH_JSON": sampleAuth}},
+		"secret:CODEX_AUTH_JSON", []string{"CODEX_AUTH_JSON"}, nil)
+
+	runCase(t, "codex_auth_json_overrides_host_file", true, "host",
+		api.SessionStartArgs{Secrets: map[string]api.Secret{"CODEX_AUTH_JSON": sampleAuth}},
+		"secret:CODEX_AUTH_JSON", []string{"CODEX_AUTH_JSON"}, nil)
+
+	runCase(t, "bound_openai_api_key_overrides_host_file", true, "host",
+		api.SessionStartArgs{Secrets: map[string]api.Secret{"OPENAI_API_KEY": "sk-proj-test"}},
+		"", []string{"OPENAI_API_KEY"}, nil)
+
+	runCase(t, "exposed_openai_api_key_overrides_host_file", true, "host",
+		api.SessionStartArgs{
+			Secrets:        map[string]api.Secret{"OPENAI_API_KEY": "sk-proj-test"},
+			ExposedSecrets: []string{"OPENAI_API_KEY"},
+		},
+		"", nil, []string{"OPENAI_API_KEY"})
+
+	runCase(t, "no_secrets_recomputes_host_file", true, "",
+		api.SessionStartArgs{},
+		"host", nil, nil)
 }

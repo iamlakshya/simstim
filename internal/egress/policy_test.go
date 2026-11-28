@@ -100,8 +100,8 @@ func TestLockedPresetAgentEgress(t *testing.T) {
 		},
 		{
 			agent:        "codex",
-			allowed:      []string{"chatgpt.com", "auth.openai.com"},
-			gatewayHosts: []string{"api.openai.com"},
+			allowed:      []string{"auth.openai.com"},
+			gatewayHosts: []string{"api.openai.com", "chatgpt.com"},
 			denied:       []string{"registry.npmjs.org", "example.com"},
 		},
 	} {

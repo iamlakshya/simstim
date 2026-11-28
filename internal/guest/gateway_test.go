@@ -227,3 +227,90 @@ func TestGuestProxyToModelGatewayEndToEnd(t *testing.T) {
 		t.Errorf("usage = %+v, want total=20 input=15 output=5", usage)
 	}
 }
+
+func TestSubscriptionGatewayConfigAndPlaceholderAuthJSON(t *testing.T) {
+	codex, ok := agents.Find("codex")
+	if !ok || codex.SubscriptionGateway == nil {
+		t.Fatal("codex SubscriptionGateway missing")
+	}
+	home := t.TempDir()
+	envMap := map[string]string{"HOME": home}
+	cfgPath, authPath, err := WriteSubscriptionGatewayConfig(home, envMap, "http://127.0.0.1:3128", codex)
+	if err != nil {
+		t.Fatalf("WriteSubscriptionGatewayConfig: %v", err)
+	}
+	if cfgPath != filepath.Join(home, ".codex", "config.toml") || authPath != filepath.Join(home, ".codex", "auth.json") {
+		t.Fatalf("paths = (%q, %q)", cfgPath, authPath)
+	}
+	rawCfg, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	var parsed struct {
+		CredStore      string `toml:"cli_auth_credentials_store"`
+		ModelProvider  string `toml:"model_provider"`
+		ChatGPTBaseURL string `toml:"chatgpt_base_url"`
+		ModelProviders map[string]struct {
+			BaseURL            string `toml:"base_url"`
+			WireAPI            string `toml:"wire_api"`
+			RequiresOpenAIAuth bool   `toml:"requires_openai_auth"`
+			SupportsWebSockets bool   `toml:"supports_websockets"`
+		} `toml:"model_providers"`
+	}
+	if _, err := toml.Decode(string(rawCfg), &parsed); err != nil {
+		t.Fatalf("decode config.toml: %v\n%s", err, rawCfg)
+	}
+	prov := parsed.ModelProviders[parsed.ModelProvider]
+	if parsed.CredStore != "file" || parsed.ModelProvider != "gateway" ||
+		parsed.ChatGPTBaseURL != "http://127.0.0.1:3128/gw/chatgpt/backend-api" ||
+		prov.BaseURL != "http://127.0.0.1:3128/gw/chatgpt/backend-api/codex" ||
+		prov.WireAPI != "responses" || !prov.RequiresOpenAIAuth || prov.SupportsWebSockets {
+		t.Fatalf("unexpected subscription config.toml: %+v", parsed)
+	}
+
+	fi, err := os.Stat(authPath)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("auth.json stat: err=%v mode=%v", err, fi.Mode().Perm())
+	}
+	toks, err := egress.ReadCodexAuthFile(authPath)
+	if err != nil {
+		t.Fatalf("ReadCodexAuthFile(placeholder): %v", err)
+	}
+	if toks.AccountID != "acct_placeholder" {
+		t.Errorf("placeholder account_id = %q, want acct_placeholder", toks.AccountID)
+	}
+	if toks.ExpiresAt < time.Now().Add(10*365*24*time.Hour).Unix() {
+		t.Errorf("placeholder exp = %d, want far-future expiry", toks.ExpiresAt)
+	}
+
+	// applyStartGateway in subscription mode writes subscription config and does
+	// NOT export OPENAI_API_KEY / OPENAI_BASE_URL, while keeping other bound placeholders.
+	home2 := t.TempDir()
+	env2, err := applyStartGateway(StartReq{
+		Agent:             "codex",
+		ProxyURL:          "http://127.0.0.1:3128",
+		SubscriptionRoute: "chatgpt",
+		BoundPlaceholders: []string{"ACME_TOKEN=placeholder-acme"},
+	}, []string{"HOME=" + home2})
+	if err != nil {
+		t.Fatalf("applyStartGateway(subscription): %v", err)
+	}
+	envMap2 := map[string]string{}
+	for _, kv := range env2 {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			envMap2[k] = v
+		}
+	}
+	if _, hasKey := envMap2["OPENAI_API_KEY"]; hasKey {
+		t.Errorf("OPENAI_API_KEY should not be set in subscription mode: %v", envMap2)
+	}
+	if _, hasURL := envMap2["OPENAI_BASE_URL"]; hasURL {
+		t.Errorf("OPENAI_BASE_URL should not be set in subscription mode: %v", envMap2)
+	}
+	if envMap2["ACME_TOKEN"] != "placeholder-acme" {
+		t.Errorf("ACME_TOKEN = %q, want placeholder-acme", envMap2["ACME_TOKEN"])
+	}
+	if _, err := os.Stat(filepath.Join(home2, ".codex", "auth.json")); err != nil {
+		t.Errorf("applyStartGateway did not write placeholder auth.json: %v", err)
+	}
+}

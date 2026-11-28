@@ -143,6 +143,10 @@ type WallRecord struct {
 	Docker bool `json:"docker,omitempty"`
 	// ImageRef records the user-requested OCI or saved image reference.
 	ImageRef string `json:"image_ref,omitempty"`
+	// SubscriptionAuth records how a subscription gateway (such as Codex
+	// ChatGPT sign-in) is armed: "host" (read from the host user's own login
+	// file) or "secret:<NAME>" (pushed from the client). Values are never stored here.
+	SubscriptionAuth string `json:"subscription_auth,omitempty"`
 }
 
 // GuestMemClaim holds the guest's untrusted view of memory inside the wall

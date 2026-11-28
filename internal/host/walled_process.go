@@ -72,6 +72,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 	if err != nil {
 		return nil, err
 	}
+	subscriptionAuth := detectSubscriptionAuth(agent, known, boundSecrets, exposedSecrets)
 
 	id := NewID()
 	inline := a.Inline && known && len(a.Argv) == 0 && agent.Inline.Has()
@@ -115,24 +116,25 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
 		Wall: &WallRecord{
-			Level:           level,
-			Driver:          driver,
-			Version:         ver,
-			Preset:          string(egress.PresetBalanced),
-			WorkspaceHost:   wsHost,
-			WorkspaceGuest:  wsGuest,
-			StateDirs:       slices.Clone(agent.StateDirs),
-			CacheDirs:       cacheDirs,
-			ExtraRO:         extraRO,
-			At:              now,
-			PolicyTOML:      buildSessionPolicyTOML(string(egress.PresetBalanced), ws),
-			PackageManagers: ws.pkgLevel,
-			MinReleaseAge:   ws.minAge,
-			ModelBudget:     ws.modelBudget,
-			UploadBudget:    ws.uploadBudget,
-			SandboxEnv:      filterSandboxEnv(a.Env, a.SandboxEnv),
-			BoundSecrets:    boundSecrets,
-			ExposedSecrets:  exposedSecrets,
+			Level:            level,
+			Driver:           driver,
+			Version:          ver,
+			Preset:           string(egress.PresetBalanced),
+			WorkspaceHost:    wsHost,
+			WorkspaceGuest:   wsGuest,
+			StateDirs:        slices.Clone(agent.StateDirs),
+			CacheDirs:        cacheDirs,
+			ExtraRO:          extraRO,
+			At:               now,
+			PolicyTOML:       buildSessionPolicyTOML(string(egress.PresetBalanced), ws),
+			PackageManagers:  ws.pkgLevel,
+			MinReleaseAge:    ws.minAge,
+			ModelBudget:      ws.modelBudget,
+			UploadBudget:     ws.uploadBudget,
+			SandboxEnv:       filterSandboxEnv(a.Env, a.SandboxEnv),
+			BoundSecrets:     boundSecrets,
+			ExposedSecrets:   exposedSecrets,
+			SubscriptionAuth: subscriptionAuth,
 		},
 		HostName:    a.HostName,
 		SandboxName: name,

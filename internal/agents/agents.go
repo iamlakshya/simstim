@@ -95,6 +95,11 @@ type Agent struct {
 	// ModelGuard lists the wire format, hosts, paths and tool types allowed on
 	// the agent's model API route (spec 7.2 and 8.6).
 	ModelGuard *ModelGuard `json:"model_guard,omitempty"`
+	// SubscriptionGateway configures a subscription OAuth gateway route
+	// (such as Codex's ChatGPT sign-in) where the trusted egress process injects
+	// and refreshes OAuth tokens while the sandbox sees only a placeholder
+	// (decision 0059, spec 7.3 and question 72).
+	SubscriptionGateway *SubscriptionGateway `json:"subscription_gateway,omitempty"`
 }
 
 // GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less
@@ -266,10 +271,11 @@ var Table = []Agent{
 			"chatgpt.com",
 			"auth.openai.com",
 		},
-		Secrets:      codexSecrets,
-		SandboxEnv:   map[string]string{"NO_UPDATE_NOTIFIER": "1"},
-		ModelGateway: codexGateway,
-		ModelGuard:   codexGuard,
+		Secrets:             codexSecrets,
+		SandboxEnv:          map[string]string{"NO_UPDATE_NOTIFIER": "1"},
+		ModelGateway:        codexGateway,
+		ModelGuard:          codexGuard,
+		SubscriptionGateway: codexSubscriptionGateway,
 	},
 	{
 		Kind: "opencode", Title: "opencode", Binaries: []string{"opencode"},

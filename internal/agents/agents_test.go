@@ -172,7 +172,7 @@ func TestFirstClassEgressHosts(t *testing.T) {
 
 func TestFirstClassModelGatewayAndGuard(t *testing.T) {
 	hosts := ModelHosts()
-	wantHosts := []string{"api.anthropic.com", "api.openai.com"}
+	wantHosts := []string{"api.anthropic.com", "api.openai.com", "chatgpt.com"}
 	if !slices.Equal(hosts, wantHosts) {
 		t.Fatalf("ModelHosts() = %q, want %q", hosts, wantHosts)
 	}
@@ -203,6 +203,17 @@ func TestFirstClassModelGatewayAndGuard(t *testing.T) {
 	}
 	if codex.ModelGuard == nil || codex.ModelGuard.Wire != "openai-responses" {
 		t.Fatalf("codex.ModelGuard = %+v", codex.ModelGuard)
+	}
+	if codex.SubscriptionGateway == nil || codex.SubscriptionGateway.Route != "chatgpt" ||
+		codex.SubscriptionGateway.UpstreamHost() != "chatgpt.com" ||
+		codex.SubscriptionGateway.SecretEnv != "CODEX_AUTH_JSON" ||
+		codex.SubscriptionGateway.AccountHeader != "Chatgpt-Account-Id" ||
+		codex.SubscriptionGateway.Guard == nil ||
+		!slices.Contains(codex.SubscriptionGateway.Guard.Paths, "POST /backend-api/codex/responses") {
+		t.Fatalf("codex.SubscriptionGateway = %+v", codex.SubscriptionGateway)
+	}
+	if route, ok := FindGatewayRouteForHost("chatgpt.com"); !ok || route != "chatgpt" {
+		t.Fatalf("FindGatewayRouteForHost(chatgpt.com) = (%q, %v), want (chatgpt, true)", route, ok)
 	}
 }
 
