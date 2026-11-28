@@ -219,7 +219,7 @@ func (s *Server) hijackConnect(ctx context.Context, clientConn net.Conn, host st
 			})
 			return
 		}
-		up, down := spliceConns(clientConn, upstream)
+		up, down := spliceConns(ctx, clientConn, upstream)
 		s.emitAudit(AuditEvent{
 			Kind: "net", Host: host, Port: port, Mode: string(ModeSplice), Method: http.MethodConnect,
 			Status: http.StatusOK, Up: int64(len(replay)) + up, Down: down,
@@ -241,7 +241,7 @@ func (s *Server) hijackConnect(ctx context.Context, clientConn net.Conn, host st
 	if _, err := io.WriteString(clientConn, "HTTP/1.1 200 Connection established\r\n\r\n"); err != nil {
 		return
 	}
-	up, down := spliceConns(clientConn, upstream)
+	up, down := spliceConns(ctx, clientConn, upstream)
 	s.emitAudit(AuditEvent{
 		Kind: "net", Host: host, Port: port, Mode: string(ModeSplice), Method: http.MethodConnect,
 		Status: http.StatusOK, Up: up, Down: down,

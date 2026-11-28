@@ -240,12 +240,14 @@ func serveLink(ctx context.Context, sess *link.Session, ctl *link.Stream, ctlRea
 	_ = lis.Close()
 	_ = httpSrv.Close()
 	_ = ctl.Close()
+	sessErr := sess.Err()
+	_ = sess.Close()
 	wg.Wait()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := sess.Err(); err != nil && !errors.Is(err, link.ErrLinkClosed) && !errors.Is(err, net.ErrClosed) {
-		return err
+	if sessErr != nil && !errors.Is(sessErr, link.ErrLinkClosed) && !errors.Is(sessErr, net.ErrClosed) {
+		return sessErr
 	}
 	return nil
 }
@@ -297,7 +299,10 @@ func handleCtlRequest(req proto.Request, srv *Server, id string) proto.Response 
 			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_args", Message: err.Error(), Hint: "pass target"}}
 		}
 		if err := srv.Engine.Allow(a.Target); err != nil {
-			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "policy_locked", Message: err.Error(), Hint: "remove any matching lock first"}}
+			if errors.Is(err, ErrPolicyLocked) {
+				return proto.Response{ID: req.ID, Error: &proto.Error{Code: "policy_locked", Message: err.Error(), Hint: "remove any matching lock first"}}
+			}
+			return proto.Response{ID: req.ID, Error: &proto.Error{Code: "bad_rule", Message: err.Error(), Hint: "pass a valid host, host:port or CIDR"}}
 		}
 		return proto.Response{ID: req.ID, OK: true}
 	case "policy.deny":

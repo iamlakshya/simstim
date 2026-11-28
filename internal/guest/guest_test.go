@@ -22,6 +22,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/agents"
 	"github.com/iamlakshya/simstim/internal/egress"
+	"github.com/iamlakshya/simstim/internal/link"
 )
 
 type staticResolver map[string][]netip.Addr
@@ -196,5 +197,58 @@ func TestProxyEnv(t *testing.T) {
 	}
 	if env["CUSTOM_PROXY_FLAG"] != "1" {
 		t.Errorf("CUSTOM_PROXY_FLAG = %q, want 1", env["CUSTOM_PROXY_FLAG"])
+	}
+}
+
+type noopOpener struct{}
+
+func (noopOpener) OpenEgress(context.Context, egress.StreamHeader) (*link.Stream, error) {
+	return nil, net.ErrClosed
+}
+
+func (noopOpener) OpenDNS(context.Context) (*link.Stream, error) {
+	return nil, net.ErrClosed
+}
+
+func TestProxyAndDNSStubCloseBeforeContextEnds(t *testing.T) {
+	// Pass a cancellable context that stays open while Close() stops Serve,
+	// verifying AfterFunc unregisters cleanly and Serve returns promptly.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	gp, err := ListenProxy(ctx, noopOpener{}, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxyDone := make(chan struct{})
+	go func() {
+		defer close(proxyDone)
+		gp.Serve(ctx)
+	}()
+	if err := gp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-proxyDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Proxy.Serve did not return after Close")
+	}
+
+	gd, err := ListenDNS(ctx, noopOpener{}, "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dnsDone := make(chan struct{})
+	go func() {
+		defer close(dnsDone)
+		gd.Serve(ctx)
+	}()
+	if err := gd.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-dnsDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("DNSStub.Serve did not return after Close")
 	}
 }

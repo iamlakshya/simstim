@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"context"
 	"io"
 	"net"
 	"sync"
@@ -11,10 +12,15 @@ type closeWriter interface {
 }
 
 // spliceConns copies bytes bidirectionally between client and upstream until
-// both directions finish, returning (upBytes, downBytes). It propagates
-// half-closes when the connections support CloseWrite so protocols that rely
-// on EOF work cleanly.
-func spliceConns(client, upstream net.Conn) (up, down int64) {
+// both directions finish or ctx is cancelled, returning (upBytes, downBytes).
+// It propagates half-closes when the connections support CloseWrite so
+// protocols that rely on EOF work cleanly.
+func spliceConns(ctx context.Context, client, upstream net.Conn) (up, down int64) {
+	stop := context.AfterFunc(ctx, func() {
+		_ = client.Close()
+		_ = upstream.Close()
+	})
+	defer stop()
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {

@@ -7,6 +7,7 @@ package egress
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -318,6 +319,10 @@ func (e *Engine) Reload(cfg Config) error {
 	return nil
 }
 
+// ErrPolicyLocked is returned by Engine.Allow when a locked deny covers the
+// requested target.
+var ErrPolicyLocked = errors.New("policy locked")
+
 // Allow adds a live session allow rule atomically. It refuses targets covered
 // by a locked deny.
 func (e *Engine) Allow(target string) error {
@@ -329,7 +334,7 @@ func (e *Engine) Allow(target string) error {
 	defer e.mu.Unlock()
 	cur := e.snap.Load()
 	if locked, pat := matchesAnyLock(cur.locks, r); locked {
-		return fmt.Errorf("egress: %q is locked by %q. Try: remove the lock from config before allowing it", target, pat)
+		return fmt.Errorf("egress: %w: %q is locked by %q. Try: remove the lock from config before allowing it", ErrPolicyLocked, target, pat)
 	}
 	next := *cur
 	next.grants = append(append([]rule(nil), cur.grants...), r)

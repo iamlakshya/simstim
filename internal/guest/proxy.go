@@ -77,10 +77,8 @@ func (p *Proxy) Addr() net.Addr {
 
 // Serve accepts guest connections until ctx is cancelled or Close is called.
 func (p *Proxy) Serve(ctx context.Context) {
-	go func() {
-		<-ctx.Done()
-		_ = p.Close()
-	}()
+	stop := context.AfterFunc(ctx, func() { _ = p.Close() })
+	defer stop()
 	for _, l := range p.listeners {
 		p.wg.Add(1)
 		go func(lis net.Listener) {
@@ -116,6 +114,11 @@ func (p *Proxy) forward(ctx context.Context, client net.Conn) {
 		return
 	}
 	defer func() { _ = st.Close() }()
+	stop := context.AfterFunc(ctx, func() {
+		_ = client.Close()
+		_ = st.Close()
+	})
+	defer stop()
 
 	var wg sync.WaitGroup
 	wg.Add(2)

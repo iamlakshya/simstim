@@ -86,7 +86,7 @@ func (s *Server) HandleTransparent(ctx context.Context, clientConn net.Conn, raw
 			return
 		}
 	}
-	up, down := spliceConns(clientConn, upstream)
+	up, down := spliceConns(ctx, clientConn, upstream)
 	s.emitAudit(AuditEvent{
 		Kind: "net", Host: normHost, Port: port, Mode: string(ModeSplice),
 		Status: http.StatusOK, Up: int64(len(replay)) + up, Down: down,

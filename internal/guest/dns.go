@@ -64,10 +64,8 @@ func (d *DNSStub) Addr() net.Addr { return d.pc.LocalAddr() }
 // Serve reads UDP DNS queries and answers them via KindDNS link streams until
 // ctx ends or Close is called.
 func (d *DNSStub) Serve(ctx context.Context) {
-	go func() {
-		<-ctx.Done()
-		_ = d.Close()
-	}()
+	stop := context.AfterFunc(ctx, func() { _ = d.Close() })
+	defer stop()
 	buf := make([]byte, maxGuestDNSBytes)
 	for {
 		n, peer, err := d.pc.ReadFrom(buf)
