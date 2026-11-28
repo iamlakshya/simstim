@@ -130,11 +130,7 @@ func systemSSHConfig(goos string, getenv func(string) string) string {
 // it, in a config file too. It asks ssh -G once for each run, which
 // connects to nothing. Tests replace it.
 var sshKnowsFork = sync.OnceValue(func() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "ssh", "-G", "-F", os.DevNull, "-o", "ForkAfterAuthentication=no", "--", "probe.invalid")
-	cmd.WaitDelay = sshWaitDelay
-	return cmd.Run() == nil
+	return sshKnowsOption("ForkAfterAuthentication=no")
 })
 
 func expand(p string) string {
@@ -277,6 +273,11 @@ func (s *SSH) args(shared bool) ([]string, error) {
 		return nil, err
 	}
 	args := append([]string{"-F", cfg}, NoForwarding()...)
+	pin, err := pinArgs(s.Host, false)
+	if err != nil {
+		return nil, err
+	}
+	args = append(args, pin...)
 	d := ""
 	if shared {
 		d = sharedDir()
@@ -380,14 +381,18 @@ func (s *SSH) CheckMaster(ctx context.Context) (running bool, pid int) {
 
 // sshError turns ssh's exit status and stderr into a user error.
 func sshError(h Host, err error, stderr string) error {
-	msg := tailStderr(stderr)
 	var ee *exec.ExitError
 	if ok := asExit(err, &ee); ok && ee.ExitCode() == 255 {
+		if ke := hostKeyChangedError(h, stderr); ke != nil {
+			return ke
+		}
+		msg := tailStderr(stderr)
 		if msg == "" {
 			msg = "ssh failed"
 		}
 		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", h.Name, msg), Hint: SSHCommand(h.SSH) + " (check that this works first)", Code: "unreachable"}
 	}
+	msg := tailStderr(stderr)
 	if msg == "" {
 		return err
 	}

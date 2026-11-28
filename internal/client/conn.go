@@ -167,18 +167,20 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 
 func (c *Conn) startError(err error) error {
 	waitErr := c.proc.Wait()
-	msg := strings.TrimSpace(c.proc.Stderr())
-	if strings.Contains(msg, "No such file") || strings.Contains(msg, "not found") {
+	raw := strings.TrimSpace(c.proc.Stderr())
+	if strings.Contains(raw, "No such file") || strings.Contains(raw, "not found") {
 		return ErrNotInstalled
 	}
-	if msg == "" {
+	if raw == "" {
 		return err
 	}
-	msg = tailStderr(msg)
 	if errors.Is(waitErr, ErrUnreachable) {
-		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, msg), Hint: c.hint, Code: "unreachable"}
+		if ke := hostKeyChangedError(c.Host, raw); ke != nil {
+			return ke
+		}
+		return &UserError{Msg: fmt.Sprintf("cannot reach %s: %s", c.Host.Name, tailStderr(raw)), Hint: c.hint, Code: "unreachable"}
 	}
-	return &UserError{Msg: fmt.Sprintf("the helper on %s did not start: %s", c.Host.Name, msg), Hint: brand.Name + " host doctor " + c.Host.Name, Code: "helper_failed"}
+	return &UserError{Msg: fmt.Sprintf("the helper on %s did not start: %s", c.Host.Name, tailStderr(raw)), Hint: brand.Name + " host doctor " + c.Host.Name, Code: "helper_failed"}
 }
 
 func (c *Conn) readLoop(r *bufio.Reader) {

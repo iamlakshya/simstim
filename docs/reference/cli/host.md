@@ -37,6 +37,7 @@ simstim host ls
 | [`host doctor`](host_doctor.md) | Check a host's setup, and with `--fix` fix what it can |
 | [`host idle`](host_idle.md) | Set how long a created host may idle before it stops |
 | [`host ls`](host_ls.md) | List hosts |
+| [`host rekey`](host_rekey.md) | Replace a host's pinned SSH host key |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
 | [`host rm`](host_rm.md) | Forget a host (its sessions keep running) |
 | [`host start`](host_start.md) | Start the host through its provider or provider script |

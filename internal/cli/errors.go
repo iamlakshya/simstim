@@ -39,7 +39,7 @@ var exitCodes = []ExitCode{
 	{Code: 4, Kind: client.KindNeedsAnswer, Meaning: "The command needs an answer, and input is off.",
 		Examples: "`host add` without `--yes`. `doctor --fix` without `-y`. A new session's folder that does not exist, without `--mkdir`. `setup` without the flags that answer its questions."},
 	{Code: 5, Kind: client.KindRefused, Meaning: "A policy or a tier refuses the action.",
-		Examples: "None in this release."},
+		Examples: "A host's SSH key changed. A `forward` whose SSH config has a `RemoteForward` or `Tunnel`."},
 	{Code: 130, Kind: client.KindCancelled, Meaning: "The user or a signal cancelled.",
 		Examples: "The answer no. Esc or Ctrl+C at a question or in the picker. The end of input at a question. Ctrl+C or SIGTERM outside an attach."},
 }

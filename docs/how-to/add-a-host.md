@@ -30,6 +30,35 @@ The client uses the system `ssh`, so everything in `~/.ssh/config` applies: `Pro
 simstim host add box admin@203.0.113.7 --yes
 ```
 
+To check the host's SSH key up front, read its fingerprint on the machine with `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` and pass `--host-key`:
+
+<!-- test: help (needs a reachable address and fingerprint) -->
+```sh
+simstim host add box admin@203.0.113.7 --host-key SHA256:3f9a…c1 --yes
+```
+
+## Pinned host keys and rekey
+
+Every host added over SSH gets its host key pinned in `~/.config/simstim/ssh/known_hosts-<host>`. The client passes that pin on every `ssh` command line, so a `StrictHostKeyChecking no` or `UserKnownHostsFile /dev/null` in your SSH config cannot turn it off.
+
+- If your OpenSSH settings already trust the host, `host add` pins its key without asking.
+- If the host is new, `host add` lets `ssh` show the fingerprint and ask at a terminal. Pass `--host-key SHA256:…` to verify it without a prompt, or `--yes` to pin on first use.
+- If a host's key later changes, every command stops with exit code 5 and shows both fingerprints. `host add` never replaces an existing pin.
+
+If you reinstalled the host and know why its key changed, replace the pin with `host rekey`:
+
+<!-- test: help (needs a saved host) -->
+```sh
+simstim host rekey my-server
+```
+
+`host rekey` shows the old and new fingerprints and asks you to type the host's name. In a script, pass `--host-key` and `--confirm`:
+
+<!-- test: help (needs a saved host and fingerprint) -->
+```sh
+simstim host rekey my-server --host-key SHA256:77b0…02 --confirm my-server
+```
+
 ## A repo's own SSH config
 
 Some teams keep an SSH config in a repository, with jump hosts and names of their own. Name it with `--ssh-config`:
@@ -41,11 +70,12 @@ simstim host add dev-vm dev-vm --ssh-config ~/src/infra/ssh/config --yes
 
 ## What host add does
 
-1. Checks that the host answers, and finds its system and CPU.
-2. Asks before it installs the helper, unless you pass `--yes`, then uploads it into `~/.local/share/simstim/bin/` and checks its SHA-256. In a script, or with `--no-input`, it cannot ask, so it fails with exit code 4 unless you pass `--yes` ([scripts](scripting.md)).
-3. Turns on systemd's linger for your user, so sessions keep running when you log out, and installs the unit that restores sessions after a reboot.
-4. Saves the host in `hosts.toml` ([configuration](../reference/config.md)).
-5. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
+1. Pins the host's SSH key in `~/.config/simstim/ssh/known_hosts-<host>`, from your OpenSSH settings, `--host-key` or a first-use confirmation.
+2. Checks that the host answers, and finds its system and CPU.
+3. Asks before it installs the helper, unless you pass `--yes`, then uploads it into `~/.local/share/simstim/bin/` and checks its SHA-256. In a script, or with `--no-input`, it cannot ask, so it fails with exit code 4 unless you pass `--yes` ([scripts](scripting.md)).
+4. Turns on systemd's linger for your user, so sessions keep running when you log out, and installs the unit that restores sessions after a reboot.
+5. Saves the host in `hosts.toml` ([configuration](../reference/config.md)).
+6. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
 
 ## Check a host
 

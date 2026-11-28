@@ -40,7 +40,10 @@ const promptingSSH = `echo "$@" >> "$HOME/ssh.log"
 echo "ssh-noise: a banner from ssh" >&2
 case " $* " in *" BatchMode=yes "*) ;; *) echo "Password: " >&2; sleep 5;; esac
 for a; do last=$a; done
-case "$last" in *"uname -sm"*) echo "Linux aarch64"; exit 0;; esac
+case "$last" in
+*"ssh_host_"*) echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl test@example.invalid"; exit 0;;
+*"uname -sm"*) echo "Linux aarch64"; exit 0;;
+esac
 exit 255
 `
 

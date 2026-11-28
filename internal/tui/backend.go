@@ -95,7 +95,20 @@ func (realBackend) LoadHosts(ctx context.Context) ([]client.Host, error) {
 }
 
 func (realBackend) SaveHosts(ctx context.Context, h []client.Host) error {
-	return client.SaveHosts(ctx, h)
+	old, _ := client.LoadHosts()
+	if err := client.SaveHosts(ctx, h); err != nil {
+		return err
+	}
+	kept := map[string]bool{}
+	for _, x := range h {
+		kept[x.Name] = true
+	}
+	for _, x := range old {
+		if !kept[x.Name] {
+			_ = client.CleanupHostFiles(ctx, x)
+		}
+	}
+	return nil
 }
 func (realBackend) Settings() client.Settings          { return client.LoadSettings() }
 func (realBackend) HelperVersion() string              { return client.HelperVersion() }
@@ -131,13 +144,32 @@ func (realBackend) Dial(ctx context.Context, h client.Host) (Conn, error) {
 
 // Probe and Install reach the host the way every connection does: the
 // system ssh, or the provider's own transport for a host that a provider
-// made. They never prompt.
+// made. They never prompt. Probe pins an SSH host's key before connecting.
 func (realBackend) Probe(ctx context.Context, h client.Host) (client.Platform, error) {
+	if h.SSH != "" && (h.Machine == nil || h.Machine.Provider == "lima") {
+		if _, err := client.PinHostKey(ctx, h, client.PinOptions{
+			AcceptFirstUse: h.Machine != nil,
+			Interactive:    false,
+		}); err != nil {
+			return client.Platform{}, err
+		}
+	}
 	t, err := client.HostTransport(ctx, h, false)
 	if err != nil {
 		return client.Platform{}, err
 	}
 	return client.Probe(ctx, t)
+}
+
+// removeUnsavedPin removes a host's pin file if the host is not saved in
+// hosts.toml, so cancelling the add-host wizard leaves no stale pin.
+func (realBackend) removeUnsavedPin(name string) {
+	if name == "" {
+		return
+	}
+	if _, err := client.FindHost(name); err != nil {
+		_ = client.RemovePin(context.Background(), name)
+	}
 }
 
 func (realBackend) Install(ctx context.Context, h client.Host, p client.Platform) error {

@@ -39,6 +39,7 @@ func newTestHost(t *testing.T) *testHost {
 	h.Script("ssh", `echo "$@" >> "$HOME/ssh.log"
 for a; do last=$a; done
 case " $* " in *" -N "*|*" -O "*) exit 0;; esac
+case "$last" in *"ssh_host_"*) echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl test@example.invalid"; exit 0;; esac
 exec sh -c "$last"
 `)
 	t.Setenv("PATH", filepath.Join(h.Root, "bin")+":"+os.Getenv("PATH"))

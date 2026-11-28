@@ -207,6 +207,11 @@ func (w *wizard) back(m *Model) tea.Cmd {
 	}
 	w.stop()
 	drop := m.dropConn(w.takeConn())
+	if !w.saved && !w.made {
+		if pc, ok := m.be.(interface{ removeUnsavedPin(string) }); ok {
+			pc.removeUnsavedPin(w.host.Name)
+		}
+	}
 	switch {
 	case w.made && !w.saved:
 		m.modal = nil

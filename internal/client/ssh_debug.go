@@ -29,8 +29,12 @@ func (s *SSH) ConfigValues(ctx context.Context) (map[string][]string, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	// The forwarding options of every command line, as the bridge has them.
-	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), NoPortForwards(), []string{"-G", "--", s.Host.SSH})
+	// The forwarding and pin options of every command line, as the bridge has them.
+	pin, err := pinArgs(s.Host, false)
+	if err != nil {
+		return nil, err
+	}
+	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), pin, NoPortForwards(), []string{"-G", "--", s.Host.SSH})
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.WaitDelay = sshWaitDelay
 	out, err := cmd.Output()
@@ -88,7 +92,11 @@ func (s *SSH) VerboseLog(ctx context.Context) ([]byte, error) {
 	log := filepath.Join(dir, "ssh.log")
 	ctx, cancel := context.WithTimeout(ctx, verboseWait)
 	defer cancel()
-	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), NoPortForwards(), OwnConnection(),
+	pin, err := pinArgs(s.Host, true)
+	if err != nil {
+		return nil, err
+	}
+	args := slices.Concat([]string{"-F", cfg}, NoForwarding(), pin, NoPortForwards(), OwnConnection(),
 		[]string{"-T", "-o", "BatchMode=yes", "-v", "-E", log, "--", s.Host.SSH, "true"})
 	cmd := exec.CommandContext(ctx, "ssh", args...)
 	cmd.WaitDelay = sshWaitDelay

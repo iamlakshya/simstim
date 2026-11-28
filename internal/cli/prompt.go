@@ -76,6 +76,8 @@ type question struct {
 // row here, and to the spec's table.
 var (
 	qInstallHelper = &question{cmd: "host add", flag: "--yes"}
+	qHostKey       = &question{cmd: "host add", flag: "--host-key"}
+	qHostRekey     = &question{cmd: "host rekey", flag: "--confirm"}
 	qAddAgents     = &question{cmd: "host add", flag: "--yes", keep: true}
 	qMakeFolder    = &question{cmd: "new", flag: "--mkdir"}
 	qSetupScript   = &question{cmd: "new", flag: "--setup", keep: true}
@@ -86,7 +88,7 @@ var (
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup}
+var questions = []*question{qInstallHelper, qHostKey, qHostRekey, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qSetup}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.

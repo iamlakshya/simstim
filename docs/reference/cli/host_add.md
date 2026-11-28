@@ -10,24 +10,26 @@ Connect a host: check it, install the helper, prepare it.
 simstim host add <name> [<ssh-target>] [flags]
 ```
 
-Connect a host. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own.
+Connect a host, pin its SSH host key and install the helper. The ssh target is a Host from your SSH config, or user@host. It defaults to the name. `--ssh-config` adds an extra SSH config file, for example a repo's own. `--host-key` pins the host key with the given SHA256 fingerprint instead of asking OpenSSH.
 
 ## Examples
 
 ```sh
 simstim host add my-vps
 simstim host add my-vps dev@203.0.113.10
+simstim host add my-vps dev@203.0.113.10 --host-key SHA256:…
 ```
 
 ## Flags
 
 | Flag | What it does |
 | --- | --- |
+| `--host-key <string>` | pin the host key with this SHA256 fingerprint (SHA256:…) |
 | `--label <string>` | labels, for example provider=gcp,region=eu |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |
 | `--ssh-config <string>` | an extra SSH config file to include |
 | `--wake` | start the host through its provider script when it does not answer |
-| `-y`, `--yes` | install the helper without asking, and offer no agents to install |
+| `-y`, `--yes` | install the helper without asking, pin an unknown host key on first use, and offer no agents to install |
 
 ## Flags from the parent command
 

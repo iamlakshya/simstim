@@ -2695,7 +2695,7 @@ Section 21.9 specifies the slots, the store, the requests and the tests of this 
 | --- | --- |
 | `~/.config/simstim/hosts.toml` | New keys: section 8.4 |
 | `~/.config/simstim/tiers.toml` | Each host's tier, host ID and pinned key fingerprint (0600) |
-| `~/.config/simstim/ssh/known_hosts-<key>` | The pinned host key (0600). `<key>` is the host's file key (14.7.1) |
+| `~/.config/simstim/ssh/known_hosts-<host>` | The pinned host key (0600, section 14.7.1) |
 | `~/.cache/simstim/runtime/sha256/<hex>` | Runtime files that the laptop fetched, to copy to a host |
 | `~/.cache/simstim/images/blobs/sha256/<hex>` | Image layers that the laptop fetched, to copy to a host (20.2) |
 | `~/.cache/simstim/facts.json` | The last facts of each host |
@@ -2725,7 +2725,7 @@ set_at = 2026-11-09T10:00:00Z
 
 An older client's `SaveHosts` writes `hosts.toml` from its own struct, so it drops keys that it does not know. So tiers live in `tiers.toml`, which older clients never write.
 
-- **Migration.** When `tiers.toml` does not exist, the first client that reads it writes every host in `hosts.toml` as `own`. It copies the fingerprint of each `known_hosts-<key>` that H3 wrote into `key`, and sets `migrated`. Today's hosts keep today's behaviour.
+- **Migration.** When `tiers.toml` does not exist, the first client that reads it writes every host in `hosts.toml` as `own`. It copies the fingerprint of each `known_hosts-<host>` that H3 wrote into `key`, and sets `migrated`. Today's hosts keep today's behaviour.
 - **After the migration,** a host in `hosts.toml` with no entry, for example one that an older client added, has no tier. It counts as `shared`. In a terminal, the client asks the tier question at its next use.
 - **An unanswered tier** stays `shared` when a connection records its host ID or key. Such a row has `needs_answer = true`. Only a successfully saved explicit tier answer clears it. The next foreground use checks a pinned live connection and asks without holding policy locks. A cancelled question or a failed save keeps it unanswered. Background and non-interactive uses ask nothing and keep `shared`.
 
@@ -2733,90 +2733,39 @@ An older client's `SaveHosts` writes `hosts.toml` from its own struct, so it dro
 
 #### 14.7.1 The pinned host key
 
-This applies to hosts reached over SSH, Lima hosts included. Docker and E2B hosts have no host key.
+This applies to hosts reached over SSH, Lima hosts included. Docker and E2B hosts have no host key. This section follows [decision 0054](decisions/0054-simple-pinned-host-keys.md) (replacing 0035).
 
-At `host add`, `client.PinHostKey` lets OpenSSH decide which key the user's own settings trust. The client never reads or matches the user's known hosts files itself: a matcher of its own would drift from OpenSSH's, for example on port wildcards, relative files or a `KnownHostsCommand`.
+Each SSH host's public keys live in `~/.config/simstim/ssh/known_hosts-<host>` (mode `0600`), written under the alias `simstim-<host>` with `golang.org/x/crypto/ssh/knownhosts.Line`.
 
-1. **Ask the user's settings.** It connects once, with the user's own known hosts settings as `ssh -G` resolves them: their `UserKnownHostsFile` and `GlobalKnownHostsFile` files, `@cert-authority` and `@revoked` lines, `RevokedHostKeys`, `KnownHostsCommand` and `VerifyHostKeyDNS`. It forces only `StrictHostKeyChecking=yes`, `BatchMode=yes`, `PreferredAuthentications=none` (with every other method of login off and `IdentityAgent=none`), `FingerprintHash=sha256` and `LogLevel=DEBUG1`, and also `UpdateHostKeys=no`, `CheckHostIP=no`, `NoHostAuthenticationForLocalhost=no`, `NoHostAuthenticationForProxyCommand=no` where `ssh` knows it, and a connection of its own. So `ssh` adds no key to any file, skips no check, offers no key and no password, and logs its verdict. `ssh` writes that log to a temporary file of its own (`-E`), and the client reads only that file. A ProxyJump hop or a `ProxyCommand` is a process of its own, which writes to stderr: its banner, its own log at the user's `LogLevel`, and its words about its own key never reach the file.
-   - It reaches the login, which the host refuses: OpenSSH trusted the key that its log names on the line "Server host key" (or "Server host certificate"). The client reads that key on a second connection, as step 2 does, of the same type, checks that it has that fingerprint, and pins it, "from your known_hosts". A host that only a `@cert-authority` line vouches for gets its own key, which the certificate signs.
-   - "No … host key is known": a first use, as in step 2.
-   - "REMOTE HOST IDENTIFICATION HAS CHANGED": the user's known hosts hold another key. `host add` fails with exit code 5, and its hint says to check the key on the machine and pass it with `--host-key`.
-   - A key that the user's settings revoke: exit code 5.
-   - A log that it cannot read fails closed. Its hint says to run `ssh -v` and fix the SSH connection or `KnownHostsCommand` first.
-   The client reads the whole log, and only from an `ssh` that ended by itself, in time, with a log that it could read. Text of the host's own reaches the log, such as the key ID of a host certificate, which `ssh` logs before its verdict, and which can hold line breaks and lines that look like `ssh`'s. Such text never comes after `ssh`'s own last line. So:
-   - Each verdict is a whole line, and the most severe one anywhere wins: revoked or changed, then not known, then trusted. A line of the host's can only make the verdict stricter.
-   - "Not known" needs `ssh`'s own end of that check, "Host key verification failed.", as the last line.
-   - "Trusted" needs the login, no other verdict anywhere, and an `ssh` that ended as a check that passed ends: it ran the command (exit code 0), or the host refused the login, which is the last line of the log (exit code 255).
-   - Any other end decides nothing, and the client fails closed: a failure of `ssh`'s own, such as a `KnownHostsCommand` that fails, a log that ends early, a time limit, or a log that names two different keys on its "Server host key" or "Server host certificate" lines.
-   - The client's errors never quote the log after the connection starts, nor a hop's stderr: a host could put a false `Try:` line there. They say in fixed words what failed, such as "the host refused the connection".
-2. **Read the key.** On a first use, it connects once more, with `-o HostKeyAlias=simstim-<name>` and a temporary known hosts file. That connection offers no key and no password either, so it ends after the key exchange:
-   - With `--host-key SHA256:…`, it takes the key with that fingerprint, or fails with exit code 5. It tries each type of public key that the host may have, one connection each: Ed25519, ECDSA on P-256, P-384 and P-521, and RSA, whose three signature algorithms share one key. A key that the user's settings trust, or name with another key, does not stop `--host-key`.
-   - A key to pin that step 1 did not see, such as one of another type that `--host-key` names, is checked as step 1 checks: on a connection of that key's own type (`HostKeyAlgorithms`), whose log must name that very key. A key that the user's settings revoke is never pinned, though the host shows a trusted key of another type first.
-   - In a terminal, it connects with `StrictHostKeyChecking=ask`, so `ssh` shows the fingerprint and asks.
-   - With `--yes`, it accepts the key on first use, and prints: "host key SHA256:3f9a…c1 pinned on first use. Check it on the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub".
-   - With input off and neither flag, `host add` fails with exit code 4, and names `--host-key`.
-3. **Keep the pin.** The pin is `known_hosts-<key>`, the record. `<key>` is the host's file key, which `client.HostFileKey` makes, and which every file of the host's own uses: the name in lower case, cut to 32 characters and with no dot or dash at its end, a dash, and 32 hex characters (128 bits) of SHA-256 over the exact name, such as `box-26f8567f2569182294c3fa5b9f9cb227`. Two names that differ only in case get files of their own, also on a disk that ignores case: 128 bits leave no pair that a person can make to share one, as 32 bits did. The pin's first line names the exact host, `# simstim pin of the host <name>`, and every read checks it. A file at the pin's path whose first line names another host, or no host, fails closed with exit code 5: the client neither uses it, replaces it nor removes it, and its `Try:` line says to check the file. `HostFileKey` is "" for a name that cannot name a host, and no path is built from such a name: `host rekey` of a hand-edited saved name such as `../../escape` fails with exit code 2, and writes nothing. A host's name ends with a letter, a digit, a dash or an underscore: Windows drops a dot or a space at the end of a file's name, so `box.` would name the files of `box`. `host add` prints "host key SHA256:… pinned" and where the pin came from: "from your known_hosts", "matched --host-key" or "on first use". It keeps the new pin apart, in a staged file that its own connections check, and moves it to `known_hosts-<key>` only when it saves the host, under the pin's lock, `<key>.lock`. So a `host add` that fails leaves no pin. When another client saved the host with another pin meanwhile, it saves nothing, and fails with exit code 5 and the `host rekey` hint. The save is one step: the pin goes to its place first, then the host to `hosts.toml`, and when that fails, the pin of before comes back. A host that the user adds over SSH is never saved without its pin. The stage belongs to the command that opened it: `StagePin` and `AbortPin` take the pin's lock, so a pin that is being written finishes first, and a command whose stage closed or was replaced writes nothing. From H4 on, the client also copies the fingerprint into the host's `key` in `tiers.toml` (14.6.1), for `host show` and `host rekey`.
-
-`host add` never replaces the pin of a saved host, whatever its target or `--ssh-config`. It connects with that pin, so a host that shows another key fails as a changed key, and a `--host-key` that the pin lacks fails with exit code 5. Only `host rekey` replaces a pin.
-
-From then on, `SSH.baseArgs` adds these options on the command line, where they win over every config file:
+1. **With `--host-key SHA256:…`:** `client.PinHostKey` fetches the host's public keys without logging in (`ssh-keyscan` for direct hosts, or `ssh` with `StrictHostKeyChecking=accept-new` into a temporary file and `PreferredAuthentications=none` when behind `ProxyJump` or `ProxyCommand`). It refuses a key marked revoked in the user's SSH settings, checks the fingerprint with `ssh.FingerprintSHA256`, and writes the pin ("matched --host-key"). A mismatch fails with exit code 5.
+2. **Without `--host-key`:** `client.PinHostKey` connects once with the user's own OpenSSH settings and `StrictHostKeyChecking=yes`, `BatchMode=yes`, `UpdateHostKeys=no` and `NoHostAuthenticationForLocalhost=no`.
+   - If OpenSSH trusts the host, the client pins the host's public keys from that verified session (or from a no-login key fetch if the keys are not under `/etc/ssh/ssh_host_*_key.pub`), printing "from your known_hosts".
+   - If the user's settings report a changed or revoked key, `host add` refuses with exit code 5.
+   - If the host key is unknown, `host add` lets OpenSSH ask at a terminal (`StrictHostKeyChecking=ask` into a temporary file with `PreferredAuthentications=none`), pins on first use when `--yes` is passed or for `host create lima`, or fails with exit code 4 when input is off.
+3. **Command-line enforcement:** whenever `known_hosts-<host>` exists, `SSH.args` adds these options on every `ssh` command line, where they win over every config file:
 
 ```text
--o HostKeyAlias=simstim-<name>
--o UserKnownHostsFile=<config>/ssh/known_hosts-<key>
+-o HostKeyAlias=simstim-<host>
+-o UserKnownHostsFile=<config>/ssh/known_hosts-<host>
 -o StrictHostKeyChecking=yes
 -o UpdateHostKeys=no
--o GlobalKnownHostsFile=/dev/null
+-o GlobalKnownHostsFile=none
 -o VerifyHostKeyDNS=no
 -o NoHostAuthenticationForLocalhost=no
 -o CheckHostIP=no
 -o FingerprintHash=sha256
 -o LogLevel=ERROR
--o KnownHostsCommand=none                     (OpenSSH 8.5 or later)
--o NoHostAuthenticationForProxyCommand=no     (where ssh has the option)
+-o KnownHostsCommand=none                     (when local ssh supports it)
+-o NoHostAuthenticationForProxyCommand=no     (when local ssh supports it)
 ```
 
-Without `GlobalKnownHostsFile`, `VerifyHostKeyDNS`, the two `NoHostAuthentication…` options and `KnownHostsCommand`, other sources could accept another key. These are a wildcard or `@cert-authority` line in the system's known hosts file, an SSHFP record in DNS, the user's `KnownHostsCommand`, and a config that turns the check off for a loopback address or a `ProxyCommand`. Lima's own SSH config turns it off for the loopback address. `CheckHostIP=no` keeps `ssh` from adding lines to the pin. `FingerprintHash=sha256` and `LogLevel=ERROR` keep the changed-key message and its SHA256 fingerprint whatever the user's config says. `LogLevel=ERROR` also hides a host's banner, which could imitate that message. The client asks `ssh -G` once whether it knows each of the last two options. Only `ssh`'s own words, "Bad configuration option" or "Unsupported option", say that it does not. A timeout or another failure is an error, which the client does not keep: the command fails, and the next one asks again. OpenSSH 8.5 added `KnownHostsCommand`.
-
-- The pin covers the destination only. Jump hosts follow the user's own config, because options on the command line do not reach the nested `ssh` of a ProxyJump. A jump host cannot read or change the session, because the session to the destination is end-to-end SSH with a pinned key. Nor can it choose the pin: step 1 reads `ssh`'s own log file, which the hop's words never reach.
-- **Every connection checks a pin.** A command that can log in builds its options from one snapshot of the pin, read under the pin's lock (shared), so the check that the host has a pin and the options that check it never differ. A pin that another client removes after the snapshot leaves `ssh` with a pin file that is gone, which it refuses. With no pin and no stage, it refuses, saved host or not: a host that another client forgot, which the launcher still holds, is never reached. The guided setup's check that `ssh` logs in to a rented server stages the key that the user's own settings trust, logs in with that pin alone, and leaves no pin (`client.CheckLogin`).
-- A changed key makes `ssh` exit with 255 and "REMOTE HOST IDENTIFICATION HAS CHANGED". `sshError` and `Dial` turn that into the error in section 14.14. They read only the destination `ssh`'s own `-E` log, which a ProxyJump hop's banner never reaches, and check whole lines that name the pin's alias and end at "Host key verification failed.".
-- `simstim host rekey <name> [--host-key SHA256:…] [--confirm <name>]` asks the user's settings as step 1 does, and refuses a key that they revoke. It then reads the key as step 2 does, with no key and no password offered. It shows the old and the new fingerprint, or why the old pin cannot be read, asks the user to type the host's name, replaces the pin, and, from H4 on, sets the tier to `shared`.
-- `ForgetHost`, and the launcher's remove, also remove `known_hosts-<key>` and stop the host's shared connection before removing the host from `hosts.toml`, all under the pin's lock. It never removes the lock file, so a client that holds the lock, or waits for it, locks the same file as every client after it. A client that waited for the lock checks that the host is still saved before it writes a pin. A connection without a stage checks that the host is still saved too, so a pin left on disk for an unsaved host is refused. `ForgetHost` checks the name first: a saved name that cannot name a host, such as one with a slash or `..`, leaves `hosts.toml`, and no path is built from it.
-- **Migration.** The first version of H3 named the pin `known_hosts-<name>`. At the host's next connection, the client moves such a pin to `known_hosts-<key>`, under the pin's lock: once, for a saved host, and only when every key line in the file names that exact host. It removes the old file only when the new pin holds the same keys. A file that it cannot move stays, and the host gets a new pin as a host saved before H3 does. `ForgetHost` removes an old pin of the host's too.
-- `PinHostKey` and `host rekey` connect with `-o ControlMaster=no`. After they write the pin, they stop the host's shared connection with `ssh -O exit`.
-  Each pin namespace has a random 128-bit epoch folder. The socket within it is `nf-%C`.
-  OpenSSH's `%C` keeps the route separate. The final path has at most 86 bytes.
-  This leaves 17 bytes for OpenSSH's temporary bind suffix on macOS.
-  A private cache base is used when it fits. Otherwise the client uses an owned `0700` base, `/tmp/cm-<uid in base36>`.
-  Sharing is disabled when neither base can be used safely.
-  Under the pin lock, the client publishes a `0600` index marker at `h/<host>/<key>` before returning shared options.
-  The marker holds the epoch folder's 26-character lower-case base32 token.
-  The host label holds 128 bits over the physical client config root and exact host name.
-  The key holds 128 bits over that root, the exact host name and the canonical pin set. Both use lower-case base32.
-  Pins, wrappers and host lock files keep the file key defined above.
-  Separate client roots cannot reuse or retire each other's masters.
-  Forget and rekey read this index even when a pin or user SSH config cannot be read.
-  They first rename each epoch folder within its retained private base.
-  A command that was already authenticating cannot then publish a master at its prepared path.
-  The client stops each master through its concrete socket, without a remote login, then removes the retired folder and index entry.
-  A newly added host gets a fresh epoch. The old path is never recreated.
-  Other hosts' markers and sockets stay untouched.
-  Unindexed sockets from pre-release formats are never adopted or retired. Their names cannot prove which client root owns them.
-  New templates cannot reuse them. Their original finite lifetime still applies.
-- Connections using a staged pin use a connection of their own. Sharing starts after the host and pin are saved.
-- Staged keys are bound to the operation that opened them. An old operation cannot adopt, publish or remove a replacement stage.
-  Cancellation is checked before a migration or publication. A failed host save restores its own prior pin while holding the pin lock.
-- `forward` and `pull` use a private destination SSH log for host-key refusals. Output from a jump host passes the terminal cleaner.
-  Pull records SSH's actual exit state through a private child of the client. Cancellation ends that child's SSH command.
-  A local lease bounds the SSH command's life when the client stops unexpectedly. No extra executable or network listener is installed.
-- A host saved before H3 has no pin. No `ssh` command connects to it until its next connection through `Dial` or `HostTransport` pins it, once, and prints where the pin came from:
-  - When the user's settings trust its key, as step 1 says, the client pins that key.
-  - Otherwise, the client pins on first use when the user's config takes new keys without a question (`StrictHostKeyChecking no` or `accept-new`), or when the client made the machine, as for Lima.
-  - Otherwise, at a terminal, `ssh` asks, as at `host add`. Without a terminal, the connection fails with exit code 4, and its hint names `host rekey <name> --host-key SHA256:… --confirm <name>`.
-  - A failure of the pin stops the connection: no connection to a saved host goes without a pin. A `hosts.toml` that cannot be read stops it too: it is never taken for a host that is not saved. A machine that is starting is asked for its key, on a connection that logs in to nothing, until it answers.
-- The launcher's add-host wizard pins as `host add` does: it stages the pin before its first connection, so the probe, the install and the setup check it, and it saves the host with the pin under the pin's lock. For a key that the user's settings do not name, it shows the fingerprint and the command that shows the key on the machine, and pins the key only after the user's yes. It never saves a host without its pin. A host that the guided setup made has its pin from `host create`.
-- From H4 on, the client does not connect to a host whose `key` is in `tiers.toml` and whose `known_hosts-<key>` is missing or unreadable. It fails as for a changed key, and `host rekey` makes a new pin.
+4. **Changed keys, rekey and cleanup:**
+   - `host add` never replaces an existing pin, and removes a newly created pin if saving the host fails or is cancelled.
+   - A changed host key makes `ssh` exit with 255. `sshError`, `Conn.startError` and `ForwardError` turn it into the `host_key_changed` refusal of section 14.14 (exit code 5), showing the pinned and shown SHA256 fingerprints and the `host rekey` hint.
+   - `simstim host rekey <host> [--host-key SHA256:…] [--confirm <host>]` fetches the host's current public keys without logging in, refuses a revoked key or a `--host-key` mismatch, shows old and new fingerprints, asks for the typed host name (or checks `--confirm <host>`, failing with exit code 4 when input is off without `--confirm`), replaces `known_hosts-<host>` atomically, and stops the host's shared `ControlMaster` with `ssh -O exit`.
+   - `ForgetHost`, `host rm` and launcher host removal stop the host's shared connection and remove `known_hosts-<host>` and `config-<host>`.
+   - A host saved before H3 gets its pin on its next connection through `Dial` or `HostTransport` before the bridge starts.
+   - Jump hosts follow the user's own SSH config; the end-to-end session to the destination still verifies the pinned host key.
 
 #### 14.7.2 The host ID
 
@@ -3500,8 +3449,8 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 - `BuildRootScript`: one golden script and undo script for each mix of steps in `internal/client/testdata/root/`. It refuses `root`, `a b`, `$(id)`, `-x`, a name of 33 characters and a uid of 0. No script contains `$USER`. The SHA-256 is stable.
 - `RunRoot`'s quoting: a fuzz test that any text survives the single quotes unchanged.
 - `RootStepsFor` and the default mode: a table of probes, tiers and histories.
-- `SSH.baseArgs`: the forwarding options are always there. The pin options are there when `known_hosts-<key>` exists. A missing pin file stops a host whose `key` is in `tiers.toml`. The generated config starts with the forwarding options and `ClearAllForwardings yes`, and a `ProxyJump` hop reads them. `ClearAllForwardings=yes` is on every connection but `Forward`. `Forward` has `ClearAllForwardings=no` and a connection of its own, and refuses a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` from the config. The shared master's socket is `nf-%C` within the host's pin epoch folder. Forgetting or rekeying the host retires that folder before stopping its masters. A host below `own` gets `SendEnv -*`, and a `setenv` line stops it.
-- `PinHostKey`: the verdicts of the user's settings (trusted, unknown, changed, revoked, a log that cannot be read), `--host-key` that the settings trust, that differs from them, of another type, and that the host does not show, and the first use. The connections offer no key. Against a real sshd in a container, the client gives the same answer as `ssh` for a port wildcard, a revocation in a second relative file, a CA-only host, a hashed entry, a known hosts file over 16 MiB and a `KnownHostsCommand`. A staged pin, a failed `host add`, two additions at once, and a saved host whose pin `host add` never replaces. A certificate whose key ID imitates the login, on a changed key and on an unknown key, is never trusted, and one that names a second key fails closed. A ProxyJump hop that logs at DEBUG1, a hop whose banner imitates `ssh`, a hop whose key changed and the user's own `LogLevel VERBOSE` and `DEBUG1`: the verdict is the destination's. A `--host-key` of a revoked key of another type is refused, through `host add` and `host rekey`, and one of P-384 or P-521 is found when the host shows P-256 first. Pins of names that differ only in case, added at once, stay apart. A forget while another client holds the lock, a pin of the first version that moves, a trailing dot that is refused, and a `hosts.toml` that cannot be read, which stops the connection. The add-host wizard stages the pin before it connects, asks about a key that nothing names, and saves the host with its pin. A certificate's key ID that imitates the login while the user's `KnownHostsCommand` fails or hangs, two names whose SHA-256 sums share their first 8 hex characters, a pin file that names another host, a forget between the snapshot of the pin and the command, a redial of a host that `host rm` forgot, a publication that fails half way, Esc and the launcher's end while the wizard saves, a saved name that leads out of the folder, and errors that never quote a host's false `Try:` line.
+- `SSH.baseArgs`: the forwarding options are always there. The pin options are there when `known_hosts-<host>` exists. The generated config starts with the forwarding options and `ClearAllForwardings yes`, and a `ProxyJump` hop reads them. `ClearAllForwardings=yes` is on every connection but `Forward`. `Forward` has `ClearAllForwardings=no` and a connection of its own, and refuses a `RemoteForward`, a `Tunnel` or `ForkAfterAuthentication yes` from the config. The shared master's socket is `nf-%C` in a private folder. A host below `own` gets `SendEnv -*`, and a `setenv` line stops it.
+- `PinHostKey`: unit and real-`ssh` tests cover `--host-key` (matching Ed25519 and RSA, mismatch, bad format), user `known_hosts` verdicts (trusted, unknown, changed, revoked), first-use pinning (`--yes` / Lima), input-off failure (exit code 4), changed-key refusal (exit code 5) even with `StrictHostKeyChecking no` and `UserKnownHostsFile /dev/null`, `host add` never replacing an existing pin, `host rekey` (interactive typed-name prompt, Enter keeps pin, `--confirm`, `--host-key`), `ForgetHost` / `host rm` cleanup, and automatic pinning of pre-H3 saved hosts.
 - `Allow`: every kind of outbound item against every tier, with and without `[secret_tiers]`.
 - `LoadTiers`: the migration, and a host with no entry after it.
 - The grant ledger: a test puts a secret value in the environment, starts a session, and checks that the value is in no file under the state folder.
@@ -3518,7 +3467,7 @@ The bridge serves the new requests in a new `bridge_sandbox.go`, as `handleMore`
 
 1. `host add --tier own --root-step print --yes`: the probe block prints, the root script prints with its SHA-256, and nothing changes outside the user's home.
 2. With `ForwardAgent` naming a throwaway agent in a throwaway client SSH config, a session on the host has no `SSH_AUTH_SOCK`.
-3. With a wrong key in `known_hosts-<key>`, the client refuses to connect, with the message of section 14.14.
+3. With a wrong key in `known_hosts-<host>`, the client refuses to connect, with the message of section 14.14.
 4. A `shared` host never gets an `own`-tier secret: the start is refused, and `env` on the host lacks it.
 5. With images through the laptop, each file arrives and checks. A file changed on the way is deleted.
 6. After the sandbox start of section 6.1 exists: sandboxes fill the room, and the next start gets `no_room`. While drained, a start gets `draining`.

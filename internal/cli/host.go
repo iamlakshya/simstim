@@ -25,7 +25,7 @@ func hostCmd() *cobra.Command {
 		Example: "  " + brand.Name + " host add my-vps\n" +
 			"  " + brand.Name + " host ls",
 	}
-	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostRmCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
+	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostRmCmd(), hostRekeyCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
 		hostCreateCmd(), hostDestroyCmd(), hostIdleCmd(),
 		hostProviderCmd("start", "Start the host through its provider or provider script", ""),
 		hostProviderCmd("stop", "Stop the host through its provider or provider script",
@@ -35,15 +35,18 @@ func hostCmd() *cobra.Command {
 }
 
 func hostAddCmd() *cobra.Command {
-	var sshConfig, label, providerScript string
+	var sshConfig, label, providerScript, hostKey string
 	var yes, wake bool
 	cmd := &cobra.Command{
 		Use:   "add <name> [<ssh-target>]",
 		Short: "Connect a host: check it, install the helper, prepare it",
-		Long: "Connect a host. The ssh target is a Host from your SSH config, or user@host.\n" +
-			"It defaults to the name. --ssh-config adds an extra SSH config file, for example a repo's own.",
-		Example: "  " + brand.Name + " host add my-vps" + "\n" +
-			"  " + brand.Name + " host add my-vps dev@203.0.113.10",
+		Long: "Connect a host, pin its SSH host key and install the helper. The ssh target is a Host\n" +
+			"from your SSH config, or user@host. It defaults to the name. --ssh-config adds an extra\n" +
+			"SSH config file, for example a repo's own. --host-key pins the host key with the given\n" +
+			"SHA256 fingerprint instead of asking OpenSSH.",
+		Example: "  " + brand.Name + " host add my-vps\n" +
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10\n" +
+			"  " + brand.Name + " host add my-vps dev@203.0.113.10 --host-key SHA256:…",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig}
@@ -63,12 +66,13 @@ func hostAddCmd() *cobra.Command {
 			if !client.ValidHostName(h.Name) {
 				return &client.UserError{Msg: fmt.Sprintf("%q cannot name a host", h.Name), Hint: "Use letters, digits, dots, dashes and underscores.", Code: "bad_name", Kind: client.KindUsage}
 			}
-			return addHost(cmd.Context(), prompts(cmd), h, yes)
+			return addHostWithKey(cmd.Context(), prompts(cmd), h, hostKey, yes)
 		},
 	}
 	cmd.Flags().StringVar(&sshConfig, "ssh-config", "", "an extra SSH config file to include")
+	cmd.Flags().StringVar(&hostKey, "host-key", "", "pin the host key with this SHA256 fingerprint (SHA256:…)")
 	cmd.Flags().StringVar(&label, "label", "", "labels, for example provider=gcp,region=eu")
-	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking, and offer no agents to install")
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking, pin an unknown host key on first use, and offer no agents to install")
 	cmd.Flags().StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	cmd.Flags().BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
 	return cmd
@@ -82,10 +86,19 @@ var hostAddGuide = func(*guide) {}
 // it asks p before it installs the helper, and with input on it offers the
 // agents that the host lacks, as setup does.
 func addHost(ctx context.Context, p *prompter, h client.Host, yes bool) error {
+	return addHostWithKey(ctx, p, h, "", yes)
+}
+
+func addHostWithKey(ctx context.Context, p *prompter, h client.Host, hostKey string, yes bool) error {
 	consent := installConsent(ctx, p, h, yes)
+	pinOpts := client.PinOptions{
+		HostKey:        hostKey,
+		AcceptFirstUse: yes || (h.Machine != nil && h.Machine.Provider == "lima"),
+		Interactive:    p.on,
+	}
 	// connectHost records each change in p's log as it makes it, so a
 	// cancel at any point after it says so.
-	checks, err := connectHost(ctx, os.Stderr, h, consent, p.changes())
+	checks, err := connectHostWithPin(ctx, os.Stderr, p, h, pinOpts, consent, p.changes())
 	if err != nil {
 		if isCancel(err) || ctx.Err() != nil {
 			return p.cancelOf(err)
@@ -140,15 +153,51 @@ func installConsent(ctx context.Context, p *prompter, h client.Host, yes bool) f
 	}
 }
 
-// connectHost checks a host, installs the helper after consent says yes,
-// prepares the host, and saves it. It returns the host's agent checks, or
-// none from a helper too old to check. log, when set, gets a line for each
-// change.
-func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q string) (bool, error), log *onboard.Log) ([]api.AgentCheck, error) {
+// pinBeforeConnect pins the SSH host key for h before probing it, and reports
+// whether a new pin file was written so connectHostWithPin can remove it on failure.
+func pinBeforeConnect(ctx context.Context, pr *prompter, h client.Host, opts client.PinOptions, step func(string, ...any)) (bool, error) {
+	if h.SSH == "" || (h.Machine != nil && h.Machine.Provider != "lima") {
+		return false, nil
+	}
+	pin, err := client.PinHostKey(ctx, h, opts)
+	if err != nil {
+		var ue *client.UserError
+		if pr != nil && errors.As(err, &ue) && ue.Kind == client.KindNeedsAnswer {
+			ue.Hint = pr.withFlags("--host-key", "SHA256:…") + " (or " + pr.withFlags("--yes") + " to pin on first use)"
+		}
+		return false, err
+	}
+	switch pin.Source {
+	case client.PinOnFirstUse:
+		step("✓ host key %s pinned on first use. Check it on the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub", pin.Fingerprint)
+	case client.PinExisting:
+		step("✓ host key %s already pinned", pin.Fingerprint)
+	default:
+		step("✓ host key %s pinned (%s)", pin.Fingerprint, pin.Source)
+	}
+	return pin.Created, nil
+}
+
+// connectHostWithPin pins an SSH host's key, probes it, installs the helper
+// after consent says yes, prepares the host, and saves it.
+func connectHostWithPin(ctx context.Context, w io.Writer, pr *prompter, h client.Host, pinOpts client.PinOptions, consent func(q string) (bool, error), log *onboard.Log) ([]api.AgentCheck, error) {
 	step := func(format string, a ...any) { fmt.Fprintf(w, "  "+format+"\n", a...) }
 	fmt.Fprintf(w, "Connecting to %s (%s)…\n", h.Name, h.Target())
 	start := time.Now()
 	pctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	saved := false
+	createdPin, err := pinBeforeConnect(pctx, pr, h, pinOpts, step)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	if createdPin {
+		defer func() {
+			if !saved {
+				_ = client.RemovePin(ctx, h.Name)
+			}
+		}()
+	}
 	s, err := client.HostTransport(pctx, h, true)
 	if err != nil {
 		cancel()
@@ -220,6 +269,7 @@ func connectHost(ctx context.Context, w io.Writer, h client.Host, consent func(q
 	if err := client.SaveHost(ctx, h); err != nil {
 		return nil, err
 	}
+	saved = true
 	log.Add("saved the host %s", h.Name)
 	return client.CleanAgentChecks(checks), nil
 }
@@ -297,6 +347,7 @@ func hostRmCmd() *cobra.Command {
 			if err := client.SaveHosts(cmd.Context(), out); err != nil {
 				return err
 			}
+			_ = client.CleanupHostFiles(cmd.Context(), *gone)
 			say(cmd, "Forgot %s. Its sessions and the helper stay on the host.\n", args[0])
 			if m := gone.Machine; m != nil {
 				say(cmd, "Its %s machine %s is kept. `host destroy` would have deleted it; now delete it with %s's own tools.\n", m.Provider, m.ID, m.Provider)

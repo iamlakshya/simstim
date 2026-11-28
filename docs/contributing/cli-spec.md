@@ -346,7 +346,7 @@ The isolation spec owns the messages and the hints of its errors. This table own
 | An `ssh` without the fix of CVE-2023-51385, at `ssh-config` | 17.7 | `KindFailed` | 1 |
 | `setup_trust` | 19.2 | `KindNeedsAnswer` | 4 |
 
-The pinned host key lives in `known_hosts-<key>`, where `<key>` is the host's file key, and `tiers.toml` keeps a copy of its fingerprint (isolation spec 14.7.1). A changed key is a refusal, as a tier's is.
+The pinned host key lives in `known_hosts-<host>`, and `tiers.toml` keeps a copy of its fingerprint once H4 lands (isolation spec 14.7.1). A changed key is a refusal, as a tier's is.
 
 ### 5.4 Tests
 

@@ -22,9 +22,13 @@ var (
 	wantOwn          = []string{"-o", "ControlMaster=no", "-o", "ControlPath=none"}
 )
 
-// Ask the real ssh whether it knows ForkAfterAuthentication now, before a
-// test puts a fake ssh on PATH, which would answer for the whole binary.
-func init() { _ = sshKnowsFork() }
+// Ask the real ssh which options it knows now, before a test puts a fake
+// ssh on PATH, which would answer for the whole binary.
+func init() {
+	_ = sshKnowsFork()
+	_ = sshKnowsKnownHostsCommand()
+	_ = sshKnowsNoHostAuthProxy()
+}
 
 // sshDirs gives the client a config folder and a cache folder of its own.
 func sshDirs(t *testing.T) {

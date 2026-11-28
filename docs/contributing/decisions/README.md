@@ -38,7 +38,7 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0032](0032-secret-values-in-memory-only.md) | Secret values live only in the memory of the trusted side, never in a file | Proposed |
 | [0033](0033-one-command-grammar.md) | One grammar for the command line: session verbs at the top, a noun and a verb for everything else, and every rule under `policy` | Accepted |
 | [0034](0034-ssh-options-on-the-command-line.md) | The client puts the options that keep a host safe on the `ssh` command line and at the top of its generated config, where they win over the user's own config. It starts with forwarding off (adds to 0003) | Accepted |
-| [0035](0035-pinned-host-keys.md) | Each saved host reached over SSH has a pinned host key in a file of its own, which options on the `ssh` command line check, so the user's config cannot undo it. OpenSSH decides which key the user's own settings trust, and only `host rekey` replaces a pin (applies the rule of 0034) | Proposed |
+| [0035](0035-pinned-host-keys.md) | Each saved host reached over SSH has a pinned host key in a file of its own, which options on the `ssh` command line check, so the user's config cannot undo it. OpenSSH decides which key the user's own settings trust, and only `host rekey` replaces a pin (applies the rule of 0034) | Replaced by 0054 |
 | [0036](0036-host-tiers-and-the-grant-gate.md) | Host tiers and identity stay in a separate client file. The client checks each grant before it leaves the laptop | Proposed |
 | [0041](0041-a-signed-tag-release-gate.md) | A release builds only from a tag that a maintainer signed with a hardware key, checked by `main`'s gate against the list of keys on `main`, with the release key in an environment that only the gated job reads (extends 0017) | Proposed |
 | [0044](0044-mac-host-loopback-port.md) | A joined Mac permits only its fixed Lima loopback SSH port behind the existing narrow SSH path | Proposed |
@@ -49,5 +49,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0051](0051-closed-manager-custody.md) | Retain original kernel custody in the user's manager between stopped runs | Rejected by 0053 |
 | [0052](0052-exact-http2-legacy-build.md) | Qualify the original public HTTP/2 hooks with exact official Go 1.27.4 and the documented legacy build tag | Rejected by 0053 |
 | [0053](0053-rebuild-with-open-source-parts.md) | Rebuild on the published base with maintained open-source parts, and build from scratch only when no tool meets the need | Accepted |
+| [0054](0054-simple-pinned-host-keys.md) | Pin each SSH host's public keys in `known_hosts-<host>` with OpenSSH and `x/crypto/ssh`, with no log-verdict parser or epoch index (replaces 0035) | Proposed |
 
 Write a new record from [the template](template.md).

@@ -108,7 +108,23 @@ func OpenMachine(h Host) (Lifecycle, error) {
 	return open(h)
 }
 
-// ForgetHost removes a host from hosts.toml, and its generated SSH config.
+// CleanupHostFiles stops the host's shared SSH connection and removes its
+// private known_hosts pin and generated SSH config.
+func CleanupHostFiles(ctx context.Context, h Host) error {
+	if h.SSH != "" {
+		(&SSH{Host: h}).ExitMaster(ctx)
+	}
+	if err := RemovePin(ctx, h.Name); err != nil {
+		return err
+	}
+	if err := os.Remove(wrapperPath(h)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove the generated SSH config: %w", err)
+	}
+	return nil
+}
+
+// ForgetHost removes a host from hosts.toml, stops its shared connection,
+// and removes its pinned host key and generated SSH config.
 // It runs once the host's machine is gone, so it goes on after a cancel of
 // ctx: a host saved with no machine would be left.
 func ForgetHost(ctx context.Context, name string) error {
@@ -117,24 +133,22 @@ func ForgetHost(ctx context.Context, name string) error {
 		return err
 	}
 	out := hosts[:0]
-	found := false
+	var gone *Host
 	for _, h := range hosts {
 		if h.Name == name {
-			found = true
+			c := h
+			gone = &c
 			continue
 		}
 		out = append(out, h)
 	}
-	if !found {
+	if gone == nil {
 		return &UserError{Msg: fmt.Sprintf("no host named %q", name), Hint: brand.Name + " host ls", Code: "host_not_found", Kind: KindNotFound}
 	}
 	if err := SaveHosts(context.WithoutCancel(ctx), out); err != nil {
 		return err
 	}
-	if err := os.Remove(wrapperPath(Host{Name: name})); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove the generated SSH config: %w", err)
-	}
-	return nil
+	return CleanupHostFiles(context.WithoutCancel(ctx), *gone)
 }
 
 // Target says how h is reached, for messages: its SSH target, or its
@@ -195,6 +209,9 @@ type route struct {
 func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
 	interactive = interactive && InputAllowed(ctx)
 	if h.Machine == nil {
+		if err := ensureSavedHostPinned(ctx, h, interactive); err != nil {
+			return route{}, err
+		}
 		return route{t: NewSSH(ctx, h, interactive)}, nil
 	}
 	lc, err := OpenMachine(h)
@@ -208,7 +225,42 @@ func routeTo(ctx context.Context, h Host, interactive bool) (route, error) {
 	if err != nil {
 		return route{}, err
 	}
+	if s, ok := t.(*SSH); ok {
+		if err := ensureSavedHostPinned(ctx, s.Host, interactive); err != nil {
+			return route{}, err
+		}
+	}
 	return route{t: t, lc: lc}, nil
+}
+
+// ensureSavedHostPinned pins a host that was saved before host-key pinning
+// existed, on its next connection, before the bridge starts.
+func ensureSavedHostPinned(ctx context.Context, h Host, interactive bool) error {
+	if h.SSH == "" || HasPin(h.Name) || !hasSavedHost(h.Name) {
+		return nil
+	}
+	_, err := PinHostKey(ctx, h, PinOptions{
+		AcceptFirstUse: h.Machine != nil,
+		Interactive:    interactive,
+	})
+	var ue *UserError
+	if errors.As(err, &ue) && ue.Kind == KindNeedsAnswer {
+		ue.Hint = fmt.Sprintf("%s host rekey %s --host-key SHA256:… --confirm %s", brand.Name, h.Name, h.Name)
+	}
+	return err
+}
+
+func hasSavedHost(name string) bool {
+	hosts, err := LoadHosts()
+	if err != nil {
+		return false
+	}
+	for _, h := range hosts {
+		if h.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // HostTransport returns the transport to h. A machine that a provider made

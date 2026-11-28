@@ -128,7 +128,11 @@ func (g *guide) all() error {
 		}
 		return ok, err
 	}
-	checks, err := connectHost(g.ctx, g.out, h, consent, g.log)
+	pinOpts := client.PinOptions{
+		AcceptFirstUse: g.o.yes || made,
+		Interactive:    g.tty,
+	}
+	checks, err := connectHostWithPin(g.ctx, g.out, g.p, h, pinOpts, consent, g.log)
 	if err != nil {
 		return err
 	}

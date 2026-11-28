@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
@@ -129,9 +131,10 @@ func runForward(ctx context.Context, h client.Host, pairs []client.ForwardPair) 
 	if client.InputAllowed(ctx) {
 		c.Stdin = os.Stdin
 	}
-	c.Stdout, c.Stderr = os.Stdout, os.Stderr
+	var errb bytes.Buffer
+	c.Stdout, c.Stderr = os.Stdout, io.MultiWriter(os.Stderr, &errb)
 	if err := c.Run(); err != nil && ctx.Err() == nil {
-		return &client.UserError{Msg: "the forward stopped: " + err.Error(), Hint: "Check that the local port is free, then try again.", Code: "forward_failed"}
+		return client.ForwardError(h, err, errb.String())
 	}
 	return nil
 }
