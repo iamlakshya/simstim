@@ -33,6 +33,25 @@ simstim host show my-vps --json
 simstim host doctor my-vps --json
 ```
 
+## Start a sandboxed session
+
+Pass `--wall process` to `new` to run a session inside a bubblewrap process wall:
+
+<!-- test: help (needs a reachable host) -->
+```sh
+simstim new my-vps --wall process --dir /path/to/repo
+```
+
+Inside a process wall:
+
+- **Workspace:** your chosen directory is mounted writable at `/work/<name>`. If you pass no directory (or `~` or `/`), the host creates a private scratch directory at `/work/scratch` instead of mounting your host home folder.
+- **Private home:** `/home/agent` is a fresh mode-0700 tmpfs on every start, so startup files such as `~/.bashrc` never persist across restarts. Only the agent's conversation folders (`StateDirs`, such as `.claude/projects`, `.codex/sessions` and `.local/share/opencode`) stay across `stop` and `resume`.
+- **System and agent files:** `/usr` and system library directories are mounted read-only, `/etc` is filtered through an allowlist (hiding `/etc/environment`, `/etc/shadow`, `/etc/sudoers` and `/etc/ssh`) with synthetic `passwd`, `group`, `hosts` and `resolv.conf`, and agent binaries outside `/usr` are mounted read-only under `/opt/agents/` without exposing your host home path.
+- **Kernel confinement:** the sandbox runs as uid 1000 with zero capabilities, `NoNewPrivs=1`, a seccomp-bpf filter blocking namespace creation, mount calls, `bpf`, `io_uring`, non-allowlisted socket families and foreign ABIs (i386 `int 0x80` and x32), and Landlock filesystem and IPC scoping applied by `wall-init` before reading from the link.
+- **Network:** the sandbox has an empty network namespace (loopback only). Direct outbound TCP and UDP fail closed. `HTTP_PROXY` and `HTTPS_PROXY` point at `http://127.0.0.1:3128`, where `wall-init` forwards flows over `internal/link` to the host's `egress` process under the session's network policy.
+
+Use `stop`, `resume` and `kill` as with any other session: `stop` tears down the sandbox while keeping `/work` and `StateDirs`, `resume` starts a fresh sandbox with those folders reattached, and `kill` removes the session and its state completely.
+
 ## Pin a host's floor
 
 A host's **floor** is the weakest wall level that new sessions on that host may get. `host add` and `host create` probe the host and pin the strongest level that probes OK, unless you pass `--floor` with a lower level.

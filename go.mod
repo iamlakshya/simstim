@@ -15,10 +15,12 @@ require (
 	github.com/charmbracelet/x/vt v0.1.0
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/creack/pty v1.1.24
+	github.com/elastic/go-seccomp-bpf v1.6.0
 	github.com/elazarl/goproxy v1.9.4
 	github.com/godbus/dbus/v5 v5.1.0
 	github.com/google/go-containerregistry v0.22.1
 	github.com/klauspost/compress v1.19.2
+	github.com/landlock-lsm/go-landlock v0.11.0
 	github.com/muesli/cancelreader v0.2.2
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.13
@@ -66,4 +68,5 @@ require (
 	golang.org/x/text v0.44.0 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gotest.tools/v3 v3.5.2 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 )

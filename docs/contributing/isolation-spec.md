@@ -247,7 +247,7 @@ flowchart LR
 | Part | process wall (W1) | microvm wall (W3) |
 | --- | --- | --- |
 | Supervisor, egress process | The session's unit, as the login user | The same |
-| What makes the wall | The namespace launcher: new user, mount, PID, network, IPC, UTS and cgroup namespaces, the mounts, Landlock and seccomp. It then starts the guest init with no capabilities. | Cloud Hypervisor in a jail, on `/dev/kvm` |
+| What makes the wall | `bubblewrap` (`bwrap`) with new user, mount, PID, network, IPC, UTS and cgroup namespaces, filtered mounts, seccomp-bpf and Landlock in `wall-init`. It starts the guest init as uid 1000 with no capabilities. | Cloud Hypervisor in a jail, on `/dev/kvm` |
 | Link | One end of a socket pair that the guest init inherits | vsock: the supervisor connects to the VMM's Unix socket and sends `CONNECT <port>` |
 | Holder, ring, shadow terminal, agent | Inside, on the host kernel | Inside, on the guest kernel |
 | Root file system | The host's `/usr`, `/bin`, `/lib` and a filtered `/etc`, read-only | A verified image with an overlay that resets at each start |
@@ -255,19 +255,17 @@ flowchart LR
 | Network | An empty namespace. An explicit proxy on the guest's loopback. | No network card. A transparent redirect and an explicit proxy in the guest. |
 | gvisor wall (W2, P6) | As the process wall, with gVisor's sentry between the guest and the host kernel | |
 
-**The process wall's set-up (P1.5).** The namespace launcher, `cmd/userns`, builds the wall. It is a static binary with no dynamic loader, so `LD_PRELOAD` cannot reach it. It reads one JSON request from the supervisor on fd 3, and never takes a path to run. The request has a field `v`, the version of its format. The format only grows, so a launcher reads every version up to its own. It refuses a higher `v`, or a field that it does not know, so it never skips a step in silence. In order, it:
+**The process wall's set-up (P1.5).** `bubblewrap` (`bwrap`) builds the wall ([decision 0056](decisions/0056-bubblewrap-process-wall.md), applying [decision 0053](decisions/0053-rebuild-with-open-source-parts.md)). The supervisor builds a validated mount plan (`internal/wall/process/mounts.go`), compiles the seccomp-bpf filter (`internal/wall/process/seccomp_linux.go`) and stages the filter and synthetic `/etc` files in anonymous memory-backed descriptors (`memfd_create`, falling back to unlinked temporary files). In one `bwrap` launch, it:
 
-1. Sets `PR_SET_DUMPABLE` to 0, so that no other process of the user can trace it.
-2. Makes new user, mount, PID, network, IPC, UTS and cgroup namespaces, and maps the host user to uid 0 in them. It then forks once. The child is PID 1 of the new PID namespace, and does the steps below.
-3. Applies the mount plan of 7.1: the binds, a tmpfs home, a new `devpts`, the `/dev` nodes, a new `proc`, then `pivot_root`.
-4. Brings up `lo` in the new network namespace. From P2.1, it also binds the DNS stub's UDP and TCP sockets on `127.0.0.53:53`, for the guest init to inherit. A port below 1024 needs a capability that the guest init lacks.
-5. Makes a child user namespace that maps uid 0 of the outer one to uid 1000, `agent`, and gid 0 to gid 1000.
-6. Sets `no_new_privs`, drops every capability, and loads the seccomp profile below and the Landlock rules.
-7. Runs the guest init, `<helper> wall-init`, from `/opt/<name>/bin/` as uid 1000. It stays PID 1 of the new PID namespace.
+1. Creates new user, mount, PID, network, IPC, UTS and cgroup namespaces (`--unshare-user`, `--unshare-ipc`, `--unshare-pid`, `--unshare-uts`, `--unshare-cgroup-try`, `--unshare-net`), sets uid and gid to `1000`, sets the hostname to the product name, drops every capability (`--cap-drop ALL`), enables `--die-with-parent`, `--new-session` and (on `bwrap` 0.8.0+) `--disable-userns`.
+2. Applies the mount plan of 7.1: a fresh `/proc` and minimal `/dev`, read-only `/usr` and system links/folders, a filtered `/etc` from `internal/wall/process/etc.toml` plus synthetic `/etc/passwd`, `/etc/group`, `/etc/hosts` and `/etc/resolv.conf` via `--ro-bind-data`, read-only `/opt/<name>/bin` (helper and shadow terminal only) and `/opt/agents/` mounts, fresh tmpfs `/tmp`, `/var/tmp`, `/run` and mode-0700 `/home/agent`, bound `StateDirs` under `/home/agent/`, and the writable workspace under `/work/<repo>`.
+3. Clears the environment (`--clearenv`), sets only the fixed base variables plus the Landlock configuration variable, loads the seccomp-bpf filter via `--seccomp 4`, and runs `/opt/<name>/bin/<helper> wall-init` with the inherited link socket on fd 3.
+4. As its first act before reading fd 3, `wall-init` parses and unsets the Landlock variable and applies `github.com/landlock-lsm/go-landlock` in a single ruleset (`HandledAccessFS` plus ABI 6 `Scoped` IPC rules, with `WithRefer` on ABI 2+ and `WithIoctlDev` on `/dev/ptmx`, `/dev/tty` and `/dev/pts` on ABI 5+), failing closed if Landlock is unavailable.
+5. `wall-init` starts the explicit HTTP loopback proxy on `127.0.0.1:3128` (and `[::1]:3128`), which forwards every flow verbatim over `KindEgress` link streams to the supervisor and the host's `egress` process. The guest needs no capability, and direct outbound TCP and UDP fail closed in the empty network namespace.
 
-On a host with Ubuntu's user-namespace restriction, the launcher is the root-owned copy of the `userns-apparmor` step. Its `AppArmor` profile puts the guest init into a child profile that denies every capability (14.4.2). The helper upgrades without root, so that copy can be older than the helper. A start whose request the copy refuses fails with `wall_setup`. `host prepare` then offers the `userns-apparmor` step again, which installs the new copy (14.3). On other hosts, the supervisor runs the launcher from the helper's own folder, with the same steps. The guest init needs no capability: it serves the link, the proxy on `lo` and the DNS stub, and starts the holder. The holder and the agent run as uid 1000 (17.10).
+On a host with Ubuntu's user-namespace restriction (`kernel.apparmor_restrict_unprivileged_userns = 1`), the host uses Ubuntu's packaged `bwrap-userns-restrict` AppArmor profile ([sandboxes](../how-to/sandboxes.md#install-bubblewrap)). The guest init, holder and agent all run as uid 1000 with zero capabilities and `NoNewPrivs=1`.
 
-**The seccomp profile** (`internal/wall/process/seccomp.go`) allows every system call except these, which fail with `EPERM`:
+**The seccomp profile** (`internal/wall/process/seccomp_linux.go`) is assembled with `github.com/elastic/go-seccomp-bpf` and allows every system call except these, which fail with `EPERM`:
 
 - `unshare`, `setns`, and `clone` with any `CLONE_NEW*` flag. `clone3` fails with `ENOSYS` instead, so that the C library falls back to `clone`, whose flags seccomp can read. Docker's default profile does the same ([moby](https://github.com/moby/profiles/blob/main/seccomp/default.json)).
 - The mount family: `mount`, `umount2`, `pivot_root`, `move_mount`, `open_tree`, `fsopen`, `fsmount`, `fsconfig`, `fspick` and `mount_setattr`.

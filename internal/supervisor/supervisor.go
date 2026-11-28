@@ -18,6 +18,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/api"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
@@ -35,6 +36,8 @@ type Options struct {
 	StopGrace        time.Duration // 5s
 	UploadTimeout    time.Duration // 15s
 	AlertsPath       string        // override alerts config path (optional)
+	Egress           *egress.Client
+	EgressExe        string
 }
 
 func (o Options) withDefaults() Options {
@@ -68,6 +71,10 @@ type Supervisor struct {
 	limiter   *eventLimiter
 	alerts    *alerts.Dispatcher
 
+	egressMu   sync.Mutex
+	egress     *egress.Client
+	egressStop func()
+
 	ctlMu   sync.Mutex
 	ctlNext atomic.Uint64
 	pending map[uint64]chan proto.Response
@@ -100,12 +107,21 @@ type stopRequest struct {
 	system bool
 }
 
-// Run supervises session id using the test-only plain driver. It returns when
+// Run supervises session id using the wall driver recorded in its manifest
+// ("process" via bubblewrap, or "plain" for the test driver). It returns when
 // the sandbox has ended and the session is stopped, ended or killed.
 func Run(id string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate host helper: %w", err)
+	}
+	m, err := host.LoadManifest(id)
+	if err != nil {
+		return fmt.Errorf("load manifest: %w", err)
+	}
+	if m.Wall != nil && m.Wall.Driver == "process" {
+		sb := NewProcessSandbox(id, exe, m)
+		return RunWith(id, sb, Options{EgressExe: exe})
 	}
 	sb := NewPlainSandbox(id, exe, paths.GuestRuntimeDir(id))
 	return RunWith(id, sb, Options{})
@@ -153,6 +169,19 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		return err
 	}
 	defer s.closeSocket()
+
+	if err := s.initEgress(); err != nil {
+		s.log.Error("egress start failed", "err", err)
+		code := 127
+		reason := api.CleanText(err.Error(), maxDetailRunes)
+		s.mu.Lock()
+		s.m.Status = host.Status{State: host.StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: reason}
+		mCopy := *s.m
+		s.mu.Unlock()
+		_ = s.save(&mCopy, true)
+		return err
+	}
+	defer s.closeEgress()
 
 	restored := host.WasRestored(m)
 	secretEnv, notes := s.secretsBeforeStart(restored)
@@ -239,6 +268,11 @@ func (s *Supervisor) bootSandbox(secretEnv, notes []string, restored bool) error
 	ctl, err := s.link.Open(ctx, link.KindCtl, nil)
 	if err != nil {
 		_ = s.link.Close()
+		if sr, ok := s.sb.(interface{ Stderr() string }); ok {
+			if msg := sr.Stderr(); msg != "" {
+				return fmt.Errorf("open ctl stream: %w (%s)", err, api.CleanText(msg, 240))
+			}
+		}
 		return fmt.Errorf("open ctl stream: %w", err)
 	}
 	s.ctl = ctl
@@ -246,8 +280,9 @@ func (s *Supervisor) bootSandbox(secretEnv, notes []string, restored bool) error
 	// Start the alert dispatcher before ctlReadLoop so fast agent exits never
 	// miss their alert.
 	s.initAlerts()
-	s.wg.Add(1)
+	s.wg.Add(2)
 	go s.ctlReadLoop()
+	go s.linkAcceptLoop()
 
 	startReq := guest.StartReq{
 		Session:  s.id,

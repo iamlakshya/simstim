@@ -81,15 +81,30 @@ type Manifest struct {
 	extra map[string]json.RawMessage
 }
 
+// WallMount records one extra bind mount for a walled session.
+type WallMount struct {
+	Source   string `json:"source"`
+	Dest     string `json:"dest"`
+	ReadOnly bool   `json:"read_only,omitempty"`
+}
+
 // WallRecord records the wall a session runs in, written by the trusted side.
 type WallRecord struct {
-	Level          string    `json:"level"`
-	Driver         string    `json:"driver"`
-	Version        string    `json:"version,omitempty"`
-	Floor          string    `json:"floor,omitempty"`
-	DowngradedFrom string    `json:"downgraded_from,omitempty"`
-	Reason         string    `json:"reason,omitempty"`
-	At             time.Time `json:"at,omitempty"`
+	Level          string      `json:"level"`
+	Driver         string      `json:"driver"`
+	Version        string      `json:"version,omitempty"`
+	Floor          string      `json:"floor,omitempty"`
+	DowngradedFrom string      `json:"downgraded_from,omitempty"`
+	Preset         string      `json:"preset,omitempty"`
+	Reason         string      `json:"reason,omitempty"`
+	At             time.Time   `json:"at,omitempty"`
+	WorkspaceHost  string      `json:"workspace_host,omitempty"`
+	WorkspaceGuest string      `json:"workspace_guest,omitempty"`
+	StateDirs      []string    `json:"state_dirs,omitempty"`
+	ExtraRO        []WallMount `json:"extra_ro,omitempty"`
+	ExtraRW        []WallMount `json:"extra_rw,omitempty"`
+	ShareNet       bool        `json:"share_net,omitempty"`
+	PolicyTOML     string      `json:"policy_toml,omitempty"`
 }
 
 // GuestClaims holds the latest reports from the guest inside the wall.

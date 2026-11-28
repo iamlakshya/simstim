@@ -51,5 +51,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0053](0053-rebuild-with-open-source-parts.md) | Rebuild on the published base with maintained open-source parts, and build from scratch only when no tool meets the need | Accepted |
 | [0054](0054-simple-pinned-host-keys.md) | Pin each SSH host's public keys in `known_hosts-<host>` with OpenSSH and `x/crypto/ssh`, with no log-verdict parser or epoch index (replaces 0035) | Proposed |
 | [0055](0055-lean-release-signing.md) | Keep SSH checksum signatures, SBOMs and GitHub attestations; drop cosign keyless signing and the unmaintained SLSA generator (replaces 0017) | Proposed |
+| [0056](0056-bubblewrap-process-wall.md) | Build the process wall with bubblewrap, `go-seccomp-bpf` and `go-landlock` instead of a custom namespace launcher (applies 0053) | Proposed |
 
 Write a new record from [the template](template.md).

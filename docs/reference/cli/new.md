@@ -14,6 +14,7 @@ simstim new <host> [-- <command>…] [flags]
 
 ```sh
 simstim new my-vps --agent claude --dir ~/src/app
+simstim new my-vps --agent claude --wall process --dir ~/src/app
 simstim new my-vps --agent claude --dir ~/src/new-app --mkdir
 simstim new my-vps --agent claude --secret ANTHROPIC_API_KEY
 simstim new my-vps --agent claude --memory-max 6G
@@ -37,6 +38,7 @@ simstim new my-vps --agent claude --detach --json
 | `--no-setup` | do not run the repository's setup script this time |
 | `--secret <stringArray>` | pass a secret from config.toml's [secrets] into the session's environment (repeatable) |
 | `--setup` | run the repository's setup script this time, whatever your answer for it |
+| `--wall <string>` | sandbox wall level: none or process |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 
 ## Flags from the parent command

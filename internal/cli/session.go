@@ -29,13 +29,14 @@ func termSize() (int, int) {
 }
 
 func newCmd() *cobra.Command {
-	var agent, dir, name, base, memoryMax string
+	var agent, dir, name, base, memoryMax, wallLevel string
 	var detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
 	var secrets []string
 	cmd := &cobra.Command{
 		Use:   "new <host> [-- <command>…]",
 		Short: "Start a session on a host, and attach to it",
 		Example: "  " + brand.Name + " new my-vps --agent claude --dir ~/src/app\n" +
+			"  " + brand.Name + " new my-vps --agent claude --wall process --dir ~/src/app\n" +
 			"  " + brand.Name + " new my-vps --agent claude --dir ~/src/new-app --mkdir\n" +
 			"  " + brand.Name + " new my-vps --agent claude --secret ANTHROPIC_API_KEY\n" +
 			"  " + brand.Name + " new my-vps --agent claude --memory-max 6G\n" +
@@ -46,6 +47,11 @@ func newCmd() *cobra.Command {
 			if asJSON && !detach {
 				return needsDetach(cmd)
 			}
+			wl, err := parseWallFlag(wallLevel)
+			if err != nil {
+				return err
+			}
+			wallLevel = wl
 			h, err := client.FindHost(args[0])
 			if err != nil {
 				return err
@@ -72,7 +78,7 @@ func newCmd() *cobra.Command {
 				return err
 			}
 			cols, rows := termSize()
-			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, Secrets: values}, cols, rows)
+			a := client.TerminalArgs(client.NewArgs{Agent: agent, Cwd: client.RemotePath(dir), MakeFolder: mkdir, Name: name, Worktree: worktree, Base: base, Inline: inline, MemoryMax: memMax, Secrets: values, Wall: wallLevel}, cols, rows)
 			if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 				a.Argv = args[dash:]
 			}
@@ -111,8 +117,27 @@ func newCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&secrets, "secret", nil, "pass a secret from config.toml's [secrets] into the session's environment (repeatable)")
 	cmd.Flags().BoolVar(&setup, "setup", false, "run the repository's setup script this time, whatever your answer for it")
 	cmd.Flags().BoolVar(&noSetup, "no-setup", false, "do not run the repository's setup script this time")
+	cmd.Flags().StringVar(&wallLevel, "wall", "", "sandbox wall level: none or process")
 	addJSON(cmd, &asJSON)
 	return cmd
+}
+
+func parseWallFlag(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	w := strings.ToLower(strings.TrimSpace(raw))
+	switch w {
+	case "none", "process", "plain":
+		return w, nil
+	default:
+		return "", &client.UserError{
+			Msg:  fmt.Sprintf("--wall: unknown wall level %q", raw),
+			Hint: "Pass none or process.",
+			Code: "bad_value",
+			Kind: client.KindUsage,
+		}
+	}
 }
 
 // listSessions asks a host for its sessions. Tests replace it.

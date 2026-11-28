@@ -68,8 +68,13 @@ type Agent struct {
 	// In October 2026, the docs of opencode and Antigravity CLI named none.
 	Memory int64 `json:"memory,omitempty"`
 	// InstallDirs are folders under the home that hold the agent's files.
-	// The agents disk copies them read-only into microvm sandboxes.
+	// Process walls mount them read-only and the agents disk copies them into
+	// microvm sandboxes.
 	InstallDirs []string `json:"install_dirs,omitempty"`
+	// StateDirs are relative folders under the guest home kept across sandbox
+	// stops so conversations can resume without keeping shell startup scripts
+	// or hooks (isolation spec 7.1).
+	StateDirs []string `json:"state_dirs,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
 	// Egress lists the hosts the agent needs: its model API and its login.
@@ -160,6 +165,7 @@ var Table = []Agent{
 		// "4 GB+ RAM": https://code.claude.com/docs/en/setup#system-requirements.
 		Memory:      4 * GB,
 		InstallDirs: []string{".local/share/claude"},
+		StateDirs:   []string{".claude/projects"},
 		Setup: &Setup{
 			Install: "curl -fsSL https://claude.ai/install.sh | bash",
 			Source:  "https://code.claude.com/docs/en/setup",
@@ -222,7 +228,8 @@ var Table = []Agent{
 		Inline: Inline{Args: []string{"--no-alt-screen"}},
 		// "4-GB minimum (8-GB recommended)":
 		// https://github.com/openai/codex/blob/main/docs/install.md#system-requirements.
-		Memory: 4 * GB,
+		Memory:    4 * GB,
+		StateDirs: []string{".codex/sessions"},
 		Setup: &Setup{
 			// The installer puts codex in $CODEX_INSTALL_DIR, by default ~/.local/bin.
 			Install: "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
@@ -249,6 +256,7 @@ var Table = []Agent{
 		Continue:  []string{"opencode", "-c"},
 		IDCapture: "scan",
 		Support:   Supported,
+		StateDirs: []string{".local/share/opencode"},
 		Setup: &Setup{
 			Install: "curl -fsSL https://opencode.ai/install | bash",
 			Source:  "https://opencode.ai/docs/",

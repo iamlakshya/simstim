@@ -4,7 +4,6 @@ package process
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -49,14 +48,15 @@ func (Driver) Probe(ctx context.Context) wall.Probe {
 	return ProbeWith(ctx, defaultProbeDeps())
 }
 
-// Prepare is implemented in the process-wall build task (P1.5).
-func (Driver) Prepare(context.Context, wall.Spec) (wall.Sandbox, error) {
-	return nil, errors.New("process wall launch is not implemented in this helper yet; Try: update the host helper when process walls ship")
+// Prepare validates spec, persists the sandbox mount plan under
+// spec.SessionDir, and returns a bubblewrap-backed Sandbox ready to Start.
+func (Driver) Prepare(_ context.Context, spec wall.Spec) (wall.Sandbox, error) {
+	return prepareDriver(spec)
 }
 
-// Open is implemented in the process-wall build task (P1.5).
-func (Driver) Open(context.Context, string) (wall.Sandbox, error) {
-	return nil, errors.New("process wall open is not implemented in this helper yet; Try: update the host helper when process walls ship")
+// Open reloads a previously prepared process-wall sandbox from sessionDir.
+func (Driver) Open(_ context.Context, sessionDir string) (wall.Sandbox, error) {
+	return openDriver(sessionDir)
 }
 
 // ProbeDeps injects host reads and commands so ProbeWith can run unit tests on

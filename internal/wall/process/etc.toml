@@ -1,0 +1,32 @@
+# Allowlisted entries of /etc mounted read-only into a process-wall sandbox
+# (isolation spec 7.1). Everything not listed here — including /etc/environment,
+# /etc/gitconfig, /etc/shadow, /etc/sudoers and /etc/ssh — stays out of the
+# sandbox. /etc/passwd, /etc/group, /etc/hosts and /etc/resolv.conf are
+# generated synthetically by the process-wall driver.
+
+entries = [
+  "alternatives",
+  "ca-certificates",
+  "ca-certificates.conf",
+  "debian_version",
+  "fonts",
+  "inputrc",
+  "ld.so.cache",
+  "ld.so.conf",
+  "ld.so.conf.d",
+  "localtime",
+  "lsb-release",
+  "magic",
+  "magic.mgc",
+  "mime.types",
+  "nsswitch.conf",
+  "os-release",
+  "pki",
+  "protocols",
+  "services",
+  "shells",
+  "ssl",
+  "terminfo",
+  "timezone",
+  "xdg",
+]

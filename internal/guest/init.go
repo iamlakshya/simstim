@@ -7,18 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/link"
 	"github.com/iamlakshya/simstim/internal/paths"
@@ -31,9 +30,14 @@ var HeartbeatInterval = 5 * time.Second
 // linkFD is the file descriptor inherited from the supervisor's socket pair.
 const linkFD = 3
 
-// Run is the entry point of `<helper> wall-init`. It inherits the link socket
-// on fd 3 and serves ctl, holder and put streams until stopped or the link ends.
+// Run is the entry point of `<helper> wall-init`. When Landlock configuration is
+// present in the environment, it applies Landlock as its very first act before
+// attaching to fd 3. It then serves ctl, holder, put and (when enabled) guest
+// loopback proxy streams until stopped or the link ends.
 func Run() error {
+	if err := applyWallLandlock(); err != nil {
+		return err
+	}
 	f := os.NewFile(linkFD, "link")
 	if f == nil {
 		return errors.New("guest: no link socket on fd 3. Try: start sessions through the supervisor")
@@ -47,7 +51,17 @@ func Run() error {
 	if runDir == "" {
 		runDir = filepath.Join("/run", brand.Name)
 	}
-	return RunConn(conn, runDir)
+	opts := RunOptions{
+		Proxy: os.Getenv(brand.Env("GUEST_PROXY")) == "1",
+	}
+	_ = os.Unsetenv(brand.Env("GUEST_PROXY"))
+	return RunConnWithOptions(conn, runDir, opts)
+}
+
+// RunOptions configures optional guest loopback services started by wall-init.
+type RunOptions struct {
+	Proxy      bool
+	ProxyAddrs []string
 }
 
 type managedHolder struct {
@@ -75,6 +89,12 @@ type runner struct {
 // RunConn runs guest init over conn using runDir for local guest sockets,
 // manifests, logs and uploaded paste files.
 func RunConn(conn net.Conn, runDir string) error {
+	return RunConnWithOptions(conn, runDir, RunOptions{})
+}
+
+// RunConnWithOptions runs guest init over conn with optional guest loopback
+// proxy forwarding over KindEgress link streams.
+func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 	if err := paths.EnsurePrivateDir(runDir); err != nil {
 		_ = conn.Close()
 		return err
@@ -90,6 +110,22 @@ func RunConn(conn net.Conn, runDir string) error {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	var wg sync.WaitGroup
+	var px *Proxy
+	if opts.Proxy {
+		var perr error
+		px, perr = ListenProxy(ctx, r, opts.ProxyAddrs...)
+		if perr != nil {
+			_ = sess.Close()
+			return perr
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			px.Serve(ctx)
+		}()
+	}
 
 	reapStop := startReaper(r.isManaged)
 	defer reapStop()
@@ -111,7 +147,6 @@ func RunConn(conn net.Conn, runDir string) error {
 		}
 	}()
 
-	var wg sync.WaitGroup
 	for {
 		st, err := sess.Accept(ctx)
 		if err != nil {
@@ -124,9 +159,19 @@ func RunConn(conn net.Conn, runDir string) error {
 		}(st)
 	}
 	r.shutdown(3 * time.Second)
+	cancel()
+	if px != nil {
+		_ = px.Close()
+	}
 	_ = sess.Close()
 	wg.Wait()
 	return nil
+}
+
+// OpenEgress implements StreamOpener for guest.Proxy by opening a KindEgress
+// stream over the guest-to-supervisor link.
+func (r *runner) OpenEgress(ctx context.Context, hdr egress.StreamHeader) (*link.Stream, error) {
+	return r.sess.Open(ctx, link.KindEgress, hdr)
 }
 
 func (r *runner) isManaged(pid int) bool {
@@ -439,40 +484,5 @@ func (r *runner) stopHolders(grace time.Duration) {
 			}
 			<-mh.done
 		}
-	}
-}
-
-func guestHolderEnv(sock, hookSock, manifestPath, logPath string) []string {
-	env := []string{
-		brand.Env("GUEST_SOCKET") + "=" + sock,
-		brand.Env("GUEST_HOOK_SOCKET") + "=" + hookSock,
-		brand.Env("GUEST_MANIFEST") + "=" + manifestPath,
-		brand.Env("GUEST_LOG") + "=" + logPath,
-		brand.Env("GUEST_EVENTS_FD") + "=3",
-	}
-	for _, k := range []string{"PATH", "HOME", "GORACE", "GOCOVERDIR"} {
-		if v := os.Getenv(k); v != "" {
-			env = append(env, k+"="+v)
-		}
-	}
-	return env
-}
-
-func withEnvVar(env []string, key, val string) []string {
-	prefix := key + "="
-	out := make([]string, 0, len(env)+1)
-	for _, kv := range env {
-		if !strings.HasPrefix(kv, prefix) {
-			out = append(out, kv)
-		}
-	}
-	return append(out, prefix+val)
-}
-
-// copyOneWay copies src into dst and half-closes dst's write side if supported.
-func copyOneWay(dst io.Writer, src io.Reader) {
-	_, _ = io.Copy(dst, src)
-	if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-		_ = cw.CloseWrite()
 	}
 }

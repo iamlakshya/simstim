@@ -32,7 +32,12 @@ func currentHelper() string {
 
 // hookArgs fills the {hook} and {hook_bin} placeholders of an agent's hook arguments.
 func hookArgs(args []string) []string {
-	bin := currentHelper()
+	return hookArgsWithBin(args, currentHelper())
+}
+
+// hookArgsWithBin fills {hook} and {hook_bin} using bin as the helper binary path
+// (for example /opt/<brand>/bin/<helper> inside a process-wall sandbox).
+func hookArgsWithBin(args []string, bin string) []string {
 	out := make([]string, len(args))
 	for i, a := range args {
 		a = strings.ReplaceAll(a, "{hook}", shellQuote(bin)+" hook")

@@ -36,6 +36,7 @@ func fillWallInfo(info *SessionInfo, m *Manifest) {
 			Version:        m.Wall.Version,
 			Floor:          m.Wall.Floor,
 			DowngradedFrom: m.Wall.DowngradedFrom,
+			Preset:         m.Wall.Preset,
 		}
 	}
 	info.Claimed = m.Status.Claimed && info.Alive && info.State != StateLost
@@ -68,10 +69,18 @@ func fillAgentManifest(m *Manifest, userArgv, argv []string, agent agents.Agent,
 // newWalled creates a session that runs under a supervisor and guest init.
 // Its environment comes from the fixed base of spec 4.2, never from LoginEnv.
 func newWalled(a NewArgs) (_ *SessionInfo, err error) {
-	if a.Wall != "plain" {
+	switch a.Wall {
+	case "process":
+		return newProcessWalled(a)
+	case "plain":
+		return newPlainWalled(a)
+	default:
 		return nil, UserError("wall_unavailable", fmt.Sprintf("wall %q is not available in this build", a.Wall),
-			"Use --wall none for an unwalled session, or --wall plain for the test supervisor driver.")
+			"Use --wall process for a bubblewrap sandbox, or --wall none for an unwalled session.")
 	}
+}
+
+func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 	if err := checkMemoryMax(a.MemoryMax); err != nil {
 		return nil, err
 	}

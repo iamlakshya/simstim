@@ -49,7 +49,7 @@ func Stop(a api.StopArgs) (*StopResult, error) {
 		}
 		return &StopResult{Session: infoFrom(m, false), AlreadyStopped: true}, nil
 	}
-	if running {
+	if running && !isWalled(m) {
 		runStopHook(m)
 	}
 	stopHolder(id, m)
