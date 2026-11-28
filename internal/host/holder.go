@@ -19,6 +19,7 @@ import (
 	"github.com/creack/pty"
 
 	"github.com/iamlakshya/simstim/internal/agents"
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/diag"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -69,18 +70,19 @@ type Holder struct {
 	hookLn    net.Listener
 	peerCheck bool
 
-	mu        sync.Mutex
-	m         *Manifest
-	ring      *ring.Ring
-	clients   map[*hclient]struct{}
-	leader    *hclient
-	scan      scanner
-	lastOut   time.Time
-	needInput bool
-	busy      bool
-	exited    bool
-	ended     proto.Ended
-	dirty     bool
+	mu           sync.Mutex
+	m            *Manifest
+	ring         *ring.Ring
+	clients      map[*hclient]struct{}
+	leader       *hclient
+	everAttached bool
+	scan         scanner
+	lastOut      time.Time
+	needInput    bool
+	busy         bool
+	exited       bool
+	ended        proto.Ended
+	dirty        bool
 	// The memory cap's kills (holder_oom.go): the count accounted for, the
 	// count the last tick read, and whether cmd.Wait has returned.
 	oomSeen  int64
@@ -370,9 +372,12 @@ func (h *Holder) waitLoop() {
 	}
 	h.m.Status = st
 	h.alertEnded(ended)
+	h.recordHolderAlertEvent(api.EventEnded, "", &code, ended.Signal)
 	b, _ := json.Marshal(ended)
+	attached := 0
 	for c := range h.clients {
 		if c.attached {
+			attached++
 			select {
 			case c.out <- outFrame{proto.TEnded, b}:
 			default:
@@ -380,10 +385,14 @@ func (h *Holder) waitLoop() {
 		}
 	}
 	// Save a copy: other goroutines change the manifest under the lock.
+	everAttached := h.everAttached
 	m := *h.m
 	h.mu.Unlock()
 	h.emitGuestEnded(ended)
 	_ = h.save(&m, false)
+	if !h.isGuest() && m.RemoveOnExit && attached == 0 && (!m.RemoveWaitAttach || everAttached) {
+		h.finishDetachedOnExit()
+	}
 }
 
 // tick updates the status and saves the manifest when it changed.
@@ -450,6 +459,7 @@ func (h *Holder) updateStatus() {
 	// The wait can also pass between the agent and the memory warning.
 	handover := state == StateNeedsInput && (src == srcMemory) != (h.m.Status.Source == srcMemory)
 	if state != h.m.Status.State || handover {
+		prevState := h.m.Status.State
 		oom := h.m.Status.OOM
 		h.m.Status = Status{State: state, Since: time.Now().UTC(), Source: src, FullScreen: h.m.Status.FullScreen, OOM: oom}
 		switch {
@@ -464,6 +474,7 @@ func (h *Holder) updateStatus() {
 			h.m.Status.Reason = oomChildReason
 		}
 		h.dirty = true
+		h.recordHolderStateEvent(prevState, state, h.m.Status.Reason)
 	}
 	h.emitGuestStatus()
 	if h.al.agent != agentPrev {
@@ -471,27 +482,4 @@ func (h *Holder) updateStatus() {
 		// count while the memory warning shows too.
 		h.alertState(agentPrev, h.al.agent)
 	}
-}
-
-// agentState is the session's state from the agent's own signals, without
-// the memory warning. The caller holds h.mu.
-func (h *Holder) agentState() (state, src string) {
-	state, src = StateIdle, "quiet"
-	switch {
-	case h.ruleState == StateNeedsInput:
-		state, src = StateNeedsInput, "screen:"+h.ruleID
-	case h.needInput:
-		state, src = StateNeedsInput, "notify"
-	case h.ruleState == StateWorking:
-		state, src = StateWorking, "screen:"+h.ruleID
-	case h.hookBusy:
-		state, src = StateWorking, "hook"
-	case h.busy:
-		state, src = StateWorking, "progress"
-	case h.hookSeen && !h.lastTurnEnd.IsZero() && time.Since(h.lastTurnEnd) < 3*time.Second:
-		state, src = StateIdle, "hook"
-	case time.Since(h.lastOut) < 3*time.Second:
-		state, src = StateWorking, "output"
-	}
-	return state, src
 }

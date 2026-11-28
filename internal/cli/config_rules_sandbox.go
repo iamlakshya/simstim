@@ -61,6 +61,11 @@ func validateSandboxSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			addBad(ins.Pos("sandbox", "seed_max"), "sandbox.seed_max: "+err.Error())
 		}
 	}
+	if sb.MaxRun != "" {
+		if _, err := api.ParseRunDuration(sb.MaxRun); err != nil {
+			addBad(ins.Pos("sandbox", "max_run"), "sandbox.max_run: "+err.Error())
+		}
+	}
 	names := make([]string, 0, len(sb.Env))
 	for k := range sb.Env {
 		names = append(names, k)
@@ -117,6 +122,11 @@ func validateHostSandbox(abbrev string, idx int, h client.Host, ins *client.TOML
 	if sb.IdleStop != "" {
 		if err := client.CheckIdleStop(sb.IdleStop); err != nil {
 			addBad(ins.HostPos(idx, "sandbox", "idle_stop"), fmt.Sprintf("host %q sandbox.idle_stop: %s", label, err.Error()))
+		}
+	}
+	if sb.MaxRun != "" {
+		if _, err := api.ParseRunDuration(sb.MaxRun); err != nil {
+			addBad(ins.HostPos(idx, "sandbox", "max_run"), fmt.Sprintf("host %q sandbox.max_run: %s", label, err.Error()))
 		}
 	}
 	names := make([]string, 0, len(sb.Env))

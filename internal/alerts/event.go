@@ -20,25 +20,39 @@ import (
 
 // Event kinds.
 const (
-	NeedsInput  = "needs_input"  // the agent waits for the user
-	TurnDone    = "turn_done"    // the agent finished a long turn
-	Exited      = "exited"       // the program ended with code 0
-	Failed      = "failed"       // the program ended with another code or a signal
-	OOM         = "oom"          // the memory cap stopped a process
-	Memory      = "memory"       // the session is close to its memory cap
-	Started     = "started"      // the session started
-	Restored    = "restored"     // the session started again after a host restart
-	LinkSilent  = "link_silent"  // the guest init stopped sending heartbeats
-	ModelBudget = "model_budget" // the session reached its model token budget
-	DiskFull    = "disk_full"    // the session exceeded disk_max or the host fell below 5% free disk
-	Test        = "test"         // sent by the test command only
+	NeedsInput      = "needs_input"      // the agent waits for the user
+	TurnDone        = "turn_done"        // the agent finished a long turn
+	Exited          = "exited"           // the program ended with code 0
+	Failed          = "failed"           // the program ended with another code or a signal
+	OOM             = "oom"              // the memory cap stopped a process
+	Memory          = "memory"           // the session is close to its memory cap
+	Started         = "started"          // the session started
+	Restored        = "restored"         // the session started again after a host restart
+	LinkSilent      = "link_silent"      // the guest init stopped sending heartbeats
+	ModelBudget     = "model_budget"     // the session reached its model token budget
+	DiskFull        = "disk_full"        // the session exceeded disk_max or the host fell below 5% free disk
+	EgressBlocked   = "egress_blocked"   // a held request opened, or the model guard / registry gate refused a request
+	SandboxReady    = "sandbox_ready"    // a sandbox started and its guest init answered
+	SandboxStopped  = "sandbox_stopped"  // a sandbox stopped by stop, idle_stop or max_run
+	SandboxError    = "sandbox_error"    // a sandbox failed to start, or its wall failed while running
+	HealthDegraded  = "health_degraded"  // a host gained a health problem it did not have
+	HealthRecovered = "health_recovered" // a host's last health problem cleared
+	Test            = "test"             // sent by the test command only
 )
 
 // Kinds lists the events a config may name.
-var Kinds = []string{NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored, LinkSilent, ModelBudget, DiskFull}
+var Kinds = []string{
+	NeedsInput, TurnDone, Exited, Failed, OOM, Memory, Started, Restored,
+	LinkSilent, ModelBudget, DiskFull, EgressBlocked,
+	SandboxReady, SandboxStopped, SandboxError, HealthDegraded, HealthRecovered,
+}
 
 // DefaultEvents are sent when a config names none.
-var DefaultEvents = []string{NeedsInput, TurnDone, Failed, OOM, Memory, LinkSilent, ModelBudget, DiskFull}
+var DefaultEvents = []string{
+	NeedsInput, TurnDone, Failed, OOM, Memory,
+	LinkSilent, ModelBudget, DiskFull, EgressBlocked,
+	SandboxReady, SandboxStopped, SandboxError, HealthDegraded, HealthRecovered,
+}
 
 // Version is the version of the event's JSON. It changes only when a field
 // changes meaning or goes away; new fields may appear at any time.
@@ -63,7 +77,13 @@ type Event struct {
 	Signal   string  `json:"signal,omitempty"`
 	// Detail is the agent's question. It is sent only when the config turns
 	// it on, because it can hold code.
-	Detail  string `json:"detail,omitempty"`
+	Detail string `json:"detail,omitempty"`
+	// DetailFrom marks who wrote Detail (such as "guest" for walled sessions,
+	// spec 10.8) so command destinations treat untrusted guest text as data.
+	DetailFrom string `json:"detail_from,omitempty"`
+	// Reason names why a sandbox stopped or failed (such as "max_run",
+	// "idle_stop", "stop", or an error cause).
+	Reason  string `json:"reason,omitempty"`
 	Summary string `json:"summary"`
 
 	// Turn is how long the agent worked, for turn_done. It is not sent.
@@ -136,6 +156,30 @@ func summary(ev Event) string {
 		}
 	case DiskFull:
 		s = on + " ran out of disk space and was stopped"
+	case EgressBlocked:
+		s = on + " had a network request blocked"
+		if ev.Reason != "" {
+			s += " (" + ev.Reason + ")"
+		}
+	case SandboxReady:
+		s = name + " sandbox is ready on " + ev.Host
+	case SandboxStopped:
+		s = on + " sandbox stopped"
+		if ev.Reason != "" {
+			s += " (" + ev.Reason + ")"
+		}
+	case SandboxError:
+		s = on + " sandbox hit an error"
+		if ev.Reason != "" {
+			s += " (" + ev.Reason + ")"
+		}
+	case HealthDegraded:
+		s = ev.Host + " health degraded"
+		if ev.Reason != "" {
+			s += " (" + ev.Reason + ")"
+		}
+	case HealthRecovered:
+		s = ev.Host + " health recovered"
 	case Test:
 		return "Test alert from " + ev.Host
 	default:
@@ -184,6 +228,12 @@ func (ev Event) env() []string {
 		{"SIGNAL", ev.Signal},
 		{"DETAIL", ev.Detail},
 	}
+	if ev.DetailFrom != "" {
+		vars = append(vars, [2]string{"DETAIL_FROM", ev.DetailFrom})
+	}
+	if ev.Reason != "" {
+		vars = append(vars, [2]string{"REASON", ev.Reason})
+	}
 	if ev.ExitCode != nil {
 		vars = append(vars, [2]string{"EXIT_CODE", strconv.Itoa(*ev.ExitCode)})
 	}
@@ -230,6 +280,14 @@ func TestEvent(kind, dir string) (Event, error) {
 		ev.Usage = "2.7 of 2.9 GiB"
 	case ModelBudget:
 		ev.Usage = "2000412 of 2000000 tokens"
+	case EgressBlocked:
+		ev.Reason = "registry write refused"
+	case SandboxStopped:
+		ev.Reason = "max_run"
+	case SandboxError:
+		ev.Reason = "sandbox exited unexpectedly"
+	case HealthDegraded:
+		ev.Reason = "disk low"
 	}
 	return ev, nil
 }

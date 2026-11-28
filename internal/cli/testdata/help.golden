@@ -26,6 +26,8 @@ Sessions:
   forward     Forward a session's ports to localhost: all, or those you name
   pull        Bring a session's branch into the git repository you are in
   cp          Copy files or folders into or out of a session over SFTP
+  prune       Remove stopped sessions with no unpulled commits
+  events      Show or follow events from sessions and sandboxes
 
 Hosts:
   host        Add, create, list, test and remove hosts

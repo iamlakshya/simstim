@@ -239,6 +239,7 @@ func (s *Supervisor) applyGuestStatus(sess *sandboxSession, ev guest.Event, nowU
 	if s.ended || sess.ended {
 		return
 	}
+	prevState := sess.m.Status.State
 	sess.m.Guest = &host.GuestClaims{
 		State:      ev.State,
 		Source:     ev.Source,
@@ -269,20 +270,47 @@ func (s *Supervisor) applyGuestStatus(sess *sandboxSession, ev guest.Event, nowU
 	} else {
 		sess.dirty = true
 	}
+	if prevState != ev.State {
+		host.RecordWatchEvent(api.WatchEvent{
+			Event:   api.EventStateChanged,
+			Session: sess.id,
+			Name:    sess.m.Name,
+			Agent:   sess.m.Agent.Kind,
+			State:   ev.State,
+			Prev:    prevState,
+			Reason:  ev.Reason,
+		})
+	}
 }
 
 // applyGuestAlert forwards an allowlisted agent-side alert. Caller holds s.mu.
 func (s *Supervisor) applyGuestAlert(sess *sandboxSession, ev guest.Event) {
-	if s.ended || sess.ended || s.alerts == nil {
+	if s.ended || sess.ended {
 		return
 	}
 	switch ev.Kind {
 	case alerts.NeedsInput:
-		ae := s.makeSessionAlert(sess.m, alerts.NeedsInput)
-		ae.Detail = ev.Detail
-		s.alerts.Notify(ae)
+		host.RecordWatchEvent(api.WatchEvent{
+			Event:   api.EventNeedsInput,
+			Session: sess.id,
+			Name:    sess.m.Name,
+			Agent:   sess.m.Agent.Kind,
+			Detail:  ev.Detail,
+		})
+		if s.alerts != nil {
+			ae := s.makeSessionAlert(sess.m, alerts.NeedsInput)
+			ae.Detail = ev.Detail
+			ae.DetailFrom = "guest"
+			s.alerts.Notify(ae)
+		}
 	case alerts.TurnDone:
-		if ev.TurnNS > 0 {
+		host.RecordWatchEvent(api.WatchEvent{
+			Event:   api.EventTurnDone,
+			Session: sess.id,
+			Name:    sess.m.Name,
+			Agent:   sess.m.Agent.Kind,
+		})
+		if s.alerts != nil && ev.TurnNS > 0 {
 			ae := s.makeSessionAlert(sess.m, alerts.TurnDone)
 			ae.Turn = time.Duration(ev.TurnNS)
 			s.alerts.Notify(ae)
@@ -355,6 +383,18 @@ func (s *Supervisor) applyGuestEnded(sess *sandboxSession, ev guest.Event, nowUT
 		sess.dirty = false
 	}
 	s.audit.Record(AuditEntry{Event: "guest_end", Session: sess.id, ExitCode: &code, Signal: ev.Signal})
+	host.RecordWatchEvent(api.WatchEvent{
+		Event:    api.EventEnded,
+		Session:  sess.id,
+		Name:     sess.m.Name,
+		Agent:    sess.m.Agent.Kind,
+		State:    state,
+		ExitCode: &code,
+		Signal:   ev.Signal,
+	})
+	if sess.id == s.id && s.m.RemoveOnExit && s.attached.Load() == 0 && (!s.m.RemoveWaitAttach || s.everAttached.Load()) {
+		go s.requestStopKind(stopKindRemoveOnExit, "remove_on_exit", false)
+	}
 	return true
 }
 

@@ -114,6 +114,7 @@ func (h *Holder) attach(c *hclient, a proto.Attach) {
 	data, _ := h.ring.ReadFrom(from)
 	live := h.ring.End()
 	c.attached = true
+	h.everAttached = true
 	h.clients[c] = struct{}{}
 	h.leader = c
 	exited := h.exited

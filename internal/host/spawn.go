@@ -274,7 +274,7 @@ func stopSandbox(requestedID string, m *Manifest) (*StopResult, error) {
 		return &StopResult{Session: reqInfo, AlreadyStopped: true, Sessions: all}, nil
 	}
 
-	stopWalledHolder(primaryID, primary)
+	stoppedBySup := stopWalledHolder(primaryID, primary)
 	if reloaded, err := LoadManifest(primaryID); err == nil {
 		primary = reloaded
 	}
@@ -296,6 +296,16 @@ func stopSandbox(requestedID string, m *Manifest) (*StopResult, error) {
 	}
 	if err := markStopped(primary); err != nil {
 		return nil, fmt.Errorf("save the manifest of session %s: %w", primary.ID, err)
+	}
+	if !stoppedBySup {
+		RecordWatchEvent(api.WatchEvent{
+			Event:   api.EventSandboxStopped,
+			Session: primary.ID,
+			Name:    primary.Name,
+			Agent:   primary.Agent.Kind,
+			State:   StateStopped,
+			Reason:  "stop",
+		})
 	}
 	all := make([]SessionInfo, 0, 1+len(children))
 	pInfo := infoFrom(primary, false)

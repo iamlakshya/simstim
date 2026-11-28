@@ -153,6 +153,8 @@ func TestCommandsPrintJSON(t *testing.T) {
 	agentEnded(t, ended)
 	for _, args := range [][]string{
 		{"ls", "--json"},
+		{"prune", "box", "--dry-run", "--json"},
+		{"events", "box", "--json"},
 		{"resume", "box/done", "--detach", "--json"},
 		{"ports", "box/web", "--json"},
 		{"doctor", "--json"},

@@ -1,6 +1,10 @@
 package client
 
-import "github.com/iamlakshya/simstim/internal/api"
+import (
+	"time"
+
+	"github.com/iamlakshya/simstim/internal/api"
+)
 
 // MemoryAuto is a NewArgs.MemoryMax that asks for the host's default even
 // when config.toml names a size, as `new --memory-max auto` does. NewSession
@@ -34,41 +38,65 @@ type SandboxSizes struct {
 	IdleStop string
 	CopyMax  int64
 	SeedMax  int64
+	MaxRun   time.Duration
+}
+
+type rawSandboxSizes struct {
+	cpus   int
+	mem    string
+	disk   string
+	idle   string
+	maxRun string
+}
+
+func mergeRawSandboxSizes(s Settings, h Host) (rawSandboxSizes, error) {
+	raw := rawSandboxSizes{
+		cpus:   s.Sandbox.CPUs,
+		mem:    s.Sandbox.Memory,
+		disk:   s.Sandbox.DiskMax,
+		idle:   s.Sandbox.IdleStop,
+		maxRun: s.Sandbox.MaxRun,
+	}
+	if h.Sandbox != nil {
+		if h.Sandbox.CPUs < 0 {
+			return raw, &UserError{Msg: "sandbox.cpus in hosts.toml must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
+		}
+		if h.Sandbox.CPUs > 0 {
+			raw.cpus = h.Sandbox.CPUs
+		}
+		if h.Sandbox.Memory != "" {
+			raw.mem = h.Sandbox.Memory
+		}
+		if h.Sandbox.DiskMax != "" {
+			raw.disk = h.Sandbox.DiskMax
+		}
+		if h.Sandbox.IdleStop != "" {
+			raw.idle = h.Sandbox.IdleStop
+		}
+		if h.Sandbox.MaxRun != "" {
+			raw.maxRun = h.Sandbox.MaxRun
+		}
+	}
+	if raw.cpus < 0 {
+		return raw, &UserError{Msg: "sandbox.cpus in config must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
+	}
+	return raw, nil
 }
 
 // ResolveSandboxSizes merges [sandbox] settings from config.toml and hosts.toml
 // (host layer wins over global config).
 func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
+	raw, err := mergeRawSandboxSizes(s, h)
+	if err != nil {
+		return SandboxSizes{}, err
+	}
 	out := SandboxSizes{
-		CPUs:    s.Sandbox.CPUs,
+		CPUs:    raw.cpus,
 		CopyMax: DefaultCopyInMaxBytes,
 		SeedMax: DefaultSeedMaxBytes,
 	}
-	memRaw := s.Sandbox.Memory
-	diskRaw := s.Sandbox.DiskMax
-	idleRaw := s.Sandbox.IdleStop
-	if h.Sandbox != nil {
-		if h.Sandbox.CPUs < 0 {
-			return out, &UserError{Msg: "sandbox.cpus in hosts.toml must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
-		}
-		if h.Sandbox.CPUs > 0 {
-			out.CPUs = h.Sandbox.CPUs
-		}
-		if h.Sandbox.Memory != "" {
-			memRaw = h.Sandbox.Memory
-		}
-		if h.Sandbox.DiskMax != "" {
-			diskRaw = h.Sandbox.DiskMax
-		}
-		if h.Sandbox.IdleStop != "" {
-			idleRaw = h.Sandbox.IdleStop
-		}
-	}
-	if out.CPUs < 0 {
-		return out, &UserError{Msg: "sandbox.cpus in config must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
-	}
-	if memRaw != "" {
-		n, err := api.ParseMemoryMax(memRaw)
+	if raw.mem != "" {
+		n, err := api.ParseMemoryMax(raw.mem)
 		if err != nil {
 			return out, &UserError{Msg: "sandbox.memory in config: " + err.Error(), Hint: `Set sandbox.memory to "auto" or a size of 256M or more (` + api.MemorySizes + ").", Code: "bad_config", Kind: KindUsage}
 		}
@@ -78,18 +106,18 @@ func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
 			out.Memory = n
 		}
 	}
-	if diskRaw != "" {
-		n, err := api.ParseByteSize(diskRaw, 1<<20)
+	if raw.disk != "" {
+		n, err := api.ParseByteSize(raw.disk, 1<<20)
 		if err != nil {
 			return out, &UserError{Msg: "sandbox.disk_max in config: " + err.Error(), Hint: "Set sandbox.disk_max to a size such as 10G.", Code: "bad_config", Kind: KindUsage}
 		}
 		out.DiskMax = n
 	}
-	if idleRaw != "" {
-		if err := CheckIdleStop(idleRaw); err != nil {
+	if raw.idle != "" {
+		if err := CheckIdleStop(raw.idle); err != nil {
 			return out, &UserError{Msg: "sandbox.idle_stop in config: " + err.Error(), Hint: "Set sandbox.idle_stop to a duration of a minute or more (such as 30m or 2h), or never.", Code: "bad_config", Kind: KindUsage}
 		}
-		out.IdleStop = idleRaw
+		out.IdleStop = raw.idle
 	}
 	if s.Sandbox.CopyMax != "" {
 		n, err := api.ParseByteSize(s.Sandbox.CopyMax, 1<<10)
@@ -104,6 +132,13 @@ func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
 			return out, &UserError{Msg: "sandbox.seed_max in config.toml: " + err.Error(), Hint: "Set [sandbox] seed_max to a size such as 512M.", Code: "bad_config", Kind: KindUsage}
 		}
 		out.SeedMax = n
+	}
+	if raw.maxRun != "" {
+		d, err := api.ParseRunDuration(raw.maxRun)
+		if err != nil {
+			return out, &UserError{Msg: "sandbox.max_run in config: " + err.Error(), Hint: `Set sandbox.max_run to a positive duration such as "4h" or "1m".`, Code: "bad_config", Kind: KindUsage}
+		}
+		out.MaxRun = d
 	}
 	return out, nil
 }

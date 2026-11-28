@@ -39,12 +39,15 @@ The alert's title names the host, and its text is the summary, such as "auth-fix
 
 ## Set up a webhook
 
-A webhook gets an HTTP POST of the event as JSON (see [what is sent](#what-is-sent)). For Slack or Discord, ask for a message they understand:
+A webhook gets an HTTP POST of the event as JSON (see [what is sent](#what-is-sent)). For Slack, Discord or an OpenTelemetry (OTLP/HTTP) log collector, choose the matching format:
 
 ```sh
 simstim host alerts set my-vps --webhook https://hooks.slack.com/services/… --format slack
 simstim host alerts set my-vps --webhook https://discord.com/api/webhooks/… --format discord
+simstim host alerts set my-vps --webhook http://127.0.0.1:4318/v1/logs --format otlp
 ```
+
+With `format = "otlp"`, each alert is sent as an OTLP/HTTP JSON `ExportLogsServiceRequest` carrying the event fields as log record attributes.
 
 A webhook address is a secret: anyone who has it can post to your channel. It stays on the host, and `host alerts` shows only its start.
 
@@ -63,6 +66,8 @@ A command runs on the host with `sh -c`, in your home folder and your login envi
 | `SIMSTIM_TIME` | When it happened, in RFC 3339, UTC |
 | `SIMSTIM_EXIT_CODE`, `SIMSTIM_SIGNAL` | How the program ended, for `exited`, `failed` and `oom` |
 | `SIMSTIM_DETAIL` | The agent's question, only if you turn `detail` on |
+| `SIMSTIM_DETAIL_FROM` | `guest` when `SIMSTIM_DETAIL` came from inside a walled sandbox |
+| `SIMSTIM_REASON` | Why a sandbox stopped or failed, such as `max_run`, when set |
 | `SIMSTIM_EVENT_VERSION` | The version of the event's format, now `1` |
 
 Some examples:
@@ -103,7 +108,7 @@ priority = "high"                      # 1 to 5, or min, low, default, high, urg
 [[destination]]
 type = "webhook"
 url = "https://hooks.slack.com/services/…"
-format = "slack"                       # json (the default), slack or discord
+format = "slack"                       # json (the default), slack, discord or otlp
 events = ["failed", "oom"]             # this destination only gets these
 headers = { X-Team = "agents" }
 
@@ -139,6 +144,12 @@ A destination flag without `--add` replaces the whole file. With no destination 
 | `oom` | A process in the session hit its memory cap and was stopped. When that process was the program itself, `oom` is the session's end, in place of `failed`, and has `exit_code` and `signal`. A program that runs on does not also send `needs_input`. [Memory](memory.md) says how to raise the cap |
 | `memory` | The session is close to its memory cap, before the cap stops a process |
 | `model_budget` | A walled session reached `network.model_budget`, and its egress process started refusing model requests |
+| `egress_blocked` | An outbound request was held for approval or refused by policy, at most once a minute per session |
+| `sandbox_ready` | A sandbox started and its guest init answered |
+| `sandbox_stopped` | A sandbox stopped via `stop`, idle stop or `sandbox.max_run` |
+| `sandbox_error` | A sandbox failed to start or its wall exited unexpectedly |
+| `health_degraded` | A host gained a new health problem |
+| `health_recovered` | A host's last health problem cleared |
 | `started` | The session started, or `resume` started its agent again |
 | `restored` | The session was started again after a host restart |
 | `test` | `host alerts test` |

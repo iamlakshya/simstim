@@ -277,6 +277,7 @@ OPENAI_API_KEY
 json	Raw event JSON
 slack	Slack incoming webhook
 discord	Discord webhook
+otlp	OTLP/HTTP log record
 :4
 
 === alert events flag after comma ===
@@ -287,6 +288,12 @@ failed,oom	Session hit its memory cap
 failed,memory	Session memory warning
 failed,started	Session started
 failed,restored	Session restored after restart
+failed,egress_blocked	Outbound request blocked or held
+failed,sandbox_ready	Sandbox started and guest init answered
+failed,sandbox_stopped	Sandbox stopped
+failed,sandbox_error	Sandbox failed to start or wall failed
+failed,health_degraded	Host health degraded
+failed,health_recovered	Host health recovered
 :6
 
 === alert test event flag ===
@@ -299,6 +306,12 @@ oom	Session hit its memory cap
 memory	Session memory warning
 started	Session started
 restored	Session restored after restart
+egress_blocked	Outbound request blocked or held
+sandbox_ready	Sandbox started and guest init answered
+sandbox_stopped	Sandbox stopped
+sandbox_error	Sandbox failed to start or wall failed
+health_degraded	Host health degraded
+health_recovered	Host health recovered
 :4
 
 === image pull ref (arg 0) ===

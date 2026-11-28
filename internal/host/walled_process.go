@@ -144,10 +144,13 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			Keep:             keepFiles,
 			Shell:            strings.TrimSpace(a.Shell),
 		},
-		HostName:    a.HostName,
-		SandboxName: name,
-		CopyIn:      a.CopyIn,
+		HostName:         a.HostName,
+		SandboxName:      name,
+		CopyIn:           a.CopyIn,
+		RemoveOnExit:     a.RemoveOnExit,
+		RemoveWaitAttach: a.RemoveWaitAttach,
 	}
+	m.Limits.MaxRunSeconds = a.MaxRunSeconds
 	if ws.modelBudget > 0 {
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}

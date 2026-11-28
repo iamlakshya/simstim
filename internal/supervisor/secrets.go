@@ -161,6 +161,7 @@ func (s *Supervisor) finishSandboxExit(ex Exit) {
 		}
 		s.m.Status = st
 		s.alertEnded(code, ex.Signal, oom)
+		s.emitSandboxErrorLocked(st.Reason, &code, ex.Signal)
 		s.audit.Record(AuditEntry{Event: "link_error", Session: s.id, ExitCode: &code, Signal: ex.Signal, OOM: oom})
 	}
 	childCopies := s.finalizeChildrenLocked(stopRequest{kind: stopKindKill, reason: "the sandbox exited unexpectedly"}, time.Now().UTC())

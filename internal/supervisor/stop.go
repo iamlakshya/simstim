@@ -16,6 +16,8 @@ const (
 	stopKindHostStop
 	stopKindDiskFull
 	stopKindIdleStop
+	stopKindMaxRun
+	stopKindRemoveOnExit
 )
 
 type stopRequest struct {
@@ -41,7 +43,6 @@ func (s *Supervisor) requestStopKind(kind stopKind, reason string, system bool) 
 // Stop keeps no screen and makes no memory snapshot (questions 10 and 11).
 func (s *Supervisor) finishStopReq(sr stopRequest) {
 	close(s.doneCh)
-	s.closeAlerts()
 	s.mu.Lock()
 	s.stopping = true
 	s.mu.Unlock()
@@ -91,6 +92,35 @@ func (s *Supervisor) finishStopReq(sr stopRequest) {
 	s.closeEgress()
 	_ = s.sb.Destroy()
 
+	if sr.kind == stopKindRemoveOnExit {
+		removed, stopReason := host.FinishDetachedWalledOnExit(s.id)
+		if removed {
+			s.closeAlerts()
+			s.closeChildSockets()
+			s.closeSocket()
+			<-s.acceptDone
+			return
+		}
+		if stopReason != "" {
+			now := time.Now().UTC()
+			s.mu.Lock()
+			_ = s.mem.Reap(s.id)
+			s.m.GrantedPorts = nil
+			s.m.Run.HolderPID, s.m.Run.AgentPID, s.m.Run.Unit = 0, 0, ""
+			s.m.Guest = nil
+			s.ended = true
+			s.m.Status = host.Status{State: host.StateStopped, Since: now, Source: "supervisor", Reason: stopReason, Claimed: false}
+			s.mu.Unlock()
+			_ = s.save(true)
+			s.emitSandboxStopped("unpulled_commits")
+			s.closeAlerts()
+			s.closeChildSockets()
+			s.closeSocket()
+			<-s.acceptDone
+			return
+		}
+	}
+
 	now := time.Now().UTC()
 	s.mu.Lock()
 	_ = s.mem.Reap(s.id)
@@ -105,18 +135,28 @@ func (s *Supervisor) finishStopReq(sr stopRequest) {
 	}
 
 	auditEvent := "kill"
+	stopEventReason := ""
 	switch sr.kind {
-	case stopKindKill:
+	case stopKindKill, stopKindRemoveOnExit:
 		auditEvent = "kill"
 	case stopKindStop:
 		auditEvent = "stop"
+		stopEventReason = "stop"
 	case stopKindHostStop:
 		auditEvent = "host_stop"
 	case stopKindIdleStop:
 		auditEvent = "idle_stop"
+		stopEventReason = "idle_stop"
+	case stopKindMaxRun:
+		auditEvent = "max_run"
+		stopEventReason = "max_run"
 	case stopKindDiskFull:
 		auditEvent = "disk_full_stop"
 	}
+	if stopEventReason != "" {
+		s.emitSandboxStopped(stopEventReason)
+	}
+	s.closeAlerts()
 	s.audit.Record(AuditEntry{Event: auditEvent, Session: s.id, Detail: sr.reason})
 	// Close the session sockets last so callers polling alive(id) (such as
 	// resume, stop or delete) wait until sb.Destroy and the final manifest saves finish.
@@ -141,7 +181,7 @@ func applyStopToManifest(m *host.Manifest, sr stopRequest, now time.Time) {
 		m.Status.Reason = sr.reason
 		m.Status.Source = "system"
 		m.Status.Claimed = false
-	case stopKindStop, stopKindDiskFull, stopKindIdleStop:
+	case stopKindStop, stopKindDiskFull, stopKindIdleStop, stopKindMaxRun:
 		src := "user"
 		if sr.system {
 			src = "system"

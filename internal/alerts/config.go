@@ -236,9 +236,9 @@ func checkWebhook(d api.AlertDestination, where string) error {
 		return err
 	}
 	switch d.Format {
-	case "", "json", "slack", "discord":
+	case "", "json", "slack", "discord", "otlp":
 	default:
-		return &Error{Msg: fmt.Sprintf("%s: unknown format %q", where, d.Format), Hint: "Use json, slack or discord."}
+		return &Error{Msg: fmt.Sprintf("%s: unknown format %q", where, d.Format), Hint: "Use json, slack, discord or otlp."}
 	}
 	if len(d.Headers) > maxHeaders {
 		return &Error{Msg: where + ": too many headers", Hint: fmt.Sprintf("Keep %d at most.", maxHeaders)}

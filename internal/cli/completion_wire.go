@@ -47,6 +47,7 @@ var (
 		{"json", "Raw event JSON"},
 		{"slack", "Slack incoming webhook"},
 		{"discord", "Discord webhook"},
+		{"otlp", "OTLP/HTTP log record"},
 	}
 	alertEventItems = []compItem{
 		{"needs_input", "Agent is waiting for input"},
@@ -57,6 +58,12 @@ var (
 		{"memory", "Session memory warning"},
 		{"started", "Session started"},
 		{"restored", "Session restored after restart"},
+		{"egress_blocked", "Outbound request blocked or held"},
+		{"sandbox_ready", "Sandbox started and guest init answered"},
+		{"sandbox_stopped", "Sandbox stopped"},
+		{"sandbox_error", "Sandbox failed to start or wall failed"},
+		{"health_degraded", "Host health degraded"},
+		{"health_recovered", "Host health recovered"},
 	}
 	profileItems = []compItem{
 		{diag.ProfileCPU, "CPU profile"},
@@ -125,6 +132,7 @@ func argCompletionBindings() []argCompletionBinding {
 	add(completeHostAt(0),
 		[]string{"new"},
 		[]string{"ls"},
+		[]string{"prune"},
 		[]string{"host", "show"},
 		[]string{"host", "upgrade"},
 		[]string{"host", "rm"},
@@ -192,6 +200,7 @@ func argCompletionBindings() []argCompletionBinding {
 		argCompletionBinding{path: []string{"debug", "profile"}, fn: completeDebugProfileArgs},
 		argCompletionBinding{path: []string{"debug", "bundle"}, fn: completeDebugBundleArgs},
 		argCompletionBinding{path: []string{"cp"}, fn: completeCPArgs},
+		argCompletionBinding{path: []string{"events"}, fn: completeEventsArg},
 	)
 	return out
 }

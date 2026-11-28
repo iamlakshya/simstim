@@ -38,6 +38,7 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sandbox.shell` | string | — | Names the shell started by `shell` inside a sandbox, such as "/bin/bash" or "zsh". Leave empty to use the sandbox's login shell. |
 | `sandbox.keep` | array of string | — | Lists relative file paths under /home/agent to keep across sandbox restarts, such as [".bash_history"]. Startup and hook files such as .bashrc and .profile are refused (keep_refused). |
 | `sandbox.pull_max` | string | `"512M"` | Caps the size of a git bundle streamed by pull, such as "512M" or "1G". |
+| `sandbox.max_run` | string | — | Stops a sandbox this long after its start, such as "4h" or "1m", keeping its work and raising sandbox_stopped with reason "max_run". Empty turns the cap off. |
 | `network.min_release_age` | string | `"7d"` | Sets the minimum release age for package managers inside a sandbox, as a whole number of days from "0d" to "365d". "0d" turns the age check off. |
 | `network.model_budget` | integer | — | Caps the total model tokens a walled session may use across gateway requests. 0 turns the cap off. |
 | `network.upload_budget` | string | `"16M"` | Caps bytes uploaded per host per hour from a walled session to non-model hosts, such as "16M". "0" turns the cap off. |
@@ -82,3 +83,4 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `sandbox.copy_in` | array of string | Lists laptop paths (or laptop:guest pairs) copied into new sessions on this host at start. |
 | `sandbox.keep_caches` | boolean | Overrides sandbox.keep_caches from config.toml for this host. |
 | `sandbox.caches` | array of string | Adds relative cache paths under /home/agent, or drops one with a leading "!", layered on top of sandbox.caches from config.toml. |
+| `sandbox.max_run` | string | Overrides sandbox.max_run from config.toml for this host. |

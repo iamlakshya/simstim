@@ -2,7 +2,6 @@ package alerts
 
 import (
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -73,18 +72,23 @@ func TestEventEnv(t *testing.T) {
 	}
 }
 
-// An event has no word about who wrote its detail yet. That variable,
-// <NAME>_DETAIL_FROM, comes with walled sessions, whose guest writes it
+// An unwalled event carries no detail_from field or <NAME>_DETAIL_FROM variable;
+// a walled event marks its guest-originated detail with detail_from="guest"
 // (docs/contributing/isolation-spec.md 10.8).
-func TestEventHasNoDetailFrom(t *testing.T) {
-	if _, ok := reflect.TypeOf(Event{}).FieldByName("DetailFrom"); ok {
-		t.Error("Event has DetailFrom")
-	}
+func TestEventDetailFrom(t *testing.T) {
 	ev := Event{V: 1, Event: NeedsInput, Host: "box", Detail: "Proceed?", Summary: "s"}
 	if j := string(ev.JSON()); strings.Contains(j, "detail_from") {
-		t.Errorf("the JSON has detail_from: %s", j)
+		t.Errorf("unwalled JSON has detail_from: %s", j)
 	}
 	if env := strings.Join(ev.env(), "\n"); strings.Contains(env, "DETAIL_FROM") {
-		t.Errorf("env has DETAIL_FROM:\n%s", env)
+		t.Errorf("unwalled env has DETAIL_FROM:\n%s", env)
+	}
+
+	walled := Event{V: 1, Event: NeedsInput, Host: "box", Detail: "Proceed?", DetailFrom: "guest", Summary: "s"}
+	if j := string(walled.JSON()); !strings.Contains(j, `"detail_from":"guest"`) {
+		t.Errorf("walled JSON lacks detail_from=guest: %s", j)
+	}
+	if env := strings.Join(walled.env(), "\n"); !strings.Contains(env, brand.Env("DETAIL_FROM")+"=guest") {
+		t.Errorf("walled env lacks DETAIL_FROM=guest:\n%s", env)
 	}
 }

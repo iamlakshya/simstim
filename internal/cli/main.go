@@ -51,7 +51,7 @@ func Root() *cobra.Command {
 		Args:          unknownCommand,
 		RunE:          runRoot,
 	}
-	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), showCmd(), agentsCmd(), imageCmd(), attachCmd(), shellCmd(), execCmd(), resumeCmd(), stopCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), cpCmd(), doctorCmd(), debugCmd(), configCmd(), sshConfigCmd(), sshProxyCmd(), demoCmd(), versionCmd())
+	root.AddCommand(setupCmd(), hostCmd(), newCmd(), lsCmd(), showCmd(), agentsCmd(), imageCmd(), attachCmd(), shellCmd(), execCmd(), resumeCmd(), stopCmd(), flipCmd(), sendCmd(), rmCmd(), killCmd(), renameCmd(), portsCmd(), forwardCmd(), pullCmd(), cpCmd(), pruneCmd(), eventsCmd(), doctorCmd(), debugCmd(), configCmd(), sshConfigCmd(), sshProxyCmd(), demoCmd(), versionCmd())
 	root.AddCommand(topics()...)
 	// Define --version without a short form so Cobra's InitDefaultVersionFlag
 	// never adds -v (cli-spec 10.1). -v stays as a hidden old form.

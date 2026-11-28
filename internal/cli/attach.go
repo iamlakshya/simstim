@@ -32,8 +32,13 @@ func attachEnded(ctx context.Context, h client.Host, id, name string) (bool, err
 }
 
 func attachSession(ctx context.Context, h client.Host, id, name string) (ended, stuck bool, err error) {
+	res, err := attachResult(ctx, h, id, name)
+	return res.Ended != nil, res.ReaderStuck, err
+}
+
+func attachResult(ctx context.Context, h client.Host, id, name string) (client.AttachResult, error) {
 	if !isTerminal(os.Stdin) || !isTerminal(os.Stdout) {
-		return false, false, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal", Kind: client.KindUsage}
+		return client.AttachResult{}, &client.UserError{Msg: "attach needs a terminal", Hint: "Run it from a terminal, not a pipe.", Code: "no_terminal", Kind: client.KindUsage}
 	}
 	client.RememberLast(h.Name, id, name)
 	// The name comes from the host: it is cleaned before it is drawn. The
@@ -43,14 +48,14 @@ func attachSession(ctx context.Context, h client.Host, id, name string) (ended, 
 		Host: h, Session: id, Settings: client.LoadSettings(), Interactive: true,
 	})
 	if err != nil {
-		return false, res.ReaderStuck, err
+		return res, err
 	}
 	if res.Ended != nil {
 		fmt.Fprint(os.Stderr, endMessage(name, h.Name, id, res.Ended))
 	} else {
 		fmt.Fprintf(os.Stderr, "\r\nDetached. %s keeps running on %s.\n", name, shown(h.Name))
 	}
-	return res.Ended != nil, res.ReaderStuck, nil
+	return res, nil
 }
 
 func attachCmd() *cobra.Command {

@@ -104,6 +104,10 @@ type Manifest struct {
 	SeedHeads map[string]string `json:"seed_heads,omitempty"`
 	// Pulled records commit OIDs already pulled to the user's laptop (spec 6.10).
 	Pulled []string `json:"pulled,omitempty"`
+	// RemoveOnExit marks a throwaway session created with `new --rm`.
+	RemoveOnExit bool `json:"remove_on_exit,omitempty"`
+	// RemoveWaitAttach defers host-side auto-removal until a client has attached.
+	RemoveWaitAttach bool `json:"remove_wait_attach,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -251,6 +255,8 @@ type Limits struct {
 	CPUsAsked int `json:"cpus_asked,omitempty"`
 	// DiskMax is the soft disk cap for a walled session's folder, in bytes.
 	DiskMax int64 `json:"disk_max,omitempty"`
+	// MaxRunSeconds is the sandbox.max_run cap in seconds (0 = no limit).
+	MaxRunSeconds int64 `json:"max_run_seconds,omitempty"`
 }
 
 // Runtime is live process information.
@@ -303,7 +309,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
 		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true, "usage": true,
 		"host_name": true, "sandbox_name": true, "copy_in": true, "copies_pending": true, "seed_repos": true,
-		"sandbox_of": true, "task": true, "seed_heads": true, "pulled": true}
+		"sandbox_of": true, "task": true, "seed_heads": true, "pulled": true, "remove_on_exit": true, "remove_wait_attach": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

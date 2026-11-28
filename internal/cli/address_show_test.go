@@ -35,7 +35,7 @@ func TestAttachChecksTheTerminalFirst(t *testing.T) {
 	}
 	// The attach of new does the same, before it starts anything.
 	before = len(th.tr.Remotes())
-	if got, code := failsAs(t, "new", "box", "--", "sleep", "60"); code != 2 || !strings.Contains(got, "new attaches, so it needs a terminal") {
+	if got, code := failsAs(t, "new", "box"); code != 2 || !strings.Contains(got, "new attaches, so it needs a terminal") {
 		t.Errorf("new without a terminal: exit %d\n%s", code, got)
 	}
 	if n := len(th.tr.Remotes()); n != before {

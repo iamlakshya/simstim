@@ -103,9 +103,6 @@ func warnOldNewFlags(cmd *cobra.Command, o newOpts) {
 }
 
 func validateNewOpts(cmd *cobra.Command, o *newOpts) (wl string, err error) {
-	if err = beforeAttach(cmd, o.asJSON, o.detach); err != nil {
-		return "", err
-	}
 	if err = client.CheckSessionName(o.name); err != nil {
 		return "", err
 	}

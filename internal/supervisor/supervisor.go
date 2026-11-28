@@ -35,6 +35,7 @@ type Options struct {
 	TickInterval      time.Duration                              // 1s
 	SecretsWait       time.Duration                              // 30s
 	StopGrace         time.Duration                              // 5s
+	MaxRun            time.Duration                              // optional override for sandbox.max_run (spec 17.6)
 	UploadTimeout     time.Duration                              // 15s
 	DiskCheckInterval time.Duration                              // 1m (spec 17.1)
 	DiskFreePercent   int                                        // 5% (spec 17.1)
@@ -101,11 +102,11 @@ type Supervisor struct {
 	budgetAlerted    bool
 	budgetAlertLimit int64
 
-	attached atomic.Int32
-
 	saveMu        sync.Mutex
 	closed        bool
 	closeSockOnce sync.Once
+	attached      atomic.Int32
+	everAttached  atomic.Bool
 
 	wg     sync.WaitGroup
 	connMu sync.Mutex
@@ -208,6 +209,7 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		s.m.Status = host.Status{State: host.StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: reason}
 		s.mu.Unlock()
 		_ = s.save(true)
+		s.emitStartError(reason)
 		return err
 	}
 	defer s.closeEgress()
@@ -226,11 +228,14 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		s.m.Status = host.Status{State: host.StateErrored, Since: time.Now().UTC(), ExitCode: &code, Reason: reason}
 		s.mu.Unlock()
 		_ = s.save(true)
+		s.emitStartError(reason)
 		_ = s.sb.Kill()
 		_ = s.sb.Destroy()
 		s.wg.Wait()
 		return err
 	}
+	stopMaxRun := s.startMaxRunTimer()
+	defer stopMaxRun()
 
 	// Start serving the session socket and ticks before publishing the started
 	// manifest so callers woken by waitStarted always reach a live acceptLoop.
@@ -241,6 +246,7 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		s.log.Warn("manifest not saved", "err", err)
 	}
 	s.notifyStarted(restored)
+	s.emitSandboxReady()
 
 	sbExit := make(chan Exit, 1)
 	go func() { sbExit <- s.sb.Wait() }()

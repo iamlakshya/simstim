@@ -220,7 +220,7 @@ func TestAttachNeedsATerminal(t *testing.T) {
 	newTestHost(t)
 	id := newSession(t, "s", "sleep", "60")
 	failsWithHint(t, "attach needs a terminal", brand.Name+" send box/"+id+" 'text'", "attach", "box/"+id)
-	fails(t, "new attaches, so it needs a terminal", "new", "box", "--", "sleep", "60")
+	fails(t, "new attaches, so it needs a terminal", "new", "box")
 	// Without a terminal, attach stops before it looks: show says it.
 	fails(t, "no session has been attached yet", "show", "-")
 	_, err := run(t, "show", "-")

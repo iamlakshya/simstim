@@ -196,10 +196,13 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 			SandboxEnv:      filterSandboxEnv(a.Env, a.SandboxEnv),
 			IdleStop:        ws.idleStop,
 		},
-		HostName:    a.HostName,
-		SandboxName: name,
-		CopyIn:      a.CopyIn,
+		HostName:         a.HostName,
+		SandboxName:      name,
+		CopyIn:           a.CopyIn,
+		RemoveOnExit:     a.RemoveOnExit,
+		RemoveWaitAttach: a.RemoveWaitAttach,
 	}
+	m.Limits.MaxRunSeconds = a.MaxRunSeconds
 	if ws.modelBudget > 0 {
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}
 	}

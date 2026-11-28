@@ -101,11 +101,12 @@ const (
 // file. Its methods never block the caller: events wait in small queues, and
 // an event that finds its queue full is dropped.
 type Dispatcher struct {
-	o    Options
-	in   chan Event
-	work chan job
-	quit chan struct{}
-	done chan struct{} // closed when the last delivery has ended
+	o        Options
+	in       chan Event
+	work     chan job
+	quit     chan struct{}
+	loopDone chan struct{} // closed when loop has drained d.in and exited
+	done     chan struct{} // closed when the last delivery has ended
 
 	gen   atomic.Uint64 // counts the session's state changes
 	typed atomic.Int64  // when a person last typed, in Unix nanoseconds
@@ -140,7 +141,7 @@ func (s fileStamp) same(t fileStamp) bool { return s.mod.Equal(t.mod) && s.size 
 func New(o Options) *Dispatcher {
 	o.fill()
 	d := &Dispatcher{o: o, in: make(chan Event, inQueue), work: make(chan job, workQueue),
-		quit: make(chan struct{}), done: make(chan struct{}), sent: map[string]time.Time{}}
+		quit: make(chan struct{}), loopDone: make(chan struct{}), done: make(chan struct{}), sent: map[string]time.Time{}}
 	go d.loop()
 	go d.worker()
 	return d
@@ -176,12 +177,15 @@ func (d *Dispatcher) TypedAt() time.Time {
 	return time.Time{}
 }
 
-// Close drops every new event, and waits up to wait for deliveries under way.
+// Close drops every new event, drains immediate events already queued before
+// Close, cancels any waiting needs_input delay, and waits up to wait for
+// deliveries under way.
 func (d *Dispatcher) Close(wait time.Duration) {
 	if d.muted.Swap(true) {
 		return
 	}
 	close(d.quit)
+	<-d.loopDone
 	d.mu.Lock()
 	d.closed = true
 	if d.pending != nil {
@@ -196,25 +200,37 @@ func (d *Dispatcher) Close(wait time.Duration) {
 }
 
 func (d *Dispatcher) loop() {
+	defer close(d.loopDone)
 	for {
 		select {
 		case ev := <-d.in:
-			d.handle(ev)
+			d.handle(ev, false)
 		case <-d.quit:
-			return
+			for {
+				select {
+				case ev := <-d.in:
+					d.handle(ev, true)
+				default:
+					return
+				}
+			}
 		}
 	}
 }
 
 // handle decides what to do with one event: drop it, hold it for the delay,
-// or send it.
-func (d *Dispatcher) handle(ev Event) {
+// or send it. When draining is true (during Close), immediate events still go
+// out and delayed needs_input events are dropped rather than arming a timer.
+func (d *Dispatcher) handle(ev Event, draining bool) {
 	set, sinks := d.settings()
 	if set == nil || !set.wants(ev.Event) || (ev.Event == TurnDone && ev.Turn < set.MinTurn) {
 		return
 	}
 	if ev.Event != NeedsInput || set.Delay <= 0 {
-		d.fire(ev, set, sinks)
+		d.fire(ev, set, sinks, true)
+		return
+	}
+	if draining {
 		return
 	}
 	d.mu.Lock()
@@ -225,12 +241,12 @@ func (d *Dispatcher) handle(ev Event) {
 	if d.pending != nil {
 		d.pending() // a newer needs_input replaces the waiting one
 	}
-	d.pending = d.o.Clock.AfterFunc(set.Delay, func() { d.fire(ev, set, sinks) })
+	d.pending = d.o.Clock.AfterFunc(set.Delay, func() { d.fire(ev, set, sinks, false) })
 }
 
 // fire applies the noise rules, then queues the event for delivery.
-func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink) {
-	if d.muted.Load() {
+func (d *Dispatcher) fire(ev Event, set *Settings, sinks []sink, immediate bool) {
+	if !immediate && d.muted.Load() {
 		return
 	}
 	if why := d.stale(ev, set); why != "" {
@@ -344,6 +360,7 @@ func prepare(ev Event, host string, set *Settings) Event {
 	}
 	if !set.Detail {
 		ev.Detail = ""
+		ev.DetailFrom = ""
 	}
 	ev.Summary = summary(ev)
 	return ev

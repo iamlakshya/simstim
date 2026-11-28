@@ -542,7 +542,7 @@ func TestRunGitOp(t *testing.T) {
 			t.Errorf("git-op %q: %v, want %s with a hint", c.args, err, c.code)
 		}
 	}
-	if err := RunGitOp(nil, nil, &out); err == nil || !strings.Contains(err.Error(), "<worktree.add|worktree.remove|worktree.discard|repo.info|bundle.create|seed.clone>") {
+	if err := RunGitOp(nil, nil, &out); err == nil || !strings.Contains(err.Error(), "<worktree.add|worktree.remove|worktree.discard|repo.info|bundle.create|seed.clone|repo.unpulled>") {
 		t.Errorf("usage = %v", err)
 	}
 }

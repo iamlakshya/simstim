@@ -645,6 +645,7 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim policy refuse <request-ID> [flags]` | Refuse one held network request by its opaque ID. [Reference](../reference/cli/policy_refuse.md) |
 | `simstim policy rm <id or target> [flags]` | Remove a rule from one policy layer. [Reference](../reference/cli/policy_rm.md) |
 | `simstim ports <host>/<session> [flags]` | List the TCP ports a session's processes listen on. [Reference](../reference/cli/ports.md) |
+| `simstim prune [<host>] [flags]` | Remove stopped sessions with no unpulled commits. [Reference](../reference/cli/prune.md) |
 | `simstim pull <host>/<session> [flags]` | Bring a session's branch into the git repository you are in. [Reference](../reference/cli/pull.md) |
 | `simstim rename <host>/<session> <name> [flags]` | Rename a session. [Reference](../reference/cli/rename.md) |
 | `simstim resume <host>/<session> [flags]` | Start a session's agent again after it ended, and attach to it. [Reference](../reference/cli/resume.md) |

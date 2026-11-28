@@ -28,6 +28,8 @@ type HostSandbox struct {
 	// Caches adds relative cache paths under /home/agent, or drops one with
 	// a leading "!", layered on top of sandbox.caches from config.toml.
 	Caches []string `toml:"caches,omitempty"`
+	// MaxRun overrides sandbox.max_run from config.toml for this host.
+	MaxRun string `toml:"max_run,omitempty"`
 }
 
 func boolPtr(v bool) *bool { return &v }

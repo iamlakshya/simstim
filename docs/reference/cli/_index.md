@@ -40,6 +40,8 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`forward`](forward.md) | Forward a session's ports to localhost: all, or those you name |
 | [`pull`](pull.md) | Bring a session's branch into the git repository you are in |
 | [`cp`](cp.md) | Copy files or folders into or out of a session over SFTP |
+| [`prune`](prune.md) | Remove stopped sessions with no unpulled commits |
+| [`events`](events.md) | Show or follow events from sessions and sandboxes |
 
 ## Hosts
 

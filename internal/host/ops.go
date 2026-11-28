@@ -164,16 +164,12 @@ func buildManifest(a NewArgs, id, cwd, kind string, argv, env []string, term str
 		Schema: 1, ID: id, Name: name, CreatedAt: now, HostVersion: version.Version,
 		Agent: AgentInfo{Kind: kind, Argv: argv},
 		Cwd:   cwd, Env: env,
-		Term:        TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows},
-		Limits:      resolveSessionLimits(a.MemoryMax, a.CPUs, a.DiskMax, kind, false),
-		Run:         Runtime{Socket: paths.Socket(id), BootID: BootID()},
-		Status:      Status{State: StateStarting, Since: now},
-		Restart:     Restart{Policy: "resume", MaxAttempts: 3},
-		HostName:    a.HostName,
-		SandboxName: name,
-		CopyIn:      a.CopyIn,
-		Task:        strings.TrimSpace(a.Task),
+		Term: TermInfo{Term: term, Cols: a.Cols, Rows: a.Rows}, Limits: resolveSessionLimits(a.MemoryMax, a.CPUs, a.DiskMax, kind, false),
+		Run: Runtime{Socket: paths.Socket(id), BootID: BootID()}, Status: Status{State: StateStarting, Since: now},
+		Restart: Restart{Policy: "resume", MaxAttempts: 3}, HostName: a.HostName, SandboxName: name, CopyIn: a.CopyIn,
+		Task: strings.TrimSpace(a.Task), RemoveOnExit: a.RemoveOnExit, RemoveWaitAttach: a.RemoveWaitAttach,
 	}
+	m.Limits.MaxRunSeconds = a.MaxRunSeconds
 	m.Git = gi
 	m.Secrets = secrets
 	m.SetupHook, m.ResumeHook, m.StopHook, m.SetupHash = sessHooks.setup, sessHooks.resume, sessHooks.stop, sessHooks.hash
@@ -325,7 +321,7 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
 		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
 		DebugUntil: debugUntil(m, alive), Usage: m.Usage.Clone(),
-		SandboxOf: m.SandboxOf, Task: m.Task,
+		SandboxOf: m.SandboxOf, Task: m.Task, MaxRunSeconds: m.Limits.MaxRunSeconds, RemoveOnExit: m.RemoveOnExit,
 	}
 	fillWallInfo(&info, m)
 	return info

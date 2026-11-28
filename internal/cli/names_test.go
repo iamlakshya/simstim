@@ -190,7 +190,7 @@ func TestNewAndResumeCheckTheTerminalFirst(t *testing.T) {
 		args []string
 		try  string
 	}{
-		{[]string{"new", "box", "--name", "fresh", "--", "sleep", "60"}, brand.Name + " new box --name fresh --detach -- sleep 60"},
+		{[]string{"new", "box", "--name", "fresh"}, brand.Name + " new box --name fresh --detach"},
 		{[]string{"resume", "box/" + id}, brand.Name + " resume box/" + id + " --detach"},
 		{[]string{"resume", "crash"}, brand.Name + " ls"},
 	} {
@@ -198,6 +198,12 @@ func TestNewAndResumeCheckTheTerminalFirst(t *testing.T) {
 		if code != 2 || !strings.Contains(text, "attaches, so it needs a terminal") || !strings.Contains(text, "Try: "+c.try+"\n") {
 			t.Errorf("%s without a terminal: exit %d\n%s", strings.Join(c.args, " "), code, text)
 		}
+	}
+	// --json without --detach still puts --detach before "--" in its Try: line.
+	if text, code := failsAs(t, "new", "box", "--json", "--name", "fresh", "--", "sleep", "60"); code != 2 ||
+		!strings.Contains(text, "--json needs --detach") ||
+		!strings.Contains(text, "Try: "+brand.Name+" new box --json --name fresh --detach -- sleep 60\n") {
+		t.Errorf("new --json -- sleep 60: exit %d\n%s", code, text)
 	}
 	if n := len(th.tr.Remotes()) - before; n != 0 {
 		t.Errorf("new and resume without a terminal ran %d commands on the host: %q", n, th.tr.Remotes()[before:])

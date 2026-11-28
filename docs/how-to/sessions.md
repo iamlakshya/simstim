@@ -134,6 +134,56 @@ simstim rm my-server/app -y
 
 Until v0.4.0 and 11 November 2027, whichever comes later, `rm` without a terminal and without `-y` still deletes, and prints a warning. After that, it fails with exit code 4, and names `-y`.
 
+## Run throwaway and parallel sessions
+
+Pass `--rm` to `new` when a session should clean itself up once its program exits:
+
+<!-- test: skip (command after -- cannot take trailing --help) -->
+```sh
+simstim new my-server --seed . --rm -- make test
+```
+
+When the program finishes, the host removes the session. If the session holds commits that you have not pulled yet, the host stops the session instead of deleting it and prints how many commits remain. When attached at a terminal, `new --rm` exits with the program's exit code.
+
+Without a terminal, such as in CI, `new <host> -- <command>` does not attach. It starts the session, runs `<command>` through `exec`, streams stdout and stderr, removes the session when `--rm` is set (unless commits are not pulled), and exits with `<command>`'s exit code. Without `-- <command>`, `new` still needs a terminal unless you pass `--detach`.
+
+Pass `--count <n>` to start `n` sessions with the same flags, named `<name>-1` to `<name>-<n>`:
+
+<!-- test: help (starts sessions) -->
+```sh
+simstim new my-server --agent claude --name batch --count 4 --detach --json
+```
+
+`new --count` never attaches, so it accepts `--json` without `--detach`. With `--json`, it prints one array: a session object for each session that started, and `{v, name, error}` for any that failed. If every session failed, it exits as one failing command with empty stdout; if some started, it prints the array and exits with the first error's exit code.
+
+To cap an unattended run, set `max_run` under `[sandbox]` in `config.toml` (or `[host.sandbox]` in `hosts.toml`), such as `max_run = "1h"`. When the timer expires, the supervisor stops the sandbox, keeps its work on disk and raises `sandbox_stopped` with the reason `max_run`. Changes apply at the next start.
+
+## Clean up stopped sessions
+
+`prune` lists stopped sessions that have no commits waiting to be pulled, and removes them after a question:
+
+<!-- test: help (needs a host) -->
+```sh
+simstim prune my-server --stopped-before 7d --dry-run
+simstim prune my-server -y
+simstim prune --json -y
+```
+
+Sessions with unpulled commits are kept and listed with their count. `--stopped-before` takes a duration such as `7d` or `24h`, or an RFC 3339 timestamp. With `--dry-run`, nothing is removed. Without `-y` and with input off (such as `--no-input` or `--json`), `prune` fails with exit code 4 when stopped sessions would be removed.
+
+## Watch session and sandbox events
+
+`events` shows recent events from one host, one session or every saved host. Add `--follow` to keep watching as events happen without polling:
+
+<!-- test: help (needs a host) -->
+```sh
+simstim events my-server
+simstim events my-server/app --follow
+simstim events --follow --json
+```
+
+The stream carries `state_changed`, `needs_input`, `turn_done`, `ended`, `egress_held`, `classifier_allow`, `sandbox_ready`, `sandbox_stopped` and `sandbox_error`. With `--follow --json`, each event prints as one compact JSON object per line.
+
 ## Old names
 
 These still work, and print a warning on stderr, until v0.4.0 and 11 November 2027, whichever comes later. Their `Try:` lines name the new form:

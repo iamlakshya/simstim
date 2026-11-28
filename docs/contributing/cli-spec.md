@@ -402,6 +402,7 @@ Try: simstim rm box/abcd2345 -y
 | `rewind` | Restore the selected disk checkpoint, after showing its time and changed branches? | No | `-y` | Fail; a missing checkpoint number also needs an answer |
 | `rewind` with a secret or SSH key that `[secret_tiers]` marks `shared`, for a `shared` host | Send the selected value to this host for this exact rewind? | No | None | Refuse, with exit code 5 |
 | `rm` | `Delete auth-fix on box?` with what stops and what stays | No | `-y` | Fail, after the end of section 3 |
+| `prune` | `Remove N stopped sessions?` after listing candidates and kept sessions | No | `-y` | Fail |
 | `attach` on an ended agent | `Start claude again in auth-fix on box? [Y/n]` | Yes | `--restart` | Fail |
 | `ssh-config` after preparing its generated files | `Add this Include to the top of your SSH config? [y/N]` | No | `--yes` | Keep: leave the generated files ready without changing the user's config |
 | `new`, missing folder | `Make it? [y/N]` | No | `--mkdir` | Fail |
@@ -466,6 +467,8 @@ Every command that prints data or makes something takes `--json` (G10). This tab
 | `show` | A session object | C5 |
 | `new --detach`, `resume --detach` | A session object | C4 |
 | `new --count <n>` | An array: a session object for each session that started, and `{v, name, error}` for each that did not | P1.16 |
+| `prune` | An array of `{v, host, dry_run, sessions, removed_images, error}` | P1.16 |
+| `events` | An array of event objects (each with `v`), or one compact JSON object per line with `--follow` | P1.16 |
 | `fork --detach`, `fork --count <n>` | `{v, host, parent, children, failures}`. Each child is a session object. Each failure has a one-based `index` and an `error` with the fields of section 7.4. | P5.1 |
 | `rewind --list` | `{v, host, id, checkpoints, current_refs}`. Checkpoints are newest first, each with its immutable `name`, `created_at` and branch `refs`. | P5.4 |
 | `rewind <host>/<session> <n> -y` | `{v, host, id, checkpoint, session}`. `checkpoint` is the immutable name selected before confirmation. | P5.4 |

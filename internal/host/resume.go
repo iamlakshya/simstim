@@ -169,16 +169,20 @@ func stopHolder(id string, m *Manifest) {
 }
 
 // stopWalledHolder asks a walled session's supervisor for a clean stop (ACPI
-// power-button on microvm, graceful shutdown on process/gvisor) before tearing
-// down its systemd unit so no VMM, supervisor or egress process remains.
-func stopWalledHolder(id string, m *Manifest) {
-	stopHolderOp(id, m, "stop")
+// power-button on microvm, graceful shutdown on process/gvisor, emitting
+// sandbox_stopped) before tearing down its systemd unit so no VMM, supervisor
+// or egress process remains. It reports whether the supervisor accepted "stop".
+func stopWalledHolder(id string, m *Manifest) bool {
+	return stopHolderOp(id, m, "stop")
 }
 
-func stopHolderOp(id string, m *Manifest, op string) {
+func stopHolderOp(id string, m *Manifest, op string) bool {
 	wasAlive := alive(id)
+	opAcked := false
 	if wasAlive {
-		if _, err := HolderRequest(id, op, nil, 2*time.Second); err != nil && op != "kill" {
+		if _, err := HolderRequest(id, op, nil, 2*time.Second); err == nil {
+			opAcked = true
+		} else if op != "kill" {
 			_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
 		}
 		deadline := time.Now().Add(stopWait)
@@ -190,7 +194,7 @@ func stopHolderOp(id string, m *Manifest, op string) {
 		// Child sessions share the primary sandbox's unit and supervisor PID;
 		// never stop the shared unit or kill the supervisor when removing a child.
 		os.Remove(paths.Socket(id))
-		return
+		return opAcked
 	}
 	switch {
 	case m != nil && m.Run.Unit != "":
@@ -206,6 +210,7 @@ func stopHolderOp(id string, m *Manifest, op string) {
 	os.Remove(paths.HookSocket(id))
 	os.Remove(paths.VMMSocket(id))
 	os.Remove(paths.VsockSocket(id))
+	return opAcked
 }
 
 // killHolder stops a holder that did not stop when asked: SIGTERM first,

@@ -18,7 +18,7 @@ import (
 // into raw link-frame relay mode after its TResponse (isolation spec 10.5).
 func isStreamingOp(op string) bool {
 	switch op {
-	case "sftp", "ssh.exec", "exec":
+	case "sftp", "ssh.exec", "exec", "events.watch":
 		return true
 	default:
 		return false
@@ -30,6 +30,9 @@ func isStreamingOp(op string) bool {
 // link frames between client and supervisor unchanged (spec 10.5) and returns
 // true so RunBridge exits when the stream ends.
 func (b *bridge) serveStream(req proto.Request, r *bufio.Reader, out io.Writer) bool {
+	if req.Op == "events.watch" {
+		return b.serveEventsWatch(req, r, out)
+	}
 	var target struct {
 		ID string `json:"id"`
 	}

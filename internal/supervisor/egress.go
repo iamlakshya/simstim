@@ -91,6 +91,7 @@ func (s *Supervisor) recordEgressAudit(ev egress.AuditEvent) {
 		Detail:  string(detail),
 	})
 	s.handleEgressUsageAndBudget(ev)
+	s.emitEgressWatchEvent(ev)
 }
 
 func startEgressProcess(ctx context.Context, id, exe string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error) {

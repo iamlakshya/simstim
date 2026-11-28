@@ -19,6 +19,8 @@ simstim new my-vps --agent claude --dir ~/src/new-app --mkdir
 simstim new my-vps --agent claude --secret ANTHROPIC_API_KEY
 simstim new my-vps --agent claude --memory 6G --cpus 2
 simstim new my-vps --agent claude --seed . --copy ~/.claude/skills
+simstim new my-vps --seed . --rm -- make test
+simstim new my-vps --agent claude --count 4 --detach --json
 simstim new my-vps --detach -- htop
 simstim new my-vps --agent claude --detach --json
 ```
@@ -30,6 +32,7 @@ simstim new my-vps --agent claude --detach --json
 | `-a`, `--agent <string>` | the agent: claude, codex, opencode, antigravity, gemini, amp, cursor, aider, goose or shell (default: `shell`) |
 | `--base <string>` | the commit or branch the worktree starts from (default: HEAD) |
 | `--copy <stringArray>` | copy a file or folder from this laptop into the session over SFTP: &lt;laptop&gt;[:&lt;guest&gt;] (repeatable) |
+| `--count <int>` | start this many sessions, named &lt;name&gt;-1 to &lt;name&gt;-&lt;n&gt; (default: `1`) |
 | `--cpus <int>` | cap the session's CPUs through systemd (default: sandbox.cpus in config.toml) |
 | `--detach` | start it without attaching |
 | `-C`, `--dir <string>` | the folder on the host (default: `~`) |
@@ -47,6 +50,7 @@ simstim new my-vps --agent claude --detach --json
 | `--mkdir` | make the folder on the host if it does not exist, without asking |
 | `-n`, `--name <string>` | a name for the session (default: the folder name) |
 | `--no-setup-script` | do not run the repository's setup script this time |
+| `--rm` | remove the session when its program exits, unless commits are not pulled |
 | `--secret <strings>` | pass a secret from config.toml's [secrets] to the session (repeatable, or comma-separated) |
 | `--seed <stringArray>` | seed the session from a git repository on this laptop as a git bundle (repeatable) |
 | `--seed-dirty` | with `--seed`, include uncommitted changes and non-ignored untracked files as one commit |

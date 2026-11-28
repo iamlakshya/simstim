@@ -153,9 +153,14 @@ func newMicroVMWalled(a NewArgs) (_ *SessionInfo, err error) {
 			Docker:           a.Docker,
 			ImageRef:         a.Image,
 		},
-		HostName:    a.HostName,
-		SandboxName: name,
-		CopyIn:      a.CopyIn,
+		HostName:         a.HostName,
+		SandboxName:      name,
+		CopyIn:           a.CopyIn,
+		RemoveOnExit:     a.RemoveOnExit,
+		RemoveWaitAttach: a.RemoveWaitAttach,
+	}
+	if a.MaxRunSeconds > 0 {
+		m.Limits.MaxRunSeconds = a.MaxRunSeconds
 	}
 	if ws.modelBudget > 0 {
 		m.Usage = &api.SessionUsage{Budget: ws.modelBudget}

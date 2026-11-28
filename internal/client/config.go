@@ -169,6 +169,10 @@ type Settings struct {
 		// PullMax caps the size of a git bundle streamed by pull, such as
 		// "512M" or "1G".
 		PullMax string `toml:"pull_max"`
+		// MaxRun stops a sandbox this long after its start, such as "4h" or
+		// "1m", keeping its work and raising sandbox_stopped with reason
+		// "max_run". Empty turns the cap off.
+		MaxRun string `toml:"max_run"`
 	} `toml:"sandbox"`
 	// Network holds defaults for sandbox network policy.
 	Network struct {

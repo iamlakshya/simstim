@@ -120,13 +120,13 @@ func alertsSetCmd() *cobra.Command {
 	fl := cmd.Flags()
 	fl.StringVar(&f.ntfy, "ntfy", "", "send to this ntfy topic (https://ntfy.sh/<topic> or your own server)")
 	fl.StringVar(&f.webhook, "webhook", "", "POST to this web address")
-	fl.StringVar(&f.format, "format", "", "the webhook's body: json (the event), slack or discord")
+	fl.StringVar(&f.format, "format", "", "the webhook's body: json (the event), slack, discord or otlp")
 	fl.StringVar(&f.command, "command", "", "run this command line on the host, with the event on stdin and in the environment")
 	addTokenCommand(cmd, &f.tokenCmd, "run this here and use its output as the ntfy token (it is never printed)")
 	if oldAlertsTokenCmd != nil {
 		addOldFlag(cmd, "token-command", "token-cmd", &f.usedOldTokenCmd, oldAlertsTokenCmd)
 	}
-	fl.StringSliceVar(&f.events, "events", nil, "the events to send: needs_input, turn_done, exited, failed, oom, memory, started, restored")
+	fl.StringSliceVar(&f.events, "events", nil, "the events to send: needs_input, turn_done, exited, failed, oom, memory, started, restored, egress_blocked, sandbox_ready, sandbox_stopped, sandbox_error, health_degraded, health_recovered")
 	fl.DurationVar(&f.delay, "delay", 0, "how long needs_input waits before it is sent (default 10s)")
 	fl.DurationVar(&f.minTurn, "min-turn", 0, "the shortest turn that sends turn_done (default 1m)")
 	fl.BoolVar(&f.detail, "detail", false, "add the agent's question to needs_input (it can hold code)")

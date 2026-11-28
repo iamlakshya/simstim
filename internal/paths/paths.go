@@ -43,6 +43,14 @@ func AlertsLog() string { return filepath.Join(StateDir(), "alerts.log") }
 // Holders lock it while they read or change it, and while they write the log.
 func AlertsRate() string { return filepath.Join(StateDir(), "alerts.rate") }
 
+// EventsLog is the append-only stream of session and sandbox events on a host,
+// one JSON object a line, watched by `events.watch` (spec 17.6). It turns over
+// to the same name with ".1" added.
+func EventsLog() string { return filepath.Join(StateDir(), "events.jsonl") }
+
+// EventsLock guards concurrent appends and rotations of EventsLog.
+func EventsLock() string { return filepath.Join(StateDir(), "events.lock") }
+
 // SessionsDir holds one folder per session.
 func SessionsDir() string { return filepath.Join(StateDir(), "sessions") }
 

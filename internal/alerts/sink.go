@@ -183,7 +183,9 @@ type ntfySink struct {
 var ntfyTags = map[string]string{
 	NeedsInput: "bell", TurnDone: "white_check_mark", Exited: "checkered_flag", Failed: "x",
 	OOM: "warning", Memory: "chart_with_upwards_trend", Started: "arrow_forward", Restored: "arrows_counterclockwise",
-	ModelBudget: "octagonal_sign", Test: "test_tube",
+	LinkSilent: "warning", ModelBudget: "octagonal_sign", DiskFull: "floppy_disk", EgressBlocked: "no_entry_sign",
+	SandboxReady: "rocket", SandboxStopped: "stop_sign", SandboxError: "rotating_light",
+	HealthDegraded: "warning", HealthRecovered: "white_check_mark", Test: "test_tube",
 }
 
 func (n *ntfySink) send(ctx context.Context, ev Event) (string, error) {
@@ -214,7 +216,7 @@ func (n *ntfySink) priority(kind string) string {
 		return strings.ToLower(n.d.Priority)
 	}
 	switch kind {
-	case NeedsInput, Failed, OOM, Memory, ModelBudget:
+	case NeedsInput, Failed, OOM, Memory, LinkSilent, ModelBudget, DiskFull, EgressBlocked, SandboxError, HealthDegraded:
 		return "high"
 	}
 	return "default"
@@ -238,6 +240,8 @@ func (w *webhookSink) send(ctx context.Context, ev Event) (string, error) {
 			text = text[:1900] + "…"
 		}
 		body, _ = json.Marshal(map[string]string{"content": text})
+	case "otlp":
+		body = ev.OTLPJSON()
 	default:
 		body = ev.JSON()
 	}

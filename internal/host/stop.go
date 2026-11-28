@@ -77,6 +77,16 @@ func Stop(a api.StopArgs) (*StopResult, error) {
 	if err := m.Save(); err != nil {
 		return nil, fmt.Errorf("save the manifest of session %s: %w", id, err)
 	}
+	if m.Wall == nil {
+		RecordWatchEvent(api.WatchEvent{
+			Event:   api.EventSandboxStopped,
+			Session: m.ID,
+			Name:    m.Name,
+			Agent:   m.Agent.Kind,
+			State:   StateStopped,
+			Reason:  "stop",
+		})
+	}
 	return &StopResult{Session: infoFrom(m, false)}, nil
 }
 

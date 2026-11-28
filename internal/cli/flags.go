@@ -155,6 +155,21 @@ func addIn(cmd *cobra.Command, p *string, usage string) {
 	markSharedFlag(cmd.Flags().Lookup("in"))
 }
 
+func addDryRun(cmd *cobra.Command, p *bool, usage string) {
+	cmd.Flags().BoolVar(p, "dry-run", false, usage)
+	markSharedFlag(cmd.Flags().Lookup("dry-run"))
+}
+
+func addFollow(cmd *cobra.Command, p *bool, usage string) {
+	cmd.Flags().BoolVar(p, "follow", false, usage)
+	markSharedFlag(cmd.Flags().Lookup("follow"))
+}
+
+func addCount(cmd *cobra.Command, p *int, usage string) {
+	cmd.Flags().IntVar(p, "count", 1, usage)
+	markSharedFlag(cmd.Flags().Lookup("count"))
+}
+
 // oldFlagValue writes to the target flag's value so last-flag-wins semantics
 // hold when both the old and new flags appear, and records that the old flag
 // was used so the command warns once.

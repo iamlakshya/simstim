@@ -34,6 +34,7 @@ const (
 	gitOpRepoInfo        = api.GitOpRepoInfo
 	gitOpBundleCreate    = api.GitOpBundleCreate
 	gitOpSeedClone       = api.GitOpSeedClone
+	gitOpUnpulledCount   = api.GitOpUnpulledCount
 )
 
 // gitOpKind is a git operation: its name, how long it may run, and what
@@ -82,6 +83,10 @@ var gitOpKinds = []*gitOpKind{
 		a.Seed, err = seedClone(r.Seed)
 		return a, err
 	}},
+	{gitOpUnpulledCount, time.Minute, func(r gitOpRequest, _ func(*GitInfo)) (a gitOpAnswer, err error) {
+		a.Count, err = unpulledCount(r.Unpulled)
+		return a, err
+	}},
 }
 
 // findGitOp is the git operation called name, or nil.
@@ -118,6 +123,8 @@ type gitOpRequest struct {
 	Bundle *bundleCreateArgs `json:"bundle,omitempty"`
 	// Seed is seed.clone's request.
 	Seed *seedCloneArgs `json:"seed,omitempty"`
+	// Unpulled is repo.unpulled's request.
+	Unpulled *unpulledArgs `json:"unpulled,omitempty"`
 	// DeadlineMS is the operation's deadline, in milliseconds, which the
 	// child keeps itself. It may only shorten the operation's own.
 	DeadlineMS int64 `json:"deadline_ms,omitempty"`
@@ -140,6 +147,7 @@ type gitOpAnswer struct {
 	Repo   *api.RepoInfo       `json:"repo,omitempty"`   // repo.info
 	Bundle *bundleCreateResult `json:"bundle,omitempty"` // bundle.create
 	Seed   *seedCloneResult    `json:"seed,omitempty"`   // seed.clone
+	Count  int                 `json:"count,omitempty"`  // repo.unpulled
 	Result string              `json:"result,omitempty"` // worktree.remove: what it did
 	Plan   *GitInfo            `json:"plan,omitempty"`   // worktree.add: what it is about to make
 }

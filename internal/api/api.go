@@ -148,6 +148,17 @@ type NewArgs struct {
 	Keep []string `json:"keep,omitempty"`
 	// Shell overrides the login shell started by `shell` inside a sandbox.
 	Shell string `json:"shell,omitempty"`
+	// MaxRunSeconds stops a walled session this many seconds after its start,
+	// keeping its work and raising sandbox_stopped with reason "max_run"
+	// (0 = no limit, spec 17.6).
+	MaxRunSeconds int64 `json:"max_run_seconds,omitempty"`
+	// RemoveOnExit marks a throwaway session created with `new --rm` so it is
+	// removed when its program exits unless it has unpulled commits (spec 17.6).
+	RemoveOnExit bool `json:"remove_on_exit,omitempty"`
+	// RemoveWaitAttach defers host-side auto-removal on exit until at least one
+	// client has attached and detached, preventing a fast-exiting command from
+	// racing interactive `new --rm` before its initial attach connects.
+	RemoveWaitAttach bool `json:"remove_wait_attach,omitempty"`
 }
 
 // WallInfo is a session's wall, in its row.
@@ -228,6 +239,10 @@ type SessionInfo struct {
 	SandboxOf string `json:"sandbox_of,omitempty"`
 	// Task is the short task description given at session start, if any.
 	Task string `json:"task,omitempty"`
+	// MaxRunSeconds is the sandbox.max_run cap in seconds when set (spec 17.6).
+	MaxRunSeconds int64 `json:"max_run_seconds,omitempty"`
+	// RemoveOnExit reports whether the session was started with `new --rm`.
+	RemoveOnExit bool `json:"remove_on_exit,omitempty"`
 }
 
 // ResumeArgs asks a host to start the agent of a session again, in the same

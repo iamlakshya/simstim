@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/alerts"
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/term"
 )
@@ -99,6 +100,7 @@ func (h *Holder) alertState(prev, next string) {
 			h.emitGuestAlert(alerts.NeedsInput, detail, 0)
 			return
 		}
+		h.recordHolderAlertEvent(api.EventNeedsInput, api.CleanText(detail, 200), nil, "")
 		ev := h.alertEvent(alerts.NeedsInput)
 		ev.Detail = detail
 		a.d.Notify(ev)
@@ -108,6 +110,7 @@ func (h *Holder) alertState(prev, next string) {
 			if h.isGuest() {
 				h.emitGuestAlert(alerts.TurnDone, "", a.worked)
 			} else {
+				h.recordHolderAlertEvent(api.EventTurnDone, "", nil, "")
 				ev := h.alertEvent(alerts.TurnDone)
 				ev.Turn = a.worked
 				a.d.Notify(ev)

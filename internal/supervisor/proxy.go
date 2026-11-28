@@ -381,6 +381,7 @@ func (s *Supervisor) handleAttach(sessionID string, conn net.Conn, r *bufio.Read
 		_ = st.Close()
 		return
 	}
+	s.everAttached.Store(true)
 
 	var closeOnce sync.Once
 	closeBoth := func() {

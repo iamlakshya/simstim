@@ -94,11 +94,12 @@ var (
 	// qDelete fails with input off only after the end of its old form:
 	// until then rm deletes and warns (rm.go).
 	qDelete  = &question{cmd: "rm", flag: "-y"}
+	qPrune   = &question{cmd: "prune", flag: "-y"}
 	qRestart = &question{cmd: "attach", flag: "--restart", def: true}
 )
 
 // questions lists every row, for the tests.
-var questions = []*question{qInstallHelper, qHostKey, qHostRekey, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qHostRmDestroy, qHostSetTrust, qSetup, qSSHConfig, qCPFlagged, qPullFlagged, qDelete, qRestart}
+var questions = []*question{qInstallHelper, qHostKey, qHostRekey, qAddAgents, qMakeFolder, qSetupScript, qFix, qHostFix, qDestroy, qHostRmDestroy, qHostSetTrust, qSetup, qSSHConfig, qCPFlagged, qPullFlagged, qDelete, qPrune, qRestart}
 
 // prompter asks a command's questions on stderr, and reads the answers from
 // stdin.

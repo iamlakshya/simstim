@@ -1,0 +1,9 @@
+15:04:01  box/auth-fix            state_changed     working (from idle)
+15:04:02  box/auth-fix            needs_input       Approve tool call?
+15:04:03  box/auth-fix            turn_done         turn finished
+15:04:04  box/auth-fix            ended             exited (code 0)
+15:04:05  box/auth-fix            egress_held       api.example.com:443  waiting for approval
+15:04:06  box/auth-fix            classifier_allow  registry.npmjs.org:443  allowed by policy
+15:04:07  box/auth-fix            sandbox_ready     sandbox ready
+15:04:08  box/auth-fix            sandbox_stopped   max_run
+15:04:09  box/auth-fix            sandbox_error     wall process exited
