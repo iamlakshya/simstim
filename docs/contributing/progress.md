@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 36 |
-| To do | 63 |
+| Done | 37 |
+| To do | 62 |
 | **All** | **99** |
 
 ## Current focus
@@ -118,7 +118,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P5.2 | 5 | Later | To do | Copy files in and out |
 | P5.4 | 5 | Later | To do | Checkpoints |
 | P5.5 | 5 | Later | To do | Save an image |
-| P6.1 | 6 | Later | To do | The gvisor wall |
+| P6.1 | 6 | Later | Done | The gvisor wall |
 | P6.2 | 6 | Later | To do | The Firecracker driver |
 | P6.4 | 6 | Later | To do | Nitro Sandboxes on EC2 |
 | P6.3 | 6 | Later | To do | Unwalled sessions on the supervisor's path |
