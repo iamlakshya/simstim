@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 49 |
-| To do | 50 |
+| Done | 51 |
+| To do | 48 |
 | **All** | **99** |
 
 ## Current focus
@@ -54,11 +54,11 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.7 | 1 | Day 1 | Done | The egress process, first version |
 | P1.8 | 1 | Day 1 | To do | The client and the launcher |
 | P1.12 | 1 | Day 1 | To do | Layers, profiles and locks |
-| P1.13 | 1 | Day 1 | To do | Shells and commands in a sandbox |
+| P1.13 | 1 | Day 1 | Done | Shells and commands in a sandbox |
 | P1.14 | 1 | Day 1 | Done | Sizes, variables, files and seeds from the laptop |
 | P1.15 | 1 | Day 1 | Done | Kept caches |
 | P1.9 | 1 | Day 1 | Done | Paste and ports through the supervisor |
-| P1.10 | 1 | Day 1 | To do | Pull through a bundle, with a review |
+| P1.10 | 1 | Day 1 | Done | Pull through a bundle, with a review |
 | P1.11 | 1 | Day 1 | Done | Destroy, stop, restore and the phase's checks |
 | P1.16 | 1 | Day 1 | To do | Runs for many sessions |
 | P2.1 | 2 | Day 1 | Done | DNS policy |
