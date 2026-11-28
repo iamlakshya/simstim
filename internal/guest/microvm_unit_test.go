@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -253,6 +254,11 @@ func TestTransparentProxyForwardAndLoopGuard(t *testing.T) {
 }
 
 func TestStartHolderDockerMissingAndMemClaims(t *testing.T) {
+	// The memory report reads /proc/meminfo, which only Linux has, and the
+	// guest init runs only on Linux.
+	if runtime.GOOS != "linux" {
+		t.Skip("the guest's memory report needs Linux")
+	}
 	oldHB := HeartbeatInterval
 	HeartbeatInterval = 30 * time.Millisecond
 	t.Cleanup(func() { HeartbeatInterval = oldHB })
@@ -260,6 +266,10 @@ func TestStartHolderDockerMissingAndMemClaims(t *testing.T) {
 	c1, c2 := net.Pipe()
 	defer c1.Close()
 	defer c2.Close()
+	// A frame that never comes fails the test, rather than hanging it.
+	if err := c2.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 
 	runDir := t.TempDir()
 	errCh := make(chan error, 1)
