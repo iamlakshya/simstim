@@ -69,6 +69,11 @@ type Agent struct {
 	Memory int64 `json:"memory,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
+	// Egress lists the hosts the agent needs: its model API and its login.
+	// The locked preset allows these on port 443 and nothing else.
+	Egress []string `json:"egress,omitempty"`
+	// ProxyEnv are extra variables that make the agent use HTTPS_PROXY.
+	ProxyEnv map[string]string `json:"proxy_env,omitempty"`
 }
 
 // GB is a gigabyte as agents' docs give memory: 10^9 bytes, a little less
@@ -164,6 +169,15 @@ var Table = []Agent{
 			LoginFiles:  []string{"~/.claude/.credentials.json"},
 			LoginEnv:    []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"},
 		},
+		// https://code.claude.com/docs/en/network-config: downloads.claude.ai
+		// (updater) and mcp-proxy.anthropic.com (connectors) are left out on purpose.
+		Egress: []string{
+			"api.anthropic.com",
+			"platform.claude.com",
+			"claude.ai",
+			"claude.com",
+			"sso.claude.com",
+		},
 	},
 	{
 		Kind: "codex", Title: "Codex", Binaries: []string{"codex"},
@@ -216,6 +230,12 @@ var Table = []Agent{
 			Login:       "codex login --device-auth",
 			LoginStatus: []string{"codex", "login", "status"},
 			LoginFiles:  []string{"~/.codex/auth.json"},
+		},
+		// openai/codex model-provider-info/src/lib.rs and login/src/auth/manager.rs.
+		Egress: []string{
+			"api.openai.com",
+			"chatgpt.com",
+			"auth.openai.com",
 		},
 	},
 	{

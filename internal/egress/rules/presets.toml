@@ -1,0 +1,74 @@
+# Built-in egress presets (spec 7.2).
+# Each entry names a host allowed on port 443 and cites its source.
+
+[presets.locked]
+description = "The agent's own model API and login hosts only."
+entries = []
+
+[presets.balanced]
+description = "Locked, plus common package registries and code hosts."
+
+[[presets.balanced.entries]]
+host = "registry.npmjs.org"
+source = "https://docs.npmjs.com/cli/v12/using-npm/registry"
+
+[[presets.balanced.entries]]
+host = "pypi.org"
+source = "https://docs.pypi.org/api/"
+
+[[presets.balanced.entries]]
+host = "files.pythonhosted.org"
+source = "https://docs.pypi.org/api/"
+
+[[presets.balanced.entries]]
+host = "proxy.golang.org"
+source = "https://go.dev/ref/mod"
+
+[[presets.balanced.entries]]
+host = "sum.golang.org"
+source = "https://go.dev/ref/mod"
+
+[[presets.balanced.entries]]
+host = "crates.io"
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[presets.balanced.entries]]
+host = "index.crates.io"
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[presets.balanced.entries]]
+host = "static.crates.io"
+source = "https://doc.rust-lang.org/cargo/reference/registries.html"
+
+[[presets.balanced.entries]]
+host = "rubygems.org"
+source = "https://guides.rubygems.org/"
+
+[[presets.balanced.entries]]
+host = "github.com"
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[presets.balanced.entries]]
+host = "api.github.com"
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[presets.balanced.entries]]
+host = "objects.githubusercontent.com"
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[presets.balanced.entries]]
+host = "raw.githubusercontent.com"
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[presets.balanced.entries]]
+host = "codeload.github.com"
+source = "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses"
+
+[[presets.balanced.entries]]
+host = "gitlab.com"
+source = "https://docs.gitlab.com/user/gitlab_com/"
+
+[presets.open]
+description = "Every public host outside the refused ranges and locked denies."
+allow_all_public = true
+entries = []

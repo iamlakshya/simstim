@@ -1,0 +1,79 @@
+# Control a sandbox's network access
+
+A walled session has no network card and no route to the host or the internet. Every outbound connection and DNS query passes through a per-session egress process on the trusted side of the host.
+
+The egress process opens no listening TCP or UDP port on the host ([decision 0030](../contributing/decisions/0030-local-sockets-do-not-listen.md)). It receives flows from the sandbox over a private link socket pair, checks each destination against the session's policy, and connects straight to the allowed host ([decision 0031](../contributing/decisions/0031-the-egress-process-is-not-a-relay.md)).
+
+## Presets
+
+Each walled session starts with one preset:
+
+| Preset | Allows on port 443 | Meant for |
+| --- | --- | --- |
+| `locked` | Only the agent's own model API and login hosts from the agent table | Untrusted repositories and research |
+| `balanced` | `locked`, plus common package registries (`registry.npmjs.org`, `pypi.org`, `files.pythonhosted.org`, `proxy.golang.org`, `sum.golang.org`, `crates.io`, `index.crates.io`, `static.crates.io`, `rubygems.org`) and code hosts (`github.com`, `api.github.com`, `objects.githubusercontent.com`, `raw.githubusercontent.com`, `codeload.github.com`, `gitlab.com`) | Daily work |
+| `open` | Every public host and port outside the refused address ranges and denies | Exploration |
+
+## Policy format
+
+A session's network policy is plain TOML with flat deny-wins semantics ([decision 0053](../contributing/decisions/0053-rebuild-with-open-source-parts.md)):
+
+```toml
+session = "devbox/auth-fix"
+agent = "claude"
+
+[sandbox]
+preset = "balanced"
+
+[network]
+allow = ["api.stripe.com", "*.internal.example:8443", "example.com:80"]
+deny = ["pastebin.com"]
+unknown = "deny"
+
+[lock]
+network.deny = ["evil.example"]
+```
+
+- **Any deny beats any allow.** A deny rule overrides `network.allow`, live session grants, agent hosts and presets.
+- **Locks stay fixed.** A host in `[lock]` cannot be opened by a live grant or a policy reload.
+- **Ports.** An `allow` entry without a port allows port 443. Write `host:port` to allow another port. A `deny` entry without a port denies every port on that host.
+- **Wildcards.** `*.example.com` matches subdomains such as `api.example.com`, never the apex `example.com`. Broad wildcards on a public suffix (such as `*.com`) are refused in allow rules.
+- **Unknown hosts.** With `unknown = "deny"` (the default), any unmatched host gets an HTTP 403 whose body names the grant command. With `unknown = "allow"`, unmatched public hosts pass and are logged as `allow-unknown`.
+
+Live commands (`policy allow`, `policy deny` and `policy ls`) are wired on top of this engine in task P1.8.
+
+## Refused addresses and TLS checks
+
+Before dialling any host, the egress process resolves the name once and checks every returned address. If any address is refused, the whole flow fails closed with HTTP 403 and nothing is dialled. The dial then uses the verified IP address directly, with no second DNS lookup, so DNS rebinding cannot redirect a connection to a private address.
+
+These addresses are refused unless an explicit IP or CIDR grant names them:
+
+- `0.0.0.0/8`, RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), CGNAT (`100.64/10`), loopback (`127.0.0.0/8`, `::1/128`), link-local and cloud metadata (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254/128`)
+- IETF protocol (`192.0.0.0/24`), benchmarking and synthetic DNS (`198.18.0.0/15`), multicast (`224.0.0.0/4`, `ff00::/8`), reserved (`240.0.0.0/4`), IPv6 unspecified (`::/128`), unique local (`fc00::/7`), discard (`100::/64`) and deprecated site-local (`fec0::/10`)
+- IPv4 addresses embedded inside IPv6 transition formats: IPv4-mapped (`::ffff:0:0/96`), IPv4-translated (`::ffff:0:0:0/96`), deprecated IPv4-compatible (`::/96`), NAT64 (`64:ff9b::/96` when the inner IPv4 is refused, and all of `64:ff9b:1::/48`), 6to4 (`2002::/16`) and Teredo (`2001::/32`)
+- Every address assigned to the host's own network interfaces, read when the egress process starts
+
+On port 443, the egress process inspects the TLS ClientHello with Go's `crypto/tls` before dialling upstream. It refuses any flow whose SNI does not match the `CONNECT` host, and refuses Encrypted Client Hello (ECH) extensions (`0xfe0d` and `0xfd00`).
+
+## DNS policy
+
+When a sandbox runs the DNS stub, every query crosses the link to the egress process:
+
+- Disallowed and unknown names (when `unknown = "deny"`) receive `NXDOMAIN` without querying any upstream resolver.
+- `HTTPS` and `SVCB` queries always receive empty `NOERROR` answers without reaching upstream, so clients do not learn ECH keys.
+- In `real` mode, only `A` and `AAAA` records for allowed names are resolved, and any name resolving to a refused IP receives `NXDOMAIN`.
+- In `synthetic` mode, allowed names receive unique addresses from `198.18.0.0/15` without querying upstream.
+
+## Audit log
+
+The egress process sends one JSON line per connection or DNS query back to the supervisor over its control stream:
+
+```json
+{"v":1,"t":"2026-11-27T10:12:03Z","kind":"net","host":"registry.npmjs.org","port":443,"mode":"splice","method":"CONNECT","status":200,"up":512,"down":2048,"rule":"preset:balanced","decision":"allow"}
+```
+
+Audit lines never include query strings, header values or bodies. Before writing a path, the egress process replaces every exposed secret value with `[NAME]` and cuts the path to 256 bytes.
+
+## Process hardening
+
+On Linux, the egress process clears `PR_SET_DUMPABLE` and sets `RLIMIT_CORE` to 0 at start. If the egress process is killed, new flows fail closed and no second egress process starts.

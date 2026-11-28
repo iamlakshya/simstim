@@ -13,6 +13,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/guest"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/proto"
@@ -62,6 +63,8 @@ var commands = map[string]func(args []string) error{
 	// The helper runs git in a child of its own, and the client runs
 	// repo.info over SSH. Not for people, so left out of the usage.
 	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
+	// The egress process for one walled session, attached to fd 3.
+	"egress": runEgress,
 	// The phone path: experimental, and left out of the usage on purpose
 	// until it is launched (docs/contributing/phone-path.md).
 	"pick":      func([]string) error { return host.RunPick(os.Stdin, os.Stdout) },
@@ -117,6 +120,13 @@ func runSupervise(args []string) error {
 
 func runWallInit([]string) error {
 	return guest.Run()
+}
+
+func runEgress(args []string) error {
+	if len(args) != 1 {
+		return fmt.Errorf("usage: %s egress <id>. Try: start egress from the session supervisor with fd 3 connected", brand.HostBinary)
+	}
+	return egress.Run(args[0])
 }
 
 func runLs(args []string) error {

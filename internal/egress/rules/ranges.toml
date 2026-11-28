@@ -1,0 +1,119 @@
+# Refused IP ranges for sandbox egress (spec 7.2 and Stripe smokescreen).
+# Short IPv4 forms such as "10/8" expand to full CIDRs at load time.
+# Embedded IPv4 addresses in NAT64 (64:ff9b::/96), 6to4 (2002::/16), Teredo
+# (2001::/32) and IPv4-translated (::ffff:0:0:0/96) are checked in code too.
+
+[[ranges]]
+cidr = "0.0.0.0/8"
+reason = "unspecified IPv4 network (RFC 1122)"
+source = "https://www.rfc-editor.org/rfc/rfc6890"
+
+[[ranges]]
+cidr = "10/8"
+reason = "private IPv4 network (RFC 1918)"
+source = "https://www.rfc-editor.org/rfc/rfc1918"
+
+[[ranges]]
+cidr = "100.64/10"
+reason = "shared address space / CGNAT (RFC 6598)"
+source = "https://www.rfc-editor.org/rfc/rfc6598"
+
+[[ranges]]
+cidr = "127.0.0.0/8"
+reason = "IPv4 loopback (RFC 1122)"
+source = "https://www.rfc-editor.org/rfc/rfc1122"
+
+[[ranges]]
+cidr = "169.254.0.0/16"
+reason = "IPv4 link-local and cloud metadata (RFC 3927)"
+source = "https://www.rfc-editor.org/rfc/rfc3927"
+
+[[ranges]]
+cidr = "172.16/12"
+reason = "private IPv4 network (RFC 1918)"
+source = "https://www.rfc-editor.org/rfc/rfc1918"
+
+[[ranges]]
+cidr = "192.0.0.0/24"
+reason = "IETF protocol assignments (RFC 6890)"
+source = "https://www.rfc-editor.org/rfc/rfc6890"
+
+[[ranges]]
+cidr = "192.168/16"
+reason = "private IPv4 network (RFC 1918)"
+source = "https://www.rfc-editor.org/rfc/rfc1918"
+
+[[ranges]]
+cidr = "198.18.0.0/15"
+reason = "benchmarking and synthetic DNS range (RFC 2544)"
+source = "https://www.rfc-editor.org/rfc/rfc2544"
+
+[[ranges]]
+cidr = "224.0.0.0/4"
+reason = "IPv4 multicast (RFC 5771)"
+source = "https://www.rfc-editor.org/rfc/rfc5771"
+
+[[ranges]]
+cidr = "240.0.0.0/4"
+reason = "reserved and broadcast IPv4 range (RFC 1112)"
+source = "https://www.rfc-editor.org/rfc/rfc6890"
+
+[[ranges]]
+cidr = "::/128"
+reason = "unspecified IPv6 address (RFC 4291)"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[ranges]]
+cidr = "::1/128"
+reason = "IPv6 loopback (RFC 4291)"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[ranges]]
+cidr = "::/96"
+reason = "deprecated IPv4-compatible IPv6 range (RFC 4291)"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[ranges]]
+cidr = "100::/64"
+reason = "IPv6 discard-only prefix (RFC 6666)"
+source = "https://www.rfc-editor.org/rfc/rfc6666"
+
+[[ranges]]
+cidr = "64:ff9b:1::/48"
+reason = "local-use NAT64 prefix (RFC 8215)"
+source = "https://www.rfc-editor.org/rfc/rfc8215"
+
+[[ranges]]
+cidr = "2001::/32"
+reason = "Teredo IPv6 transition prefix (RFC 4380)"
+source = "https://www.rfc-editor.org/rfc/rfc4380"
+
+[[ranges]]
+cidr = "2002::/16"
+reason = "6to4 IPv6 transition prefix (RFC 3056)"
+source = "https://www.rfc-editor.org/rfc/rfc3056"
+
+[[ranges]]
+cidr = "fd00:ec2::254/128"
+reason = "cloud IPv6 metadata address"
+source = "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html"
+
+[[ranges]]
+cidr = "fc00::/7"
+reason = "IPv6 unique local address (RFC 4193)"
+source = "https://www.rfc-editor.org/rfc/rfc4193"
+
+[[ranges]]
+cidr = "fe80::/10"
+reason = "IPv6 link-local address (RFC 4291)"
+source = "https://www.rfc-editor.org/rfc/rfc4291"
+
+[[ranges]]
+cidr = "fec0::/10"
+reason = "deprecated IPv6 site-local address (RFC 3879)"
+source = "https://www.rfc-editor.org/rfc/rfc3879"
+
+[[ranges]]
+cidr = "ff00::/8"
+reason = "IPv6 multicast (RFC 4291)"
+source = "https://www.rfc-editor.org/rfc/rfc4291"

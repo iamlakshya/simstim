@@ -144,3 +144,28 @@ func TestEveryCheckedAgentCanBeInstalled(t *testing.T) {
 		}
 	}
 }
+
+func TestFirstClassEgressHosts(t *testing.T) {
+	claude, ok := Find("claude")
+	if !ok {
+		t.Fatal("claude agent missing")
+	}
+	wantClaude := []string{"api.anthropic.com", "platform.claude.com", "claude.ai", "claude.com", "sso.claude.com"}
+	if !slices.Equal(claude.Egress, wantClaude) {
+		t.Errorf("claude.Egress = %q, want %q", claude.Egress, wantClaude)
+	}
+	for _, forbidden := range []string{"downloads.claude.ai", "mcp-proxy.anthropic.com"} {
+		if slices.Contains(claude.Egress, forbidden) {
+			t.Errorf("claude.Egress must not include %q", forbidden)
+		}
+	}
+
+	codex, ok := Find("codex")
+	if !ok {
+		t.Fatal("codex agent missing")
+	}
+	wantCodex := []string{"api.openai.com", "chatgpt.com", "auth.openai.com"}
+	if !slices.Equal(codex.Egress, wantCodex) {
+		t.Errorf("codex.Egress = %q, want %q", codex.Egress, wantCodex)
+	}
+}

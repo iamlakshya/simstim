@@ -552,43 +552,41 @@ The supervisor never runs, renders or interpolates guest data. It parses only li
 
 ### 5.4 `internal/egress`
 
+Under [decision 0053](decisions/0053-rebuild-with-open-source-parts.md), v1 uses `github.com/elazarl/goproxy` as its proxy front over a `net.Listener` built from `internal/link` streams, reads TLS SNI and rejects ECH with Go's `crypto/tls`, answers DNS with `golang.org/x/net/dns/dnsmessage`, and evaluates flat deny-wins TOML policies.
+
 ```go
-// Package egress makes every network connection for one walled session.
+// Package egress makes every network connection and DNS answer for one walled session.
 package egress
 
-// Run is the egress process of session id. It reads its policy and the
-// values of bound secrets from fd 3, a socket pair to the supervisor. It
-// makes the session's CA and the sentinels itself (7.2, 7.3). It sends
-// back only the CA's certificate and the sentinels, never the CA's key.
-// After start it opens no file. It sends each audit line to the
-// supervisor on fd 3, and the supervisor appends it to the audit log.
-// Only the supervisor writes that file.
+// Run is the egress process of session id. It sets PR_SET_DUMPABLE=0 and
+// RLIMIT_CORE=0, reads its TOML policy and exposed secret redaction map from
+// fd 3 (a socket pair to the supervisor), serves explicit CONNECT/HTTP proxy
+// streams, transparent streams and DNS streams without listening on any
+// network port, and sends each audit line back on the control stream.
 func Run(id string) error
 
 // Request is one flow or one HTTP request to decide on.
 type Request struct {
     Host   string // from CONNECT, the SNI, or the synthetic address
     Port   int
-    Method string // intercepted flows only
-    Path   string // intercepted flows only, without the query
+    Method string
+    Path   string
     Header http.Header
 }
 
 // Decision says what to do with a request.
 type Decision struct {
-    Action Action // Allow, Deny or Hold
-    Mode   Mode   // Splice or Intercept
-    Rule   string // the grant ID or the preset rule that decided
+    Action Action // ActionAllow or ActionDeny
+    Mode   Mode   // ModeSplice or ModeHTTP
+    Rule   string // the lock, deny, allow, grant, agent or preset rule that decided
     Why    string // in plain words, for the audit line and the 403 body
 }
 
-// Engine is one session's api.Policy as the egress process uses it, with
-// the rule tables of 7.2 built from it. It is not a second policy type.
+// Engine evaluates flows and DNS queries against a flat deny-wins TOML policy.
 type Engine struct{ /* … */ }
 
-// Decide applies the policy. It finds the deciding rule with grant.Decide:
-// the narrowest layer with a matching rule decides, and in that layer a
-// deny wins over an allow (8.2).
+// Decide applies the policy: locks and denies always beat allows, agent hosts
+// and presets.
 func (e *Engine) Decide(r Request) Decision
 ```
 
@@ -957,10 +955,10 @@ Before P2 there is no stub, and lookups in the guest fail. Tools that use the pr
 
 **Decisions.** For each flow the egress process:
 
-1. Checks the locks. Then it finds the narrowest layer with a rule that matches the host and port (8.2). In that layer a deny wins over an allow. With no match, it takes the unknown action below.
-2. Resolves the name and refuses every address in `internal/egress/rules/ranges.toml`: `0.0.0.0/8`, the private ranges of RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), the shared address space (`100.64/10`), `127.0.0.0/8`, `169.254.0.0/16`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::/128`, `::1/128`, `fc00::/7`, `fe80::/10`, `ff00::/8`, `fd00:ec2::254`, IPv4 inside `64:ff9b::/96` when the inner address is refused, and the host's own addresses, read at start. A grant that names such an address by number opens it. Short forms such as `10/8` stand for the full ranges. It then dials only an address that it checked, and keeps the name for the SNI and the certificate check. Every dial does this, those of the `http.Transport` (P2) and retries included. So a second lookup cannot bring in a refused address.
-3. On port 443, reads the ClientHello, checks that the SNI equals the host, and refuses one that carries the `encrypted_client_hello` extension.
-4. Splices, or, when a rule needs it, intercepts (P2).
+1. Evaluates the session's flat deny-wins policy ([decision 0053](decisions/0053-rebuild-with-open-source-parts.md)): locks first, then any deny rule, then explicit allows, live session grants, agent `Egress` hosts and presets. Any deny beats any allow. With no match, it takes the unknown action below (`deny` by default in v1).
+2. Resolves the name once and refuses every address in `internal/egress/rules/ranges.toml`: `0.0.0.0/8`, the private ranges of RFC 1918 (`10/8`, `172.16/12`, `192.168/16`), the shared address space (`100.64/10`), `127.0.0.0/8`, `169.254.0.0/16`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `240.0.0.0/4`, `::/128`, `::1/128`, `::/96`, `100::/64`, `64:ff9b:1::/48`, `fc00::/7`, `fe80::/10`, `fec0::/10`, `ff00::/8`, `fd00:ec2::254`, IPv4 addresses embedded in `::ffff:0:0/96`, `::ffff:0:0:0/96`, NAT64 (`64:ff9b::/96`), 6to4 (`2002::/16`) and Teredo (`2001::/32`), and the host's own addresses, read at start. A grant that names such an address by number opens it. Short forms such as `10/8` stand for the full ranges. If any returned address is refused, the whole lookup fails closed. It then dials only an address that it checked, and keeps the name for the SNI and the certificate check. Every dial does this, those of the `http.Transport` and retries included. So a second lookup cannot bring in a refused address.
+3. On port 443, reads the ClientHello with `crypto/tls`, checks that the SNI equals the host, and refuses one that carries the `encrypted_client_hello` (`0xfe0d`) or `ech_outer_extensions` (`0xfd00`) extension.
+4. Splices through `elazarl/goproxy`'s `ConnectHijack` (or forwards absolute-form HTTP through the safe transport). Model gateway routes (P2.4) and later interception plug into the same proxy front.
 5. Writes one audit line.
 
 **Interception (P2).** Three things make a host intercepted: a bound secret on it, a method or path rule, or a class rule (registries, object stores, model APIs). From P7.1, the code hosts of the `balanced` preset are a class too (7.11). Every other allowed host is spliced after the SNI check.
@@ -1303,7 +1301,7 @@ Every layer has the same shape: the tables `sandbox`, `network` and `classifier`
 A rule in a file keeps no ID there. Its ID is `g`, then the first 6 characters of a SHA-256 in base32, in lower case. The hash covers the rule's layer kind, layer name, allow or deny, door, target and mode, one on each line. Two equal rules in one layer count once, and each layer lists its rules in the order of their IDs. So the same files give the same layers at each read, and the same hash (8.8). These are project choices.
 
 1. **A narrower layer overrides a broader one.** For a value, such as `preset` or `network.unknown`, the narrowest layer that sets it wins.
-2. **For a destination, the narrowest layer with a matching rule decides.** In that layer, a deny wins over an allow. A session can allow a host that all sessions deny, and a profile can deny a host that a repository allows.
+2. **Any deny wins (v1, [decision 0053](decisions/0053-rebuild-with-open-source-parts.md)).** For a destination in v1, any matching deny beats any matching allow across the session's policy, and a lock is a deny that live grants and reloads cannot remove. Live updates swap the policy snapshot in one step for new flows.
 3. **Lists add up.** `mounts`, `secrets`, `ssh_keys`, `include`, `keep`, `copy_in` and `caches` gather from every layer. A narrower layer drops an inherited item with a leading `!`, as in `secrets = ["!GITHUB_TOKEN"]`. `env` merges by name, and for each name the narrowest layer wins (17.2).
 4. **Locks win over every layer.** A `[lock]` table at the top level of `config.toml`, or in a host's entry, holds values and denies that no narrower layer may change. A flag or a rule that tries fails with `policy_locked`, and names the lock. kubectl also stops when a flag conflicts with a file, instead of choosing one in silence ([kubectl conventions](https://github.com/kubernetes/community/blob/master/contributors/devel/sig-cli/kubectl-conventions.md)). The repository's own file cannot lock. A `config.toml` that does not parse may hide a lock. So from P1.12, each command that writes or sends layers or secrets stops with exit code 2 and `Try: simstim config check`. These are `new`, `resume`, `fork`, `image pull` and each `policy` command that writes or sends layers. `policy lockdown` still works, because its layer comes from no file. `ls` and `attach` warn, send no layers and arm no secrets (8.8).
 5. **The level** is the highest of the host's floor and the levels that the config layers ask for. A config layer below the floor gets the floor, with a line that says so ([question 90](#15-open-questions)). `--wall <level>` below the floor fails with `wall_floor`. Only `--wall <level> --downgrade`, or the launcher's typed confirmation, goes below the floor. Then the level is exactly the one named, and the downgrade is recorded. Until task P2.10, a session that no layer gives a level runs at `none` (6.1, step 1). From P2.10, `none` also needs `--downgrade`, even on a host whose floor is `none`. Without it, `new` fails with `wall_floor` ([question 6](#15-open-questions)).
