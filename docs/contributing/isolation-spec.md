@@ -4966,30 +4966,27 @@ These tables share the file with the `[[pin]]` list of 19.5. `version = 1` and t
 
 **Behaviour.** On the host, the image builder turns an OCI image into a read-only ext4 file with a verity tree. Each layer must match the client's digest.
 
-1. **Pin.** The release manifest pins the default image. `images.lock` on the laptop pins each image that the user names (20.8). The pin is the manifest digest. A host never supplies it ([question 35](#15-open-questions)).
-2. **Fetch.** `[images] fetch` picks the way, as for runtime files (14.9.3, [question 39](#15-open-questions)):
-   - `host`: the request `image.pull` gives the helper the reference, the pinned digest and the architecture. The helper fetches the manifest by digest, with no registry login, and checks its SHA-256. From an index it takes the `linux/<arch>` manifest, and checks that digest too. It downloads each layer into `images/incoming/<hex>.part`, stops at the layer's size, and checks its SHA-256.
-   - `laptop`: the client does the same with the user's registry login ([question 65](#15-open-questions)), into `~/.cache/<name>/images/blobs/sha256/`. It copies each blob to `images/incoming/` as 14.9.3 does. Then `image.install` makes the helper check each blob again.
-   - A private image always takes the `laptop` way. No registry login reaches a host.
-3. **Flatten.** The converter jail applies the layers in order, as the rules below say, and writes one normalised tar stream.
-4. **Convert.** The same jail calls `tar2ext4.Convert(tar, out, tar2ext4.AppendDMVerity)` from `github.com/Microsoft/hcsshim` v0.15.0 (MIT). It passes no other option. The output is the ext4 data, one verity superblock of 4096 bytes, then the tree.
-5. **Root hash.** The helper, outside the jail, reads the tree's first block. It computes the root hash itself, with `dmverity.RootHash`. It reads `data_blocks` from the ext4 superblock. Each value goes into `image.json`.
-6. **Check value.** When the client sends a root hash for the digest, the helper compares it ([question 81](#15-open-questions)). The default image's root hash comes from the release manifest. A user image's comes from `images.lock`, which records the first conversion's root hash and the host that made it. A different root hash deletes the result, with `image_root_mismatch`.
-7. **Store.** The helper moves the file into the store, 0444, and deletes the layer blobs.
+1. **Pin.** The default session image is the official `buildpack-deps:trixie-scm` image, pinned by digest in `internal/image` (decision [0053](decisions/0053-rebuild-with-open-source-parts.md)). `images.lock` on the laptop pins each image that the user names (20.8). The pin is the manifest or index digest. A host never supplies it ([question 35](#15-open-questions)).
+2. **Fetch.** `github.com/google/go-containerregistry` (Apache-2.0) resolves tags on the laptop (with `authn.DefaultKeychain`) and pulls by pinned digest on the host (with `authn.Anonymous`, so no registry login reaches a host). It checks the manifest digest, selects `linux/<arch>` from an OCI index or Docker manifest list, checks the platform manifest digest, and checks every layer's SHA-256 as it streams. A manifest or index larger than 4 MiB stops the pull with `image_bad_layer`.
+3. **Flatten.** `go-containerregistry`'s `mutate.Extract` applies the layers with whiteouts and opaque folders, wrapped by a thin filter and streaming byte caps in `internal/image` (`FilterTar` and `Flatten`). Because `mutate.Extract` runs `defer tarWriter.Close()` before closing its pipe with any error, `FilterTar` drains the pipe to `io.EOF` after the tar trailer so path, digest and cap errors are never hidden.
+4. **Convert.** `tar2ext4.Convert(tar, out, tar2ext4.AppendDMVerity)` from `github.com/Microsoft/hcsshim` v0.15.0 (MIT) writes the read-only ext4 file, one verity superblock of 4096 bytes, then the Merkle tree.
+5. **Root hash.** The helper reads `data_blocks` from the ext4 superblock (`tar2ext4.Ext4FileSystemSize`), reads the verity superblock (`dmverity.ReadDMVerityInfoReader`), and computes the root hash from the tree's first block with `dmverity.RootHash`. Each value goes into `image.json`.
+6. **Check value.** When the client sends a root hash for the digest, the helper compares it ([question 81](#15-open-questions)). The default image's per-architecture root hashes are pinned alongside its digest. A user image's root hash comes from `images.lock`, which records the first conversion's root hash and the host that made it. A different root hash deletes the temporary result, with `image_root_mismatch`.
+7. **Store.** The helper sets the file mode to 0444, renames it atomically into `images/<hex>/rootfs.img`, and writes `images/<hex>/image.json` atomically.
 
-A root hash is a check value, not a pin. A host can make a start fail with it, but cannot change which bytes a sandbox boots. Conversion is deterministic for one tar stream ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)), so two honest hosts agree.
+A root hash is a check value, not a pin. A host can make a start fail with it, but cannot change which bytes a sandbox boots. Conversion is deterministic for one implementation and one image ([build facts 5](../research/build-facts.md#5-the-microvm-and-its-build)), so two honest hosts agree.
 
-**The converter jail.** `<helper> image-convert` runs in a `converter` jail (5.6), in a transient scope with `MemoryMax=1G`. It has `NetNone`, no binds, and the `converter` seccomp profile. Its `Files` are the layer blobs in order from fd 3, and the output file last. 1 GiB is a target that P3.2 checks with a 1 GiB image.
+**The converter jail.** When the bubblewrap jail helper lands (P1.3), conversion runs inside a bubblewrap `converter` jail with `--unshare-net` and a `systemd-run --user --scope -p MemoryMax=1G` cap. Until then, `internal/image` runs the memory-safe Go flattener and `tar2ext4` directly with streaming caps.
 
-**Flatten rules.**
+**Flatten rules (and where `go-containerregistry`'s `mutate.Extract` differs).**
 
-1. Each layer's media type is an OCI tar, tar with gzip or tar with zstd, or Docker's `rootfs.diff.tar.gzip`. Any other type stops the pull with `image_bad_layer`.
-2. A name loses a leading `./` or `/`, and is then cleaned. A name with a `..` part, a NUL byte, or more than 4,096 bytes stops the pull with `image_bad_layer`.
-3. `.wh.<name>` removes `<name>` from the lower layers. `.wh..wh..opq` removes everything under its folder from the lower layers. No whiteout file enters the output.
-4. Regular files, folders, symlinks, hard links and FIFOs stay. Character and block devices are dropped, because the guest's `/dev` is its own. The helper logs the count. Any other type stops the pull with `image_bad_layer`.
-5. A hard link must name a path that exists at that point in the merged tree. Otherwise the pull stops with `image_bad_layer`. A link keeps its content when a later layer removes its target.
-6. The output tar is in PAX format. It lists each folder before its children, and the children of a folder in byte order of their names.
-7. Each entry keeps the mode, uid, gid, link target and modification time of the last layer that wrote it. Access and change times, user names and group names are dropped. PAX xattrs stay, except `trusted.*`.
+1. Each layer's media type is an OCI tar, tar with gzip or tar with zstd, or Docker's `rootfs.diff.tar.gzip`. `mutate.Extract` does not check media types, so `Flatten` checks them before extraction and stops on any other type with `image_bad_layer`.
+2. A name loses any leading `./` or `/`, and is then cleaned. A name with a `..` part, a NUL byte, or more than 4,096 bytes stops the pull with `image_bad_layer`. *Difference:* `mutate.Extract` runs `path.Clean` and rejects escaping `..` paths (`unsafeArchivePath`), leading `\`, and Windows drive prefixes, so an internal cancelling segment such as `a/../b` is cleaned to `b` before our output filter sees it; `FilterTar` strips leading `/`, rejects NUL bytes, rejects paths over 4,096 bytes, and rejects any remaining `..`.
+3. `.wh.<name>` removes `<name>` from the lower layers. `.wh..wh..opq` removes everything under its folder from the lower layers. No whiteout file enters the output. *Difference:* `mutate.Extract` compares cleaned paths without stripping a leading `/`, so a layer mixing `/foo` and `.wh.foo` would not match.
+4. Regular files, folders, symlinks, hard links and FIFOs stay. Character and block devices are dropped, because the guest's `/dev` is its own, and the helper logs the count. Any other type stops the pull with `image_bad_layer`. `mutate.Extract` preserves device nodes and unknown types, so `FilterTar` drops devices and rejects unsupported types. *Difference:* `mutate.Extract` silently skips relative symlinks and hard links whose targets resolve above the image root (`unsafeRelativeLink`); absolute symlinks and in-root relative symlinks stay.
+5. Every hard link must name a path already present in the merged stream, or the pull stops with `image_bad_layer`. *Difference:* `mutate.Extract` walks layers from top to bottom and streams entries immediately without tracking hard-link inode groups across layers. Intra-layer hard links (target before link, as in official Debian images) work. A cross-layer hard link (link in an upper layer targeting a lower-layer file) arrives before its target, and a hard link whose target an upper layer deletes via `.wh.<target>` becomes dangling; both fail closed in `FilterTar` with `image_bad_layer` rather than silently losing data or producing a broken filesystem.
+6. The output tar is in PAX format. *Difference:* `mutate.Extract` does not sort entries in byte order and emits upper-layer entries before lower-layer directories; `tar2ext4`'s `MakeParents` and inode reuse handle that order, and `mutate.Extract` stays deterministic for one image and library version, so two honest hosts produce identical ext4 bytes and the same dm-verity root hash.
+7. Each entry keeps the mode, uid, gid, link target and modification time of the last layer that wrote it. `FilterTar` drops access and change times, user names and group names, and keeps PAX xattrs (`SCHILY.xattr.*`) except `trusted.*` (`mutate.Extract` passes all header metadata through unchanged).
 
 **Caps.** The jail counts each cap while it reads, so a decompression bomb stops early.
 
@@ -5021,9 +5018,9 @@ A root hash is a check value, not a pin. A host can make a start fail with it, b
 
 `prune` removes every other image. `image rm <digest> <host>` removes one image at once. It refuses with `image_in_use` while a session's trusted manifest names the image, a stopped session included.
 
-**The default image.** A Debian snapshot with git, curl and CA certificates, and no proprietary agent. CI builds it, pushes it to the project's registry, and converts it with the same code. The release manifest pins it: `{"kind": "image", "name": "agent-base", "arch": "amd64", "digest": "sha256:…", "root_hash": "…", "data_blocks": 0}`.
+**The default image.** The official Debian `buildpack-deps:trixie-scm` image (which includes `git`, `curl` and CA certificates, and no proprietary agent), pinned by its OCI index digest (`sha256:d524aa66…`) and per-architecture `amd64` and `arm64` platform digests and dm-verity check values in `internal/image` (decision [0053](decisions/0053-rebuild-with-open-source-parts.md)).
 
-**Bridge ops.** `image.ls`, `image.pull`, `image.install`, `image.status` and `image.rm`, behind the feature `images` (10.5). `image.status` gives the bytes so far, as `runtime.status` does.
+**Bridge ops.** `image.ls`, `image.pull`, `image.rm` and `image.agents`, behind the feature `images` (10.5). `image.install` and `image.status` follow when laptop-side transfer lands.
 
 **Go version.** `hcsshim` v0.15.0 says `go 1.26.8` in its `go.mod`. So adding it raises this module's `go` line from 1.26.0 to 1.26.8. The `toolchain` line already names go1.26.10.
 
@@ -5143,15 +5140,13 @@ ro quiet root=/dev/dm-0 rootfstype=erofs init=/init dm-mod.waitfor=/dev/vda,/dev
 
 **Behaviour.** A microvm guest gets the host's installed agents read-only, from one disk at `/opt/agents`. The host builds it, so it is outside guarantee G11. The guest only reads it, so its content cannot harm the trusted side.
 
-1. **When.** The helper builds a disk after `agents install` ends, and at a microvm start when the installed agents differ from the newest disk.
+1. **When.** The helper rebuilds the disk after `agents install` ends (when `mkfs.erofs` is installed) and on demand via `image.agents`, without maintaining a separate inode and change-time source digest (decision [0053](decisions/0053-rebuild-with-open-source-parts.md)).
 2. **What.** For each agent of the agent table that the host has installed: each folder of its `InstallDirs`, and its resolved binary (`internal/agents`).
 3. **Read.** The helper reads each folder with `os.Root`, so no symlink leads outside it. Symlinks stay as symlinks.
-4. **Tar.** It writes one tar stream. Each entry's name is `root/<host path>`, without the leading `/`. Entries come in byte order, and every folder before its children. `bin/<binary name>` is a symlink to `../root/<resolved path>`. `<resolved path>` is the binary's host path after `filepath.EvalSymlinks`, so a binary on the `PATH` that is itself a symlink still works.
-5. **Owner.** Every entry belongs to uid and gid 1000, the guest's `agent`, and keeps its mode and modification time. So the agent can read and run what its host user could.
-6. **Convert.** A `converter` jail calls `tar2ext4.Convert` with no verity tree. The file goes to `images/agents/<hex>.img`, 0444, where `<hex>` is the file's SHA-256.
-7. **Source digest.** `images/agents/source.json` holds a SHA-256 over each entry's path, size, mode, modification time, change time and inode number, for the newest disk. A rewrite or a replacement changes the change time or the inode, even when it keeps the size and the modification time. When the installed agents give the same source digest, the helper reuses that disk.
-8. **Boot.** The VMM gets the disk with `readonly=on` (20.3). The guest init mounts it at `/opt/agents` with `ro,nodev,nosuid`, and puts `/opt/agents/bin` first in the agent's `PATH` (P3.4).
-9. **Record.** The trusted manifest records the disk's digest in `agents` (10.7). A running sandbox keeps its disk until its next start.
+4. **Tar.** It writes one deterministic PAX tar stream. Each entry's name is `root/<host path>`, without the leading `/`. Entries come in byte order, and every folder before its children. `bin/<binary name>` is a symlink to `../root/<resolved path>`. `<resolved path>` is the binary's host path after `filepath.EvalSymlinks`, so a binary on the `PATH` that is itself a symlink still works.
+5. **Owner and conversion.** The helper pipes the tar stream directly into `mkfs.erofs --tar=f --force-uid=1000 --force-gid=1000 -U clear -T 0 --mkfs-time --preserve-mtime --quiet`, so every entry belongs to uid and gid 1000 (the guest's `agent`), keeps its mode and modification time, and builds deterministically into a read-only EROFS image. The file goes to `images/agents/<hex>.erofs`, 0444, where `<hex>` is the file's SHA-256, and `images/agents/latest.json` records the newest disk.
+6. **Boot.** The VMM gets the disk with `readonly=on` (20.3). The guest init mounts it at `/opt/agents` with `ro,nodev,nosuid`, and puts `/opt/agents/bin` first in the agent's `PATH` (P3.4).
+7. **Record.** The trusted manifest records the disk's digest in `agents` (10.7). A running sandbox keeps its disk until its next start.
 
 Agents cannot update themselves: their files are on a read-only disk ([question 21](#15-open-questions)). `agents install` on the host updates them, and the next start gets the new disk.
 

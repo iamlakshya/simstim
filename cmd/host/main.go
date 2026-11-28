@@ -33,7 +33,8 @@ Usage:
   %[1]s keytest             print every key the terminal sends
   %[1]s restore [--all]     start again sessions a restart (or, with --all, a stop or crash) stopped
   %[1]s idle setup <30m|never>   power this VM off when idle (a user timer runs "idle check")
-  %[1]s prune               remove the helper versions nothing uses any more
+  %[1]s image <ls|pull|rm|agents> manage session images and the agents disk
+  %[1]s prune               remove the helper versions and unused images nothing uses any more
   %[1]s version
 `
 
@@ -60,6 +61,7 @@ var commands = map[string]func(args []string) error{
 	"restore":   runRestore,
 	"prune":     runPrune,
 	"keytest":   func([]string) error { return host.KeyTest() },
+	"image":     runImage,
 	// The helper runs git in a child of its own, and the client runs
 	// repo.info over SSH. Not for people, so left out of the usage.
 	"git-op": func(args []string) error { return host.RunGitOp(args, os.Stdin, os.Stdout) },
@@ -297,7 +299,11 @@ func runPrune([]string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("removed %d old helper versions\n", len(removed))
+	removedImages, imgErr := host.PruneImages()
+	if imgErr != nil {
+		return imgErr
+	}
+	fmt.Printf("removed %d old helper versions and %d unused images\n", len(removed), len(removedImages))
 	return nil
 }
 

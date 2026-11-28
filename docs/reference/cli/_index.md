@@ -70,6 +70,15 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`agents install`](agents_install.md) | Install an agent on a host with its official installer |
 | [`agents ls`](agents_ls.md) | List the agents in the agent table, with how each one installs |
 
+## Images
+
+| Command | What it does |
+| --- | --- |
+| [`image`](image.md) | List, pull and remove session images on a host |
+| [`image ls`](image_ls.md) | List the session images stored on a host |
+| [`image pull`](image_pull.md) | Pin an OCI image and pull it onto a host |
+| [`image rm`](image_rm.md) | Remove a stored session image from a host |
+
 ## Setup and help
 
 | Command | What it does |

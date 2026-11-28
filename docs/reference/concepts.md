@@ -14,6 +14,7 @@ The words that simstim uses, and what each one means. `simstim help concepts` pr
 | session | A terminal on a host, which keeps running when you leave. |
 | address | &lt;host&gt;/&lt;session&gt;. attach and flip take - for the last one. |
 | agent | A coding agent, such as Claude Code or Codex. |
+| image | A read-only root file system for microvm sessions, pinned by digest. |
 | launcher | The screen of hosts and sessions that simstim opens. |
 | attach and detach | Attach shows a session in this terminal. Ctrl+\\ detaches by default, and attach.detach_key can change it. |
 | worktree | A session's own git worktree and branch (new `--worktree`). |

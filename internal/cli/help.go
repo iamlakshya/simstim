@@ -30,6 +30,7 @@ var helpGroups = []HelpGroup{
 	{ID: "sessions", Title: "Sessions", Commands: []string{"new", "attach", "resume", "stop", "ls", "kill", "rename", "send", "ports", "forward", "pull", "flip"}},
 	{ID: "hosts", Title: "Hosts", Commands: []string{"host"}},
 	{ID: "agents", Title: "Agents", Commands: []string{"agents"}},
+	{ID: "images", Title: "Images", Commands: []string{"image"}},
 	{ID: "setup", Title: "Setup and help", Commands: []string{"setup", "doctor", "debug", "config", "demo", "version", "completion", "help"}},
 }
 

@@ -30,6 +30,9 @@ Hosts:
 Agents:
   agents      List the agents, and install one on a host
 
+Images:
+  image       List, pull and remove session images on a host
+
 Setup and help:
   setup       Set up step by step: a host, its agents, and their logins
   doctor      Check this machine and its terminal
@@ -72,6 +75,8 @@ The words that <name> uses, and what each one means.
   session            A terminal on a host, which keeps running when you leave.
   address            <host>/<session>. attach and flip take - for the last one.
   agent              A coding agent, such as Claude Code or Codex.
+  image              A read-only root file system for microvm sessions, pinned
+                     by digest.
   launcher           The screen of hosts and sessions that <name> opens.
   attach and detach  Attach shows a session in this terminal. Ctrl+\ detaches by
                      default, and attach.detach_key can change it.

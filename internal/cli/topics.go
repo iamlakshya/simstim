@@ -39,6 +39,7 @@ var concepts = []Concept{
 	{"session", "A terminal on a host, which keeps running when you leave"},
 	{"address", "<host>/<session>. attach and flip take - for the last one"},
 	{"agent", "A coding agent, such as Claude Code or Codex"},
+	{"image", "A read-only root file system for microvm sessions, pinned by digest"},
 	{"launcher", "The screen of hosts and sessions that " + brand.Name + " opens"},
 	{"attach and detach", "Attach shows a session in this terminal. Ctrl+\\ detaches by default, " +
 		"and attach.detach_key can change it"},

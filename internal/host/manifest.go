@@ -73,6 +73,10 @@ type Manifest struct {
 	// Guest holds the latest claims reported by the guest inside the wall.
 	// Every string is cleaned with api.CleanText before it is kept.
 	Guest *GuestClaims `json:"guest,omitempty"`
+	// Image records the session's microvm image, when it boots from one.
+	Image *ManifestImage `json:"image,omitempty"`
+	// Agents is the SHA-256 digest of the agents disk this session uses.
+	Agents string `json:"agents,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -97,6 +101,15 @@ type GuestClaims struct {
 	Since      time.Time  `json:"since,omitempty"`
 	Ports      []api.Port `json:"ports,omitempty"`
 	UpdatedAt  time.Time  `json:"updated_at,omitempty"`
+}
+
+// ManifestImage records the OCI image digest and dm-verity root hash used by a
+// microvm session (spec 10.7).
+type ManifestImage struct {
+	Ref            string `json:"ref,omitempty"`
+	Digest         string `json:"digest,omitempty"`
+	PlatformDigest string `json:"platform_digest,omitempty"`
+	RootHash       string `json:"root_hash,omitempty"`
 }
 
 // AgentInfo is the agent part of a manifest.
@@ -196,7 +209,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
-		"wall": true, "guest": true}
+		"wall": true, "guest": true, "image": true, "agents": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

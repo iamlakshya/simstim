@@ -185,6 +185,7 @@ func afterInstall(ctx context.Context, h client.Host, a agents.Agent, interactiv
 	}
 	fmt.Fprintln(os.Stderr)
 	printAgentChecks(os.Stderr, h.Name, []api.AgentCheck{c})
+	rebuildAgentsDisk(cctx, conn)
 	if c.Login != api.LoginYes {
 		fmt.Fprintf(os.Stderr, "\nNext, log in to %s with its own login, in a session on %s:\n\n    %s\n", a.Title, h.Name, loginCommand(h.Name, a))
 	}

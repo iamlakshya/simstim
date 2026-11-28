@@ -15,6 +15,7 @@ One task per page. New here? Start with [getting started](../tutorials/getting-s
 | Guide | Task |
 | --- | --- |
 | [Install agents](install-agents.md) | Pick agents from a checklist, or install one with its own installer, then log in |
+| [Manage session images](images.md) | Pin, pull, list and remove OCI session images and the read-only agents disk |
 | [Pass secrets](secrets.md) | Give a session an API key from your keychain or password manager, never stored |
 | [Use with coding agents](use-with-agents.md) | Tell a coding agent how your project uses the tool: a snippet for `AGENTS.md`, and the docs in Markdown |
 

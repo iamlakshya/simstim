@@ -109,6 +109,9 @@ func GuestRuntimeDir(id string) string { return filepath.Join(RuntimeDir(), "g",
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }
 
+// ImagesDir holds converted session images and agents disks on a host.
+func ImagesDir() string { return filepath.Join(DataDir(), "images") }
+
 // EnsurePrivateDir makes dir (and parents) with mode 0700.
 func EnsurePrivateDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {

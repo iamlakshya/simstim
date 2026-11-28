@@ -67,6 +67,9 @@ type Agent struct {
 	// not a size for one process. The host doctor warns when a host has less.
 	// In October 2026, the docs of opencode and Antigravity CLI named none.
 	Memory int64 `json:"memory,omitempty"`
+	// InstallDirs are folders under the home that hold the agent's files.
+	// The agents disk copies them read-only into microvm sandboxes.
+	InstallDirs []string `json:"install_dirs,omitempty"`
 	// Setup is how to install the agent and log in (setup.go).
 	Setup *Setup `json:"setup,omitempty"`
 	// Egress lists the hosts the agent needs: its model API and its login.
@@ -155,7 +158,8 @@ var Table = []Agent{
 		// renderer, which keeps the conversation in the terminal's scrollback.
 		Inline: Inline{Env: map[string]string{"CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN": "1"}},
 		// "4 GB+ RAM": https://code.claude.com/docs/en/setup#system-requirements.
-		Memory: 4 * GB,
+		Memory:      4 * GB,
+		InstallDirs: []string{".local/share/claude"},
 		Setup: &Setup{
 			Install: "curl -fsSL https://claude.ai/install.sh | bash",
 			Source:  "https://code.claude.com/docs/en/setup",
