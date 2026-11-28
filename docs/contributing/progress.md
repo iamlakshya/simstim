@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 26 |
-| To do | 73 |
+| Done | 28 |
+| To do | 71 |
 | **All** | **99** |
 
 ## Current focus
@@ -47,7 +47,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.2 | 1 | Day 1 | Done | The link |
 | P1.3 | 1 | Day 1 | To do | Jails |
 | P1.4 | 1 | Day 1 | Done | The supervisor, the guest init and the holder's guest mode |
-| P1.5 | 1 | Day 1 | To do | The process wall |
+| P1.5 | 1 | Day 1 | Done | The process wall |
 | P1.6 | 1 | Day 1 | Done | The files door |
 | P1.7 | 1 | Day 1 | Done | The egress process, first version |
 | P1.8 | 1 | Day 1 | To do | The client and the launcher |
@@ -81,7 +81,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | C6 | cli | Day 1 | To do | One meaning for each flag |
 | C7 | cli | Day 1 | To do | Host commands |
 | C8 | cli | Day 1 | To do | Agents: install and log in |
-| C9 | cli | Day 1 | To do | `config check` |
+| C9 | cli | Day 1 | Done | `config check` |
 | C10 | cli | Day 1 | To do | Completion |
 | C11 | cli | Day 1 | To do | The launcher and the CLI agree |
 | C12 | cli | Day 1 | Done | Docs for agents |
