@@ -96,12 +96,16 @@ type SandboxOptions struct {
 	Config           VMConfig
 	SessionDiskBytes int64
 	MkfsExt4Path     string
-	BwrapPath        string // when non-empty, launches VMM inside bubblewrap confinement
+	BwrapPath        string // optional bubblewrap path override (empty auto-detects or falls back via internal/jail)
+	DisableJail      bool   // disables internal/jail confinement (for unit tests with fake VMM scripts only)
 	BootTimeout      time.Duration
 	VsockInterval    time.Duration
 	VsockPort        uint32
 	SkipVsock        bool // true for --self-test serial-only boots (spec 20.1)
 }
+
+// jailCommand builds a jailed *exec.Cmd for the VMM. Tests replace it.
+var jailCommand = jail.Command
 
 // Sandbox manages one Cloud Hypervisor microvm process and its sockets.
 type Sandbox struct {
@@ -173,11 +177,11 @@ func (s *Sandbox) Start(ctx context.Context) (net.Conn, error) {
 
 	stderr := newTailBuffer(maxVMMStderrBytes)
 	var cmd *exec.Cmd
-	jailed := s.opts.BwrapPath != ""
+	jailed := !s.opts.DisableJail
 	if jailed {
 		js := VMMJailSpec(cfg, cfg.VMMPath, vmmArgv)
 		js.BwrapPath = s.opts.BwrapPath
-		cmd, err = jail.Command(context.WithoutCancel(ctx), js)
+		cmd, err = jailCommand(context.WithoutCancel(ctx), js)
 		if err != nil {
 			return nil, fmt.Errorf("sandbox_boot: prepare VMM jail: %w", err)
 		}

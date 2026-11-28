@@ -21,6 +21,9 @@ import (
 	"testing"
 	"time"
 
+	seccomp "github.com/elastic/go-seccomp-bpf"
+	"github.com/elastic/go-seccomp-bpf/arch"
+	"golang.org/x/net/bpf"
 	"golang.org/x/sys/unix"
 )
 
@@ -268,6 +271,186 @@ func TestSeccompBPFAssembles(t *testing.T) {
 				t.Fatalf("first BPF inst op=0x%x k=%d, want 0x20/4 (LD arch)", firstOp, firstK)
 			}
 		}
+	}
+}
+
+func makeSeccompData(nr, auditArch uint32, args ...uint64) []byte {
+	// golang.org/x/net/bpf.VM evaluates LoadAbsolute in network byte order
+	// (big-endian per 32-bit word), whereas Linux seccomp accesses 32-bit words
+	// of struct seccomp_data in native endianness (with arg low word at +0 and
+	// high word at +4 on little-endian hosts).
+	buf := make([]byte, 64)
+	binary.BigEndian.PutUint32(buf[0:4], nr)
+	binary.BigEndian.PutUint32(buf[4:8], auditArch)
+	for i := 0; i < len(args) && i < 6; i++ {
+		off := 16 + i*8
+		lo := uint32(args[i])
+		hi := uint32(args[i] >> 32)
+		binary.BigEndian.PutUint32(buf[off:off+4], lo)
+		binary.BigEndian.PutUint32(buf[off+4:off+8], hi)
+	}
+	return buf
+}
+
+func runSeccompVM(t *testing.T, raw []bpf.RawInstruction, data []byte) uint32 {
+	t.Helper()
+	var insts []bpf.Instruction
+	for _, r := range raw {
+		insts = append(insts, r.Disassemble())
+	}
+	vm, err := bpf.NewVM(insts)
+	if err != nil {
+		t.Fatalf("bpf.NewVM: %v", err)
+	}
+	res, err := vm.Run(data)
+	if err != nil {
+		t.Fatalf("vm.Run: %v", err)
+	}
+	return uint32(res)
+}
+
+func TestSeccompBPFVMNoAccumulatorClobber(t *testing.T) {
+	info, err := arch.GetInfo("")
+	if err != nil {
+		t.Fatalf("arch.GetInfo: %v", err)
+	}
+	hostArch := uint32(info.ID)
+	wantAllow := uint32(seccomp.ActionAllow)
+	wantEPERM := uint32(actionEPERM)
+	wantENOSYS := uint32(actionENOSYS)
+	wantKill := uint32(seccomp.ActionKillProcess)
+
+	noneRaw, err := SeccompInstructions(ProfileVMM, NetNone)
+	if err != nil {
+		t.Fatalf("SeccompInstructions(NetNone): %v", err)
+	}
+	hostRaw, err := SeccompInstructions(ProfileEgress, NetHost)
+	if err != nil {
+		t.Fatalf("SeccompInstructions(NetHost): %v", err)
+	}
+
+	// Pick a foreign audit arch distinct from hostArch.
+	foreignArch := uint32(unix.AUDIT_ARCH_I386)
+	if hostArch == foreignArch {
+		foreignArch = uint32(unix.AUDIT_ARCH_AARCH64)
+	}
+
+	cases := []struct {
+		name     string
+		raw      []bpf.RawInstruction
+		data     []byte
+		wantCode uint32
+	}{
+		{
+			name:     "foreign ABI killed",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_GETPID, foreignArch),
+			wantCode: wantKill,
+		},
+		{
+			name:     "clone with CLONE_NEWUSER refused",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_CLONE, hostArch, unix.CLONE_NEWUSER),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "clone with flags == 41 (amd64 SYS_socket) allowed under NetNone",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_CLONE, hostArch, 41),
+			wantCode: wantAllow,
+		},
+		{
+			name:     "clone with flags == 198 (arm64 SYS_socket) allowed under NetNone",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_CLONE, hostArch, 198),
+			wantCode: wantAllow,
+		},
+		{
+			name:     "clone with flags == SYS_SOCKET allowed under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_CLONE, hostArch, unix.SYS_SOCKET),
+			wantCode: wantAllow,
+		},
+		{
+			name:     "clone3 returns ENOSYS",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_CLONE3, hostArch, 0, 0),
+			wantCode: wantENOSYS,
+		},
+		{
+			name:     "ptrace refused",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_PTRACE, hostArch, unix.PTRACE_ATTACH, 1),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_UNIX allowed under NetNone",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_UNIX, unix.SOCK_STREAM, 0),
+			wantCode: wantAllow,
+		},
+		{
+			name:     "socket AF_INET refused under NetNone",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_INET, unix.SOCK_STREAM, 0),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_VSOCK refused under NetNone",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_VSOCK, unix.SOCK_STREAM, 0),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_VSOCK refused under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_VSOCK, unix.SOCK_STREAM, 0),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_NETLINK NETLINK_AUDIT refused under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_AUDIT),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_NETLINK NETLINK_ROUTE allowed under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_ROUTE),
+			wantCode: wantAllow,
+		},
+		{
+			name:     "unshare CLONE_NEWTIME refused",
+			raw:      noneRaw,
+			data:     makeSeccompData(unix.SYS_UNSHARE, hostArch, unix.CLONE_NEWTIME),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_INET6 allowed under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_INET6, unix.SOCK_STREAM, 0),
+			wantCode: wantAllow,
+		},
+		{
+			name:     "socket AF_PACKET refused under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_PACKET, unix.SOCK_RAW, 0),
+			wantCode: wantEPERM,
+		},
+		{
+			name:     "socket AF_INET allowed under NetHost",
+			raw:      hostRaw,
+			data:     makeSeccompData(unix.SYS_SOCKET, hostArch, unix.AF_INET, unix.SOCK_STREAM, 0),
+			wantCode: wantAllow,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runSeccompVM(t, tc.raw, tc.data); got != tc.wantCode {
+				t.Errorf("BPF VM returned 0x%x, want 0x%x", got, tc.wantCode)
+			}
+		})
 	}
 }
 

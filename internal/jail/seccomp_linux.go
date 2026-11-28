@@ -20,17 +20,18 @@ const (
 	// seccompArchOffset is offsetof(struct seccomp_data, arch).
 	seccompArchOffset = 4
 
-	// cloneNewMask matches every CLONE_NEW* namespace creation flag on clone(2).
+	// cloneNewMask matches every CLONE_NEW* namespace creation flag valid on
+	// clone(2). CLONE_NEWTIME (0x80) is omitted because bits 0..7 are CSIGNAL
+	// on clone(2); unshare(2) and clone3(2) are blocked unconditionally.
 	cloneNewMask uint64 = unix.CLONE_NEWNS |
 		unix.CLONE_NEWUTS |
 		unix.CLONE_NEWIPC |
 		unix.CLONE_NEWUSER |
 		unix.CLONE_NEWPID |
 		unix.CLONE_NEWNET |
-		unix.CLONE_NEWCGROUP |
-		unix.CLONE_NEWTIME
+		unix.CLONE_NEWCGROUP
 
-	actionEPERM  = seccomp.ActionErrno
+	actionEPERM  = seccomp.ActionErrno | seccomp.Action(syscall.EPERM)
 	actionENOSYS = seccomp.ActionErrno | seccomp.Action(syscall.ENOSYS)
 )
 
@@ -40,31 +41,24 @@ const (
 // sockets including AF_INET and AF_INET6. clone3 returns ENOSYS so runtimes
 // fall back to clone(2) where CLONE_NEW* flags are filtered.
 func SeccompPolicy(_ Profile, netMode NetMode) seccomp.Policy {
-	conds := []seccomp.NameWithConditions{
-		{
-			// Block clone(2) with any CLONE_NEW* flag.
-			Name: "clone",
-			Conditions: seccomp.ArgumentConditions{
-				{Argument: 0, Operation: seccomp.BitsSet, Value: cloneNewMask},
-			},
-		},
-	}
-
+	var socketConds []seccomp.NameWithConditions
 	if netMode == NetNone {
 		// Refuse every non-AF_UNIX socket family (blocks AF_INET, AF_INET6,
 		// AF_VSOCK, AF_PACKET, AF_NETLINK, etc.; isolation spec 5.6).
-		conds = append(conds, seccomp.NameWithConditions{
-			Name: "socket",
-			Conditions: seccomp.ArgumentConditions{
-				{Argument: 0, Operation: seccomp.NotEqual, Value: unix.AF_UNIX},
+		socketConds = []seccomp.NameWithConditions{
+			{
+				Name: "socket",
+				Conditions: seccomp.ArgumentConditions{
+					{Argument: 0, Operation: seccomp.NotEqual, Value: unix.AF_UNIX},
+				},
 			},
-		})
+		}
 	} else {
 		// NetHost (e.g. egress): allow AF_UNIX, AF_INET, AF_INET6 and
 		// AF_NETLINK(NETLINK_ROUTE); block AF_VSOCK, AF_PACKET and other
 		// netlink protocols.
-		conds = append(conds,
-			seccomp.NameWithConditions{
+		socketConds = []seccomp.NameWithConditions{
+			{
 				Name: "socket",
 				Conditions: seccomp.ArgumentConditions{
 					{Argument: 0, Operation: seccomp.NotEqual, Value: unix.AF_UNIX},
@@ -73,16 +67,20 @@ func SeccompPolicy(_ Profile, netMode NetMode) seccomp.Policy {
 					{Argument: 0, Operation: seccomp.NotEqual, Value: unix.AF_NETLINK},
 				},
 			},
-			seccomp.NameWithConditions{
+			{
 				Name: "socket",
 				Conditions: seccomp.ArgumentConditions{
 					{Argument: 0, Operation: seccomp.Equal, Value: unix.AF_NETLINK},
 					{Argument: 2, Operation: seccomp.NotEqual, Value: unix.NETLINK_ROUTE},
 				},
 			},
-		)
+		}
 	}
 
+	// Place each conditional syscall in its own SyscallGroup so
+	// SeccompInstructions can reload seccomp_data.nr before each group;
+	// go-seccomp-bpf v1.6.0 does not reload the BPF accumulator after
+	// evaluating argument conditions on an earlier syscall.
 	return seccomp.Policy{
 		DefaultAction: seccomp.ActionAllow,
 		Syscalls: []seccomp.SyscallGroup{
@@ -127,7 +125,22 @@ func SeccompPolicy(_ Profile, netMode NetMode) seccomp.Policy {
 					"finit_module",
 					"delete_module",
 				},
-				NamesWithCondtions: conds,
+			},
+			{
+				Action: actionEPERM,
+				NamesWithCondtions: []seccomp.NameWithConditions{
+					{
+						// Block clone(2) with any CLONE_NEW* flag.
+						Name: "clone",
+						Conditions: seccomp.ArgumentConditions{
+							{Argument: 0, Operation: seccomp.BitsSet, Value: cloneNewMask},
+						},
+					},
+				},
+			},
+			{
+				Action:             actionEPERM,
+				NamesWithCondtions: socketConds,
 			},
 		},
 	}
@@ -135,7 +148,9 @@ func SeccompPolicy(_ Profile, netMode NetMode) seccomp.Policy {
 
 // SeccompInstructions compiles the seccomp policy for profile and netMode with
 // a strict host-architecture guard that kills foreign ABIs (such as i386
-// int 0x80 on amd64 or 32-bit ARM on arm64).
+// int 0x80 on amd64 or 32-bit ARM on arm64). Each SyscallGroup is assembled
+// separately so seccomp_data.nr is reloaded before every conditional syscall
+// check, preventing BPF accumulator clobbering across conditional rules.
 func SeccompInstructions(profile Profile, netMode NetMode) ([]bpf.RawInstruction, error) {
 	if !validProfile(profile) {
 		return nil, fmt.Errorf("jail: unknown seccomp profile %q. Try: use vmm, converter, git or egress", profile)
@@ -145,18 +160,51 @@ func SeccompInstructions(profile Profile, netMode NetMode) ([]bpf.RawInstruction
 		return nil, fmt.Errorf("jail seccomp: detect host architecture: %w. Try: run on Linux amd64 or arm64", err)
 	}
 	pol := SeccompPolicy(profile, netMode)
-	policyInsts, err := pol.Assemble()
-	if err != nil {
-		return nil, fmt.Errorf("jail seccomp: assemble policy: %w. Try: check the host architecture and seccomp rules", err)
-	}
 
-	insts := make([]bpf.Instruction, 0, 3+len(policyInsts))
-	insts = append(insts,
+	insts := []bpf.Instruction{
 		bpf.LoadAbsolute{Off: seccompArchOffset, Size: 4},
 		bpf.JumpIf{Cond: bpf.JumpEqual, Val: uint32(info.ID), SkipTrue: 1},
 		bpf.RetConstant{Val: uint32(seccomp.ActionKillProcess)},
-	)
-	insts = append(insts, policyInsts...)
+	}
+	// Assemble each unconditional Name list and each individual conditional
+	// NameWithConditions rule as its own stage. go-seccomp-bpf v1.6.0 does not
+	// reload seccomp_data.nr into BPF accumulator A after evaluating argument
+	// conditions, so combining two conditional rules in one Assemble call
+	// clobbers A for the second rule.
+	var stages []seccomp.SyscallGroup
+	for _, grp := range pol.Syscalls {
+		if len(grp.Names) > 0 {
+			stages = append(stages, seccomp.SyscallGroup{
+				Action: grp.Action,
+				Names:  grp.Names,
+			})
+		}
+		for _, nwc := range grp.NamesWithCondtions {
+			stages = append(stages, seccomp.SyscallGroup{
+				Action:             grp.Action,
+				NamesWithCondtions: []seccomp.NameWithConditions{nwc},
+			})
+		}
+	}
+
+	wantAllow := bpf.RetConstant{Val: uint32(seccomp.ActionAllow)}
+	for _, grp := range stages {
+		stage := seccomp.Policy{
+			DefaultAction: seccomp.ActionAllow,
+			Syscalls:      []seccomp.SyscallGroup{grp},
+		}
+		stageInsts, serr := stage.Assemble()
+		if serr != nil {
+			return nil, fmt.Errorf("jail seccomp: assemble policy: %w. Try: check the host architecture and seccomp rules", serr)
+		}
+		if len(stageInsts) == 0 || stageInsts[len(stageInsts)-1] != wantAllow {
+			return nil, errors.New("jail seccomp: unexpected assembled policy terminator. Try: check go-seccomp-bpf version")
+		}
+		// Strip the stage's trailing RET ALLOW so fall-through and non-match
+		// jumps land directly on the next stage, which reloads seccomp_data.nr.
+		insts = append(insts, stageInsts[:len(stageInsts)-1]...)
+	}
+	insts = append(insts, wantAllow)
 
 	raw, err := bpf.Assemble(insts)
 	if err != nil {

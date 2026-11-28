@@ -4,14 +4,18 @@ package chv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/jail"
 )
 
 func TestCHRemoteWrapperAndSandboxLifecycle(t *testing.T) {
@@ -98,7 +102,8 @@ esac
 				DataBlocks: 16,
 			},
 		},
-		SkipVsock: true,
+		SkipVsock:   true,
+		DisableJail: true,
 	})
 
 	if _, err := sb.Start(context.Background()); err != nil {
@@ -146,6 +151,7 @@ func TestSandboxEarlyExitAndKillAfterExit(t *testing.T) {
 		},
 		BootTimeout:   2 * time.Second,
 		VsockInterval: 10 * time.Millisecond,
+		DisableJail:   true,
 	})
 	conn, err := sb.Start(context.Background())
 	if conn != nil {
@@ -176,5 +182,48 @@ func TestTailBufferCapsAtLimit(t *testing.T) {
 	_, _ = tb.Write([]byte("abcdefghijkl"))
 	if got := tb.String(); got != "efghijkl" {
 		t.Fatalf("tail overflow = %q, want efghijkl", got)
+	}
+}
+
+func TestSandboxJailsWhenBwrapPathEmpty(t *testing.T) {
+	dir := shortSockDir(t)
+	var gotSpec jail.Spec
+	called := false
+	orig := jailCommand
+	jailCommand = func(_ context.Context, s jail.Spec) (*exec.Cmd, error) {
+		called = true
+		gotSpec = s
+		return nil, errors.New("landlock ABI below 3")
+	}
+	t.Cleanup(func() { jailCommand = orig })
+
+	sb := NewSandbox(SandboxOptions{
+		Config: VMConfig{
+			VMMPath:     "/opt/bin/cloud-hypervisor",
+			APISocket:   filepath.Join(dir, "vm.vmm"),
+			VsockSocket: filepath.Join(dir, "vm.vsock"),
+			KernelPath:  "/opt/kernel/vmlinux",
+			CPUs:        1,
+			MemoryBytes: 512 << 20,
+			Tools: DiskVerity{
+				Path:       "/opt/tools/tools.erofs",
+				RootHash:   strings.Repeat("c", 64),
+				DataBlocks: 16,
+			},
+		},
+		// BwrapPath intentionally empty and DisableJail false: Start must still
+		// invoke internal/jail (for fallback or fail-closed refusal), never run unjailed.
+		SkipVsock: true,
+	})
+
+	_, err := sb.Start(context.Background())
+	if !called {
+		t.Fatal("Start skipped jailCommand when BwrapPath was empty")
+	}
+	if err == nil || !strings.Contains(err.Error(), "prepare VMM jail") {
+		t.Fatalf("Start err = %v, want sandbox_boot: prepare VMM jail refusal", err)
+	}
+	if gotSpec.BwrapPath != "" || gotSpec.Seccomp != jail.ProfileVMM || gotSpec.Net != jail.NetNone {
+		t.Fatalf("got jail.Spec = %+v, want BwrapPath=\"\" ProfileVMM NetNone", gotSpec)
 	}
 }
