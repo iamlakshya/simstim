@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 32 |
-| To do | 67 |
+| Done | 33 |
+| To do | 66 |
 | **All** | **99** |
 
 ## Current focus
@@ -77,7 +77,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | C2 | cli | Day 1 | Done | Errors, suggestions and exit codes |
 | C4 | cli | Day 1 | Done | Prompts, pickers and machine output |
 | C3 | cli | Day 1 | Done | Help that teaches |
-| C5 | cli | Day 1 | To do | Session verbs |
+| C5 | cli | Day 1 | Done | Session verbs |
 | C6 | cli | Day 1 | To do | One meaning for each flag |
 | C7 | cli | Day 1 | To do | Host commands |
 | C8 | cli | Day 1 | To do | Agents: install and log in |
