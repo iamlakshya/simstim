@@ -47,6 +47,8 @@ type Host struct {
 	// Trusted marks a host where you control root. Untrusted hosts default to
 	// false and do not receive secrets unless explicitly allowed.
 	Trusted bool `toml:"trusted,omitempty" json:"-"`
+	// Sandbox overrides [sandbox] defaults from config.toml for this host.
+	Sandbox *HostSandbox `toml:"sandbox,omitempty" json:"-"`
 }
 
 // Settings are the user's preferences, from config.toml. The comments on its
@@ -108,6 +110,11 @@ type Settings struct {
 		// Env sets extra environment variables inside a sandbox. A name set
 		// here replaces the guest init's value for that name.
 		Env map[string]string `toml:"env"`
+		// KeepCaches keeps package and build caches across starts of a
+		// sandbox, inside that sandbox only.
+		KeepCaches *bool `toml:"keep_caches"`
+		// Caches adds relative paths under /home/agent, or drops one with "!".
+		Caches []string `toml:"caches"`
 	} `toml:"sandbox"`
 	// Network holds defaults for sandbox network policy.
 	Network struct {
@@ -147,6 +154,7 @@ func DefaultSettings() Settings {
 	s.Sessions.MemoryMax = "auto"
 	s.Sandbox.Paste = "images-and-pdf"
 	s.Sandbox.PackageManagers = api.DefaultPackageManagers
+	s.Sandbox.KeepCaches = boolPtr(true)
 	s.Network.MinReleaseAge = api.DefaultMinReleaseAge
 	s.Network.UploadBudget = api.DefaultUploadBudget
 	return s
@@ -388,84 +396,6 @@ var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 
 // ValidHostName reports whether n can name a host.
 func ValidHostName(n string) bool { return hostNameRE.MatchString(n) }
-
-// LoadSettings reads the settings, with defaults for anything missing. If
-// config.toml is unreadable, broken or defines case-folded aliases of one
-// field, it returns the defaults. Callers that want the warning use
-// LoadSettingsChecked.
-func LoadSettings() Settings {
-	s, _ := LoadSettingsChecked()
-	return s
-}
-
-// LoadSettingsChecked reads config.toml once as a bounded regular file and
-// returns the effective settings plus a warning when the file could not be
-// used (docs/contributing/cli-spec.md 13.4).
-func LoadSettingsChecked() (Settings, string) {
-	d := DefaultSettings()
-	b, exists, err := ReadConfigFile(settingsPath())
-	if err != nil {
-		var re *ConfigReadError
-		if errors.As(err, &re) && re.Code == "too_large" {
-			return d, fmt.Sprintf("config.toml %s, so its settings are not used", re.Msg)
-		}
-		return d, "config.toml cannot be read, so its settings are not used"
-	}
-	if !exists {
-		return d, ""
-	}
-	var s Settings
-	ins, err := DecodeConfigLoose(settingsPath(), b, &s)
-	if err != nil {
-		var re *ConfigReadError
-		if errors.As(err, &re) && re.Code == "too_large" {
-			return d, fmt.Sprintf("config.toml %s, so its settings are not used", re.Msg)
-		}
-		var de *tomlv2.DecodeError
-		if errors.As(err, &de) {
-			if line, _ := de.Position(); line > 0 {
-				return d, fmt.Sprintf("config.toml has an error on line %d, so its settings are not used", line)
-			}
-		}
-		return d, "config.toml has an error, so its settings are not used"
-	}
-	if len(ins.Aliases) > 0 {
-		a := ins.Aliases[0]
-		scope := "at the top level"
-		if a.Table != "" {
-			scope = "in [" + a.Table + "]"
-		}
-		return d, fmt.Sprintf("config.toml names %q and %q for the same setting %s, so its settings are not used", a.First, a.Second, scope)
-	}
-	if s.UI.Motion == "" {
-		s.UI.Motion = d.UI.Motion
-	}
-	if s.Attach.DetachKey == "" {
-		s.Attach.DetachKey = d.Attach.DetachKey
-	}
-	if s.Attach.ImagePasteKey == "" {
-		s.Attach.ImagePasteKey = d.Attach.ImagePasteKey
-	}
-	if s.Attach.Scrollback == "" {
-		s.Attach.Scrollback = d.Attach.Scrollback
-	}
-	if s.Sessions.MemoryMax == "" {
-		s.Sessions.MemoryMax = d.Sessions.MemoryMax
-	}
-	if s.Sandbox.Paste == "" {
-		s.Sandbox.Paste = d.Sandbox.Paste
-	}
-	if s.Sandbox.PackageManagers == "" {
-		s.Sandbox.PackageManagers = d.Sandbox.PackageManagers
-	}
-	if s.Network.MinReleaseAge == "" {
-		s.Network.MinReleaseAge = d.Network.MinReleaseAge
-	}
-	if s.Network.UploadBudget == "" {
-		s.Network.UploadBudget = d.Network.UploadBudget
-	}
-	return s, ""
-}
 
 // UserError is an error with a suggested next step: the message, and the
 // "Try:" line (docs/contributing/cli-spec.md, section 4).

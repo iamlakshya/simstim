@@ -1,0 +1,78 @@
+# Default package-manager and build cache directories kept across restarts of
+# one sandbox, inside that sandbox only (isolation spec 17.5).
+#
+# Every path is relative to the guest home (/home/agent) and verified against
+# the tool's official documentation. Executable folders (such as .cargo/bin)
+# are never listed here and are refused even when named in sandbox.caches.
+
+[[caches]]
+tool = "npm"
+path = ".npm/_cacache"
+source = "https://docs.npmjs.com/cli/v12/using-npm/config#cache"
+notes = "npm stores its content-addressable cache under ~/.npm/_cacache (default cache is ~/.npm)."
+
+[[caches]]
+tool = "pnpm"
+path = ".local/share/pnpm/store"
+source = "https://pnpm.io/settings#storedir"
+notes = "On Linux, pnpm defaults storeDir to $XDG_DATA_HOME/pnpm/store (~/.local/share/pnpm/store when unset). Guest init sets pnpm_config_store_dir so pnpm keeps using this bind-mounted store when /home/agent is a tmpfs."
+
+[[caches]]
+tool = "pnpm"
+path = ".cache/pnpm"
+source = "https://pnpm.io/settings#cachedir"
+notes = "On Linux, pnpm defaults cacheDir to $XDG_CACHE_HOME/pnpm (~/.cache/pnpm) for registry metadata caches (metadata-full), which pnpm reads alongside the store when minimumReleaseAge is active."
+
+[[caches]]
+tool = "yarn"
+path = ".yarn/berry/cache"
+source = "https://yarnpkg.com/configuration/yarnrc#globalFolder"
+notes = "Yarn Berry defaults globalFolder to ~/.yarn/berry and caches package archives under ~/.yarn/berry/cache."
+
+[[caches]]
+tool = "pip"
+path = ".cache/pip"
+source = "https://pip.pypa.io/en/stable/topics/caching/"
+notes = "On Linux, pip stores its HTTP and wheel cache under $XDG_CACHE_HOME/pip (~/.cache/pip)."
+
+[[caches]]
+tool = "uv"
+path = ".cache/uv"
+source = "https://docs.astral.sh/uv/concepts/cache/"
+notes = "On Linux, uv stores its cache under $XDG_CACHE_HOME/uv (~/.cache/uv)."
+
+[[caches]]
+tool = "cargo"
+path = ".cargo/registry"
+source = "https://doc.rust-lang.org/cargo/reference/environment-variables.html"
+notes = "Cargo caches crate indices and archives under $CARGO_HOME/registry (~/.cargo/registry). .cargo/bin is never kept."
+
+[[caches]]
+tool = "cargo"
+path = ".cargo/git"
+source = "https://doc.rust-lang.org/cargo/reference/environment-variables.html"
+notes = "Cargo caches git dependency checkouts under $CARGO_HOME/git (~/.cargo/git)."
+
+[[caches]]
+tool = "go"
+path = "go/pkg/mod"
+source = "https://go.dev/ref/mod#module-cache"
+notes = "Go defaults GOMODCACHE to $GOPATH/pkg/mod (~/go/pkg/mod)."
+
+[[caches]]
+tool = "go"
+path = ".cache/go-build"
+source = "https://pkg.go.dev/cmd/go#hdr-Build_and_test_caching"
+notes = "On Linux, Go defaults GOCACHE to $XDG_CACHE_HOME/go-build (~/.cache/go-build)."
+
+[[caches]]
+tool = "gradle"
+path = ".gradle/caches"
+source = "https://docs.gradle.org/current/userguide/directory_layout.html"
+notes = "Gradle stores downloaded dependencies and build caches under $GRADLE_USER_HOME/caches (~/.gradle/caches)."
+
+[[caches]]
+tool = "maven"
+path = ".m2/repository"
+source = "https://maven.apache.org/settings.html"
+notes = "Maven defaults its local repository cache to ~/.m2/repository."

@@ -46,6 +46,12 @@ func prepareDriver(wspec wall.Spec) (wall.Sandbox, error) {
 	if err := paths.EnsurePrivateDir(stateHost); err != nil {
 		return nil, err
 	}
+	cacheHost := filepath.Join(wspec.SessionDir, "caches")
+	if len(wspec.CacheDirs) > 0 {
+		if err := paths.EnsurePrivateDir(cacheHost); err != nil {
+			return nil, err
+		}
+	}
 	ps := Spec{
 		SessionID:      wspec.ID,
 		HelperExe:      wspec.Helper,
@@ -53,6 +59,8 @@ func prepareDriver(wspec wall.Spec) (wall.Sandbox, error) {
 		WorkspaceGuest: wsGuest,
 		StateHost:      stateHost,
 		StateDirs:      wspec.StateDirs,
+		CacheHost:      cacheHost,
+		CacheDirs:      wspec.CacheDirs,
 		ExtraRO:        extraRO,
 		ExtraRW:        extraRW,
 	}

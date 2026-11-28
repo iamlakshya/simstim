@@ -34,7 +34,7 @@ func (p *processSandbox) Wait() Exit {
 func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 	wsHost := m.Cwd
 	wsGuest := process.WorkspaceGuestPath(wsHost)
-	var stateDirs []string
+	var stateDirs, cacheDirs []string
 	var extraRO, extraRW []process.Mount
 	shareNet := false
 	if m.Wall != nil {
@@ -45,6 +45,7 @@ func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			wsGuest = m.Wall.WorkspaceGuest
 		}
 		stateDirs = append([]string(nil), m.Wall.StateDirs...)
+		cacheDirs = append([]string(nil), m.Wall.CacheDirs...)
 		for _, wm := range m.Wall.ExtraRO {
 			extraRO = append(extraRO, process.Mount{Source: wm.Source, Dest: wm.Dest, ReadOnly: true})
 		}
@@ -65,6 +66,8 @@ func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			WorkspaceGuest: wsGuest,
 			StateHost:      paths.SessionStateDir(id),
 			StateDirs:      stateDirs,
+			CacheHost:      paths.SessionCachesDir(id),
+			CacheDirs:      cacheDirs,
 			ExtraRO:        extraRO,
 			ExtraRW:        extraRW,
 			GuestPATH:      envLookup(m.Env, "PATH"),

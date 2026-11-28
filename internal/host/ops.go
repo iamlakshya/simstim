@@ -467,7 +467,7 @@ func deleteSession(id string, expectedName *string, res *DeleteResult) error {
 			res.WorktreeCode, res.WorktreeHint = kept.Code, kept.Hint
 		}
 	}
-	if err := os.RemoveAll(paths.SessionDir(id)); err != nil {
+	if err := removeSessionDir(paths.SessionDir(id)); err != nil {
 		return fmt.Errorf("remove the files of session %s: %w", id, err)
 	}
 	if isWalled(m) {

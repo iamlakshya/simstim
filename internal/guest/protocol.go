@@ -67,6 +67,7 @@ type StartReq struct {
 	PackageManagers   string   `json:"package_managers,omitempty"`
 	MinReleaseAge     string   `json:"min_release_age,omitempty"`
 	UserEnv           []string `json:"user_env,omitempty"`
+	CacheDirs         []string `json:"cache_dirs,omitempty"`
 	ProxyURL          string   `json:"proxy_url,omitempty"`
 	BoundSecretEnv    string   `json:"bound_secret_env,omitempty"`
 	BoundPlaceholders []string `json:"bound_placeholders,omitempty"`

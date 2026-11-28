@@ -16,6 +16,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/sandbox"
 )
 
 //go:embed etc.toml
@@ -59,6 +60,8 @@ type Spec struct {
 	WorkspaceGuest string
 	StateHost      string
 	StateDirs      []string
+	CacheHost      string
+	CacheDirs      []string
 	ExtraRO        []Mount
 	ExtraRW        []Mount
 	GuestPATH      string
@@ -79,6 +82,7 @@ type Plan struct {
 	GuestRunDir string
 	GuestHelper string
 	StatePaths  []string
+	CachePaths  []string
 }
 
 type etcFile struct {
@@ -192,7 +196,7 @@ func buildPlanWithFS(spec Spec, fsOps planFS) (*Plan, error) {
 		args = append(args, "--ro-bind", m.Source, m.Dest)
 	}
 
-	args, statePaths := appendWritableMounts(args, spec, guestRun)
+	args, statePaths, cachePaths := appendWritableMounts(args, spec, guestRun)
 	args = appendEnvArgs(args, spec, guestRun, llJSON)
 	args = append(args, "--seccomp", strconv.Itoa(seccompFD))
 	args = append(args, "--", guestHelper, "wall-init")
@@ -205,6 +209,7 @@ func buildPlanWithFS(spec Spec, fsOps planFS) (*Plan, error) {
 		GuestRunDir: guestRun,
 		GuestHelper: guestHelper,
 		StatePaths:  statePaths,
+		CachePaths:  cachePaths,
 	}, nil
 }
 
@@ -235,6 +240,14 @@ func validateSpec(spec Spec, fsOps planFS) error {
 	}
 	if len(spec.StateDirs) > 0 && !filepath.IsAbs(spec.StateHost) {
 		return errors.New("process wall: state folder must be an absolute path when state dirs are set. Try: check session state paths")
+	}
+	for _, rel := range spec.CacheDirs {
+		if _, err := sandbox.ValidateCachePath(rel); err != nil {
+			return fmt.Errorf("process wall: %w", err)
+		}
+	}
+	if len(spec.CacheDirs) > 0 && !filepath.IsAbs(spec.CacheHost) {
+		return errors.New("process wall: cache folder must be an absolute path when cache dirs are set. Try: check session cache paths")
 	}
 	for _, m := range append(slices.Clone(spec.ExtraRO), spec.ExtraRW...) {
 		if !filepath.IsAbs(m.Source) || !filepath.IsAbs(m.Dest) {
@@ -352,7 +365,7 @@ func syntheticEtcFiles(shareNet bool, fsOps planFS) []BindData {
 	}
 }
 
-func appendWritableMounts(args []string, spec Spec, guestRun string) ([]string, []string) {
+func appendWritableMounts(args []string, spec Spec, guestRun string) (outArgs, statePaths, cachePaths []string) {
 	args = append(args,
 		"--tmpfs", "/tmp",
 		"--tmpfs", "/var/tmp",
@@ -360,12 +373,28 @@ func appendWritableMounts(args []string, spec Spec, guestRun string) ([]string, 
 		"--perms", "0700", "--dir", guestRun,
 		"--perms", "0700", "--tmpfs", GuestHome,
 	)
-	statePaths := make([]string, 0, len(spec.StateDirs))
+	mounted := map[string]bool{}
+	statePaths = make([]string, 0, len(spec.StateDirs))
 	for _, rel := range spec.StateDirs {
 		clean := filepath.Clean(rel)
+		slash := filepath.ToSlash(clean)
+		mounted[slash] = true
 		hostPath := filepath.Join(spec.StateHost, clean)
-		guestPath := GuestHome + "/" + filepath.ToSlash(clean)
+		guestPath := GuestHome + "/" + slash
 		statePaths = append(statePaths, hostPath)
+		args = append(args, "--bind", hostPath, guestPath)
+	}
+	cachePaths = make([]string, 0, len(spec.CacheDirs))
+	for _, rel := range sandbox.SortMountOrder(spec.CacheDirs) {
+		clean := filepath.Clean(rel)
+		slash := filepath.ToSlash(clean)
+		if mounted[slash] {
+			continue
+		}
+		mounted[slash] = true
+		hostPath := filepath.Join(spec.CacheHost, clean)
+		guestPath := GuestHome + "/" + slash
+		cachePaths = append(cachePaths, hostPath)
 		args = append(args, "--bind", hostPath, guestPath)
 	}
 	args = append(args, "--bind", spec.WorkspaceHost, spec.WorkspaceGuest)
@@ -373,7 +402,7 @@ func appendWritableMounts(args []string, spec Spec, guestRun string) ([]string, 
 		args = append(args, "--bind", m.Source, m.Dest)
 	}
 	args = append(args, "--chdir", spec.WorkspaceGuest)
-	return args, statePaths
+	return args, statePaths, cachePaths
 }
 
 func appendEnvArgs(args []string, spec Spec, guestRun, llJSON string) []string {

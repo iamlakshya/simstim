@@ -68,6 +68,11 @@ func (s *Sandbox) Start(ctx context.Context) (net.Conn, error) {
 			return nil, fmt.Errorf("prepare session state folder %s: %w", dir, err)
 		}
 	}
+	for _, dir := range plan.CachePaths {
+		if err := paths.EnsurePrivateDir(dir); err != nil {
+			return nil, fmt.Errorf("prepare session cache folder %s: %w", dir, err)
+		}
+	}
 
 	seccompBytes, err := SeccompBPF()
 	if err != nil {

@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/iamlakshya/simstim/internal/guest"
@@ -9,10 +10,11 @@ import (
 
 func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 	var pkgLevel, minAge, proxyURL, boundSecretEnv string
-	var userEnv, boundPlaceholders []string
+	var userEnv, boundPlaceholders, cacheDirs []string
 	if s.m.Wall != nil {
 		pkgLevel = s.m.Wall.PackageManagers
 		minAge = s.m.Wall.MinReleaseAge
+		cacheDirs = slices.Clone(s.m.Wall.CacheDirs)
 		if len(s.m.Wall.SandboxEnv) > 0 {
 			keys := make([]string, 0, len(s.m.Wall.SandboxEnv))
 			for k := range s.m.Wall.SandboxEnv {
@@ -48,6 +50,7 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 		PackageManagers:   pkgLevel,
 		MinReleaseAge:     minAge,
 		UserEnv:           userEnv,
+		CacheDirs:         cacheDirs,
 		ProxyURL:          proxyURL,
 		BoundSecretEnv:    boundSecretEnv,
 		BoundPlaceholders: boundPlaceholders,

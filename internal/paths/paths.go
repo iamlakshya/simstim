@@ -70,6 +70,10 @@ func WorkDir(id string) string { return filepath.Join(SessionDir(id), "work") }
 // SessionStateDir holds the agent state folders kept across starts of a walled session.
 func SessionStateDir(id string) string { return filepath.Join(SessionDir(id), "state") }
 
+// SessionCachesDir holds the package-manager and build caches kept across starts
+// of one walled session, private to that session (isolation spec 17.5).
+func SessionCachesDir(id string) string { return filepath.Join(SessionDir(id), "caches") }
+
 // DebugTrace is the debug trace of one session's holder, one JSON object a
 // line. It turns over to the same name with ".1" added.
 func DebugTrace(id string) string { return filepath.Join(SessionDir(id), "debug.jsonl") }

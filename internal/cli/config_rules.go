@@ -223,6 +223,7 @@ func validateSettings(abbrev string, s client.Settings, ins *client.TOMLInspecti
 		}
 	}
 	out = append(out, validatePackageSettings(abbrev, s, ins)...)
+	out = append(out, validateSandboxCaches(abbrev, s.Sandbox.Caches, ins.Pos("sandbox", "caches"), "sandbox.caches")...)
 	out = append(out, validateKeymap(abbrev, s.Keymap, ins)...)
 	out = append(out, validateSecrets(abbrev, s.Secrets, ins)...)
 	return out
@@ -392,6 +393,9 @@ func validateHostEntry(abbrev string, idx int, h client.Host, seenNames map[stri
 			Message:     fmt.Sprintf(`host %q wall_floor must be "none", "process", "gvisor" or "microvm", not %q`, hostLabel(h, idx), v),
 			Suggestions: suggestFromStrings(v, []string{"none", "process", "gvisor", "microvm"}),
 		})
+	}
+	if h.Sandbox != nil {
+		out = append(out, validateSandboxCaches(abbrev, h.Sandbox.Caches, ins.HostPos(idx, "sandbox", "caches"), fmt.Sprintf("host %q sandbox.caches", hostLabel(h, idx)))...)
 	}
 	return out
 }

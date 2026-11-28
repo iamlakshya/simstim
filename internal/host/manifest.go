@@ -107,6 +107,7 @@ type WallRecord struct {
 	WorkspaceHost   string            `json:"workspace_host,omitempty"`
 	WorkspaceGuest  string            `json:"workspace_guest,omitempty"`
 	StateDirs       []string          `json:"state_dirs,omitempty"`
+	CacheDirs       []string          `json:"cache_dirs,omitempty"`
 	ExtraRO         []WallMount       `json:"extra_ro,omitempty"`
 	ExtraRW         []WallMount       `json:"extra_rw,omitempty"`
 	ShareNet        bool              `json:"share_net,omitempty"`

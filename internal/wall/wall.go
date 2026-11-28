@@ -118,6 +118,7 @@ type Spec struct {
 	Image      *ImageRef
 	Mounts     []Mount
 	StateDirs  []string
+	CacheDirs  []string
 	MemoryMax  int64
 	CPUs       int
 	DiskMax    int64

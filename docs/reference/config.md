@@ -22,6 +22,8 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sandbox.paste` | string | `"images-and-pdf"` | Sets which file types image paste and drag-and-drop may upload into a walled session: "images-and-pdf" (PNG, JPEG, GIF, WebP and PDF only, the default) or "any". The paste guard still refuses private files and clipboard-written paths in either mode. |
 | `sandbox.package_managers` | string | `"guarded"` | Controls the settings that guest init writes for package managers inside a sandbox: "guarded" (minimum release age, no dependency install scripts for npm, pnpm, Yarn and Bun, and Go proxy settings), "strict" (also blocks pip and uv source builds), or "off". |
 | `sandbox.env` | table | — | Sets extra environment variables inside a sandbox. A name set here replaces the guest init's value for that name. |
+| `sandbox.keep_caches` | boolean | `true` | Keeps package and build caches across starts of a sandbox, inside that sandbox only. |
+| `sandbox.caches` | array of string | — | Adds relative paths under /home/agent, or drops one with "!". |
 | `network.min_release_age` | string | `"7d"` | Sets the minimum release age for package managers inside a sandbox, as a whole number of days from "0d" to "365d". "0d" turns the age check off. |
 | `network.model_budget` | integer | — | Caps the total model tokens a walled session may use across gateway requests. 0 turns the cap off. |
 | `network.upload_budget` | string | `"16M"` | Caps bytes uploaded per host per hour from a walled session to non-model hosts, such as "16M". "0" turns the cap off. |
@@ -56,3 +58,6 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `secrets` | array of string | Lists secrets from config.toml that every new session on this host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more. |
 | `wall_floor` | string | Is the weakest sandbox level that new sessions on this host may get: "none", "process", "gvisor" or "microvm". |
 | `trusted` | boolean | Marks a host where you control root. Untrusted hosts default to false and do not receive secrets unless explicitly allowed. |
+| `[sandbox]` | table | Overrides [sandbox] defaults from config.toml for this host. |
+| `sandbox.keep_caches` | boolean | Overrides sandbox.keep_caches from config.toml for this host. |
+| `sandbox.caches` | array of string | Adds relative cache paths under /home/agent, or drops one with a leading "!", layered on top of sandbox.caches from config.toml. |

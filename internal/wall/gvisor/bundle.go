@@ -13,6 +13,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/sandbox"
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
@@ -32,6 +33,8 @@ type Spec struct {
 	WorkspaceGuest string   `json:"workspace_guest"`
 	StateHost      string   `json:"state_host"`
 	StateDirs      []string `json:"state_dirs,omitempty"`
+	CacheHost      string   `json:"cache_host,omitempty"`
+	CacheDirs      []string `json:"cache_dirs,omitempty"`
 	ExtraRO        []Mount  `json:"extra_ro,omitempty"`
 	ExtraRW        []Mount  `json:"extra_rw,omitempty"`
 	GuestPATH      string   `json:"guest_path,omitempty"`
@@ -83,6 +86,7 @@ type BundlePlan struct {
 	RootSymlinks map[string]string // name under rootfs/ -> symlink target
 	SyntheticEtc map[string][]byte // filename under bundle/etc/ -> bytes
 	StatePaths   []string
+	CachePaths   []string
 	GuestHelper  string
 	GuestRunDir  string
 }
@@ -125,7 +129,7 @@ func buildBundlePlanWithFS(bundleDir string, spec Spec, fsOps bundleFS) (*Bundle
 	etcDir := filepath.Join(bundleDir, "etc")
 	mounts, rootLinks := buildSystemAndEtcMounts(etcList, synthEtc, etcDir, fsOps)
 	mounts = appendHelperAndExtraROMounts(mounts, spec, guestHelper, fsOps)
-	mounts, statePaths := appendWritableMounts(mounts, spec, guestRun)
+	mounts, statePaths, cachePaths := appendWritableMounts(mounts, spec, guestRun)
 
 	cfg := ociSpec{
 		OCIVersion: "1.0.2",
@@ -189,6 +193,7 @@ func buildBundlePlanWithFS(bundleDir string, spec Spec, fsOps bundleFS) (*Bundle
 		RootSymlinks: rootLinks,
 		SyntheticEtc: synthEtc,
 		StatePaths:   statePaths,
+		CachePaths:   cachePaths,
 		GuestHelper:  guestHelper,
 		GuestRunDir:  guestRun,
 	}, nil
@@ -204,6 +209,11 @@ func PrepareBundle(bundleDir string, spec Spec) (*BundlePlan, error) {
 	for _, dir := range plan.StatePaths {
 		if err := paths.EnsurePrivateDir(dir); err != nil {
 			return nil, fmt.Errorf("prepare session state folder %s: %w", dir, err)
+		}
+	}
+	for _, dir := range plan.CachePaths {
+		if err := paths.EnsurePrivateDir(dir); err != nil {
+			return nil, fmt.Errorf("prepare session cache folder %s: %w", dir, err)
 		}
 	}
 	rootfsDir := filepath.Join(bundleDir, "rootfs")
@@ -275,6 +285,14 @@ func validateSpec(spec Spec, fsOps bundleFS) error {
 	}
 	if len(spec.StateDirs) > 0 && !filepath.IsAbs(spec.StateHost) {
 		return errors.New("gvisor wall: state folder must be an absolute path when state dirs are set. Try: check session state paths")
+	}
+	for _, rel := range spec.CacheDirs {
+		if _, err := sandbox.ValidateCachePath(rel); err != nil {
+			return fmt.Errorf("gvisor wall: %w", err)
+		}
+	}
+	if len(spec.CacheDirs) > 0 && !filepath.IsAbs(spec.CacheHost) {
+		return errors.New("gvisor wall: cache folder must be an absolute path when cache dirs are set. Try: check session cache paths")
 	}
 	for _, m := range append(slices.Clone(spec.ExtraRO), spec.ExtraRW...) {
 		if !filepath.IsAbs(m.Source) || !filepath.IsAbs(m.Dest) {
@@ -385,7 +403,7 @@ func appendHelperAndExtraROMounts(mounts []ociMount, spec Spec, guestHelper stri
 	return mounts
 }
 
-func appendWritableMounts(mounts []ociMount, spec Spec, guestRun string) ([]ociMount, []string) {
+func appendWritableMounts(mounts []ociMount, spec Spec, guestRun string) (outMounts []ociMount, statePaths, cachePaths []string) {
 	uidOpt := "uid=" + strconv.Itoa(process.GuestUID)
 	gidOpt := "gid=" + strconv.Itoa(process.GuestGID)
 	mounts = append(mounts,
@@ -395,12 +413,33 @@ func appendWritableMounts(mounts []ociMount, spec Spec, guestRun string) ([]ociM
 		ociMount{Destination: guestRun, Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=0700", uidOpt, gidOpt}},
 		ociMount{Destination: process.GuestHome, Type: "tmpfs", Source: "tmpfs", Options: []string{"nosuid", "nodev", "mode=0700", uidOpt, gidOpt}},
 	)
-	statePaths := make([]string, 0, len(spec.StateDirs))
+	mounted := map[string]bool{}
+	statePaths = make([]string, 0, len(spec.StateDirs))
 	for _, rel := range spec.StateDirs {
 		clean := filepath.Clean(rel)
+		slash := filepath.ToSlash(clean)
+		mounted[slash] = true
 		hostPath := filepath.Join(spec.StateHost, clean)
-		guestPath := process.GuestHome + "/" + filepath.ToSlash(clean)
+		guestPath := process.GuestHome + "/" + slash
 		statePaths = append(statePaths, hostPath)
+		mounts = append(mounts, ociMount{
+			Destination: guestPath,
+			Type:        "bind",
+			Source:      hostPath,
+			Options:     []string{"rbind", "rw"},
+		})
+	}
+	cachePaths = make([]string, 0, len(spec.CacheDirs))
+	for _, rel := range sandbox.SortMountOrder(spec.CacheDirs) {
+		clean := filepath.Clean(rel)
+		slash := filepath.ToSlash(clean)
+		if mounted[slash] {
+			continue
+		}
+		mounted[slash] = true
+		hostPath := filepath.Join(spec.CacheHost, clean)
+		guestPath := process.GuestHome + "/" + slash
+		cachePaths = append(cachePaths, hostPath)
 		mounts = append(mounts, ociMount{
 			Destination: guestPath,
 			Type:        "bind",
@@ -422,7 +461,7 @@ func appendWritableMounts(mounts []ociMount, spec Spec, guestRun string) ([]ociM
 			Options:     []string{"rbind", "rw"},
 		})
 	}
-	return mounts, statePaths
+	return mounts, statePaths, cachePaths
 }
 
 func buildEnv(spec Spec, guestRun string) []string {

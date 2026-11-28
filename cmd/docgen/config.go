@@ -23,7 +23,7 @@ type field struct {
 func configPage(repo string) ([]byte, error) {
 	fset := token.NewFileSet()
 	types := map[string]*ast.StructType{}
-	for _, f := range []string{"config.go", "provider.go", "machine.go"} {
+	for _, f := range []string{"config.go", "caches.go", "provider.go", "machine.go"} {
 		file, err := parser.ParseFile(fset, filepath.Join(repo, "internal", "client", f), nil, parser.ParseComments)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", f, err)
@@ -96,6 +96,8 @@ func tomlKey(f *ast.Field) string {
 
 func typeName(e ast.Expr) string {
 	switch t := e.(type) {
+	case *ast.StarExpr:
+		return typeName(t.X)
 	case *ast.Ident:
 		switch t.Name {
 		case "string":
@@ -138,6 +140,20 @@ func flatten(v reflect.Value, prefix string) map[string]string {
 			}
 		case reflect.Bool:
 			out[key] = fmt.Sprintf("`%v`", fv.Bool())
+		case reflect.Pointer:
+			if !fv.IsNil() {
+				elem := fv.Elem()
+				switch elem.Kind() {
+				case reflect.Bool:
+					out[key] = fmt.Sprintf("`%v`", elem.Bool())
+				case reflect.String:
+					if elem.String() != "" {
+						out[key] = "`\"" + elem.String() + "\"`"
+					}
+				default:
+					// Other pointer targets have no default worth showing.
+				}
+			}
 		default:
 			// Other kinds have no default worth showing.
 		}

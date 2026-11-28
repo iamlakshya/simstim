@@ -15,6 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/sandbox"
 	"github.com/iamlakshya/simstim/internal/version"
 	"github.com/iamlakshya/simstim/internal/wall/process"
 )
@@ -46,6 +47,18 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 	ws, err := checkWalledSettings(a)
 	if err != nil {
 		return nil, err
+	}
+	keepCaches := true
+	if a.KeepCaches != nil {
+		keepCaches = *a.KeepCaches
+	}
+	cacheDirs, err := sandbox.ResolveCaches(keepCaches, a.Caches)
+	if err != nil {
+		msg, hint := err.Error(), "Check sandbox.caches in config.toml or hosts.toml."
+		if before, after, ok := strings.Cut(msg, ". Try: "); ok {
+			msg, hint = before, after
+		}
+		return nil, UserError("cache_path_invalid", msg, hint)
 	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
@@ -109,6 +122,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			WorkspaceHost:   wsHost,
 			WorkspaceGuest:  wsGuest,
 			StateDirs:       slices.Clone(agent.StateDirs),
+			CacheDirs:       cacheDirs,
 			ExtraRO:         extraRO,
 			At:              now,
 			PolicyTOML:      buildSessionPolicyTOML(string(egress.PresetBalanced), ws),

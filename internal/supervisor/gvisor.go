@@ -34,7 +34,7 @@ func (g *gvisorSandbox) Wait() Exit {
 func NewGVisorSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 	wsHost := m.Cwd
 	wsGuest := process.WorkspaceGuestPath(wsHost)
-	var stateDirs []string
+	var stateDirs, cacheDirs []string
 	var extraRO, extraRW []gvisor.Mount
 	if m.Wall != nil {
 		if m.Wall.WorkspaceHost != "" {
@@ -44,6 +44,7 @@ func NewGVisorSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			wsGuest = m.Wall.WorkspaceGuest
 		}
 		stateDirs = append([]string(nil), m.Wall.StateDirs...)
+		cacheDirs = append([]string(nil), m.Wall.CacheDirs...)
 		for _, wm := range m.Wall.ExtraRO {
 			extraRO = append(extraRO, gvisor.Mount{Source: wm.Source, Dest: wm.Dest, ReadOnly: true})
 		}
@@ -60,6 +61,8 @@ func NewGVisorSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			WorkspaceGuest: wsGuest,
 			StateHost:      paths.SessionStateDir(id),
 			StateDirs:      stateDirs,
+			CacheHost:      paths.SessionCachesDir(id),
+			CacheDirs:      cacheDirs,
 			ExtraRO:        extraRO,
 			ExtraRW:        extraRW,
 			GuestPATH:      envLookup(m.Env, "PATH"),

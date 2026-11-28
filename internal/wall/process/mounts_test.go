@@ -104,6 +104,8 @@ func TestBuildPlanArgsAndValidation(t *testing.T) {
 		WorkspaceGuest: "/work/app",
 		StateHost:      "/home/dev/.local/state/tool/sessions/sess1234/state",
 		StateDirs:      []string{".claude/projects"},
+		CacheHost:      "/home/dev/.local/state/tool/sessions/sess1234/caches",
+		CacheDirs:      []string{".npm/_cacache", ".local/share/pnpm/store", ".claude/projects"},
 		ExtraRO:        []Mount{{Source: "/home/dev/.local/share/claude", Dest: "/opt/agents/install-0", ReadOnly: true}},
 		DisableUserNS:  true,
 	}, fsOps)
@@ -123,6 +125,8 @@ func TestBuildPlanArgsAndValidation(t *testing.T) {
 		"--ro-bind /home/dev/.local/share/claude /opt/agents/install-0",
 		"--tmpfs /tmp", "--tmpfs /var/tmp", "--perms 0700 --tmpfs /home/agent",
 		"--bind /home/dev/.local/state/tool/sessions/sess1234/state/.claude/projects /home/agent/.claude/projects",
+		"--bind /home/dev/.local/state/tool/sessions/sess1234/caches/.npm/_cacache /home/agent/.npm/_cacache",
+		"--bind /home/dev/.local/state/tool/sessions/sess1234/caches/.local/share/pnpm/store /home/agent/.local/share/pnpm/store",
 		"--bind /home/dev/src/app /work/app", "--chdir /work/app",
 		"--clearenv", "--setenv HOME /home/agent", "--setenv USER agent",
 		"--seccomp 4", "wall-init",
@@ -131,7 +135,10 @@ func TestBuildPlanArgsAndValidation(t *testing.T) {
 			t.Errorf("bwrap args missing %q\nfull args: %s", want, joined)
 		}
 	}
-	for _, forbidden := range []string{"/etc/environment", "/etc/shadow"} {
+	if len(plan.CachePaths) != 2 {
+		t.Fatalf("len(plan.CachePaths) = %d (%v), want 2 (duplicate StateDir skipped)", len(plan.CachePaths), plan.CachePaths)
+	}
+	for _, forbidden := range []string{"/etc/environment", "/etc/shadow", "/caches/.claude/projects"} {
 		if strings.Contains(joined, forbidden) {
 			t.Errorf("bwrap args leaked %q\nfull args: %s", forbidden, joined)
 		}
@@ -184,6 +191,22 @@ func TestBuildPlanArgsAndValidation(t *testing.T) {
 		{
 			name: "state-claude-settings-refused",
 			spec: Spec{SessionID: "s1", HelperExe: "/usr/bin/h", WorkspaceHost: "/tmp/w", WorkspaceGuest: "/work/w", StateHost: "/tmp/st", StateDirs: []string{".claude/settings.json"}},
+		},
+		{
+			name: "cache-cargo-bin-refused",
+			spec: Spec{SessionID: "s1", HelperExe: "/usr/bin/h", WorkspaceHost: "/tmp/w", WorkspaceGuest: "/work/w", CacheHost: "/tmp/ca", CacheDirs: []string{".cargo/bin"}},
+		},
+		{
+			name: "cache-cargo-parent-refused",
+			spec: Spec{SessionID: "s1", HelperExe: "/usr/bin/h", WorkspaceHost: "/tmp/w", WorkspaceGuest: "/work/w", CacheHost: "/tmp/ca", CacheDirs: []string{".cargo"}},
+		},
+		{
+			name: "cache-bashrc-refused",
+			spec: Spec{SessionID: "s1", HelperExe: "/usr/bin/h", WorkspaceHost: "/tmp/w", WorkspaceGuest: "/work/w", CacheHost: "/tmp/ca", CacheDirs: []string{".bashrc"}},
+		},
+		{
+			name: "cache-missing-host-dir",
+			spec: Spec{SessionID: "s1", HelperExe: "/usr/bin/h", WorkspaceHost: "/tmp/w", WorkspaceGuest: "/work/w", CacheDirs: []string{".npm/_cacache"}},
 		},
 	}
 	for _, tc := range badCases {

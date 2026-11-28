@@ -1,0 +1,97 @@
+package client
+
+import (
+	"slices"
+	"strings"
+
+	"github.com/iamlakshya/simstim/internal/sandbox"
+)
+
+// HostSandbox overrides [sandbox] defaults from config.toml for sessions on
+// one host in hosts.toml.
+type HostSandbox struct {
+	// KeepCaches overrides sandbox.keep_caches from config.toml for this host.
+	KeepCaches *bool `toml:"keep_caches,omitempty"`
+	// Caches adds relative cache paths under /home/agent, or drops one with
+	// a leading "!", layered on top of sandbox.caches from config.toml.
+	Caches []string `toml:"caches,omitempty"`
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+// CheckCacheRules validates a layer's sandbox.caches rules and returns a
+// UserError with code "cache_path_invalid" when any rule is invalid or refused.
+func CheckCacheRules(rules []string) error {
+	if err := sandbox.ValidateCacheRules(rules); err != nil {
+		msg, hint := splitCacheError(err.Error())
+		return &UserError{
+			Msg:  msg,
+			Hint: hint,
+			Code: "cache_path_invalid",
+			Kind: KindUsage,
+		}
+	}
+	return nil
+}
+
+// ResolveCacheConfig merges built-in defaults, config.toml, hosts.toml and any
+// session overrides into the effective keep flag and ordered rule list.
+func ResolveCacheConfig(s Settings, h Host, sessionKeep *bool, sessionRules []string) (keep bool, rules []string, err error) {
+	keep = true
+	if s.Sandbox.KeepCaches != nil {
+		keep = *s.Sandbox.KeepCaches
+	}
+	if h.Sandbox != nil && h.Sandbox.KeepCaches != nil {
+		keep = *h.Sandbox.KeepCaches
+	}
+	if sessionKeep != nil {
+		keep = *sessionKeep
+	}
+
+	var hostRules []string
+	if h.Sandbox != nil {
+		hostRules = h.Sandbox.Caches
+	}
+	merged := make([]string, 0, len(s.Sandbox.Caches)+len(hostRules)+len(sessionRules))
+	merged = append(merged, s.Sandbox.Caches...)
+	merged = append(merged, hostRules...)
+	merged = append(merged, sessionRules...)
+	if err := CheckCacheRules(merged); err != nil {
+		return false, nil, err
+	}
+	if _, err := sandbox.ResolveCaches(keep, merged); err != nil {
+		msg, hint := splitCacheError(err.Error())
+		return false, nil, &UserError{
+			Msg:  msg,
+			Hint: hint,
+			Code: "cache_path_invalid",
+			Kind: KindUsage,
+		}
+	}
+	return keep, slices.Clone(merged), nil
+}
+
+// withCacheSettings fills and validates a walled session's kept-cache settings
+// from config.toml and hosts.toml (spec 17.5). Unwalled sessions without
+// explicit cache fields stay untouched for older helpers.
+func (c *Conn) withCacheSettings(a NewArgs) (NewArgs, error) {
+	walled := a.Wall != "" && a.Wall != "none"
+	if !walled && a.KeepCaches == nil && len(a.Caches) == 0 {
+		return a, nil
+	}
+	s := LoadSettings()
+	keep, rules, err := ResolveCacheConfig(s, c.Host, a.KeepCaches, a.Caches)
+	if err != nil {
+		return a, err
+	}
+	a.KeepCaches = boolPtr(keep)
+	a.Caches = rules
+	return a, nil
+}
+
+func splitCacheError(raw string) (msg, hint string) {
+	if before, after, ok := strings.Cut(raw, ". Try: "); ok {
+		return before, after
+	}
+	return raw, "Check sandbox.caches in config.toml or hosts.toml."
+}

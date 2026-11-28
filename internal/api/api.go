@@ -89,6 +89,13 @@ type NewArgs struct {
 	// SandboxEnv sets extra environment variables for walled sessions; any
 	// name here overrides values written by guest init.
 	SandboxEnv map[string]string `json:"sandbox_env,omitempty"`
+	// KeepCaches controls whether package-manager and build caches stay across
+	// restarts of this walled session, inside this sandbox only (spec 17.5).
+	// Nil uses the default (true).
+	KeepCaches *bool `json:"keep_caches,omitempty"`
+	// Caches adds relative cache paths under /home/agent, or drops one from
+	// the built-in list with a leading "!" (spec 17.5).
+	Caches []string `json:"caches,omitempty"`
 }
 
 // WallInfo is a session's wall, in its row.
