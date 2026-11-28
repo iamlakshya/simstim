@@ -189,6 +189,8 @@ func (r *runner) handleStream(ctx context.Context, st *link.Stream) {
 		r.serveHolder(ctx, st)
 	case link.KindPut:
 		r.servePut(st)
+	case link.KindPort:
+		r.servePort(ctx, st)
 	default:
 		_ = st.Close()
 	}

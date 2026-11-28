@@ -106,6 +106,15 @@ func HookSocket(id string) string { return filepath.Join(RuntimeDir(), "h", id+"
 // places a guest's local sockets, so they fit inside the Unix socket path limit.
 func GuestRuntimeDir(id string) string { return filepath.Join(RuntimeDir(), "g", id) }
 
+// PortDir is the private folder for a walled session's granted port sockets.
+func PortDir(id string) string { return filepath.Join(RuntimeDir(), "p", id) }
+
+// PortSocket is the host-side Unix socket for one granted port of a walled
+// session: $XDG_RUNTIME_DIR/<name>/p/<id>/<port>.sock (spec 7.4).
+func PortSocket(id string, port int) string {
+	return filepath.Join(PortDir(id), fmt.Sprintf("%d.sock", port))
+}
+
 // BinDir is where versioned helpers are installed.
 func BinDir() string { return filepath.Join(DataDir(), "bin") }
 

@@ -103,6 +103,22 @@ func (c *Conn) Ports(ctx context.Context, id string) ([]Port, error) {
 	return out, err
 }
 
+// PortGrantResult is the supervisor's answer to GrantPort.
+type PortGrantResult = api.PortGrantResult
+
+// GrantPort asks a walled session's supervisor to expose guest port on a
+// private host Unix socket for ssh -L forwarding (spec 7.4).
+func (c *Conn) GrantPort(ctx context.Context, id string, port int) (PortGrantResult, error) {
+	var out PortGrantResult
+	err := c.Call(ctx, "port.grant", api.PortGrantArgs{ID: id, Port: port}, &out)
+	return out, err
+}
+
+// RevokePort closes and removes a walled session's forwarded port Unix socket.
+func (c *Conn) RevokePort(ctx context.Context, id string, port int) error {
+	return c.Call(ctx, "port.revoke", api.PortGrantArgs{ID: id, Port: port}, nil)
+}
+
 // RenameSession renames a session.
 func (c *Conn) RenameSession(ctx context.Context, id, name string) error {
 	return c.Call(ctx, "rename", map[string]string{"id": id, "name": name}, nil)

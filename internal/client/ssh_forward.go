@@ -12,15 +12,19 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 )
 
-// ForwardPair is one forwarded port.
+// ForwardPair is one forwarded port. When RemoteSocket is set, ssh -L connects
+// to that host Unix socket (for walled sessions, spec 7.4) instead of a host
+// TCP port.
 type ForwardPair struct {
-	Local      int
-	RemoteHost string
-	Remote     int
+	Local        int
+	RemoteHost   string
+	Remote       int
+	RemoteSocket string
 }
 
 // Forward builds an ssh command that forwards local ports to the host until it
-// is stopped. Each pair maps a local port to an address and port on the host.
+// is stopped. Each pair maps a local port to an address and port on the host,
+// or to a host Unix socket when RemoteSocket is set.
 //
 // It has a connection of its own, so that its forwards, and those of the
 // user's config, end when it ends, and never stay in the shared master that
@@ -36,13 +40,31 @@ func (s *SSH) Forward(ctx context.Context, pairs []ForwardPair) (*exec.Cmd, erro
 	}
 	args = append(args, "-o", "ClearAllForwardings=no", "-N", "-o", "ExitOnForwardFailure=yes")
 	for _, p := range pairs {
-		args = append(args, "-L", fmt.Sprintf("127.0.0.1:%d:%s:%d", p.Local, p.RemoteHost, p.Remote))
+		spec, err := forwardSpec(p)
+		if err != nil {
+			return nil, err
+		}
+		args = append(args, "-L", spec)
 	}
 	if err := s.checkForward(ctx, args); err != nil {
 		return nil, err
 	}
 	args = append(args, "--", s.Host.SSH)
 	return exec.CommandContext(ctx, "ssh", args...), nil
+}
+
+func forwardSpec(p ForwardPair) (string, error) {
+	if p.RemoteSocket == "" {
+		return fmt.Sprintf("127.0.0.1:%d:%s:%d", p.Local, p.RemoteHost, p.Remote), nil
+	}
+	if !strings.HasPrefix(p.RemoteSocket, "/") || strings.ContainsAny(p.RemoteSocket, ":\r\n\x00 \t") {
+		return "", &UserError{
+			Msg:  fmt.Sprintf("invalid host port socket %q", CleanLine(p.RemoteSocket)),
+			Hint: "Update the host helper and try again.",
+			Code: "bad_socket",
+		}
+	}
+	return fmt.Sprintf("127.0.0.1:%d:%s", p.Local, p.RemoteSocket), nil
 }
 
 // checkForward reads `ssh -G` with Forward's options, which connects to

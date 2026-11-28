@@ -61,6 +61,21 @@ func (a *attacher) paste(ctx context.Context, p keys.Piece) {
 	if dropRead != nil {
 		dropRead()
 	}
+	payloads := make([][]byte, len(files))
+	for i, f := range files {
+		// Read through the file that the guard checked, not the path again.
+		data, ok, err := readDropped(drop.files[i], MaxImage)
+		if err != nil || !ok {
+			_ = a.conn.Send(proto.TInput, p.Raw)
+			return
+		}
+		if !pasteTypeAllowed(a.walled, a.o.Settings.Sandbox.Paste, data) {
+			a.notify(ctx, pasteTypeNotice(files, f))
+			_ = a.conn.Send(proto.TInput, p.Raw)
+			return
+		}
+		payloads[i] = data
+	}
 	var remote, names []string
 	var sizes []int
 	// The notice names each file that went up, even when a later one fails.
@@ -70,12 +85,7 @@ func (a *attacher) paste(ctx context.Context, p keys.Piece) {
 		}
 	}()
 	for i, f := range files {
-		// Read through the file that the guard checked, not the path again.
-		data, ok, err := readDropped(drop.files[i], MaxImage)
-		if err != nil || !ok {
-			_ = a.conn.Send(proto.TInput, p.Raw)
-			return
-		}
+		data := payloads[i]
 		uctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		path, err := a.conn.Upload(uctx, a.o.Session, filepath.Base(f), data)
 		cancel()

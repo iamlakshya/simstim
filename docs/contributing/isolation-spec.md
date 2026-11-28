@@ -1068,13 +1068,13 @@ It never holds a query string, a header value or a body. Before it writes a path
 ### 7.4 Ports
 
 - **Default:** nothing from a sandbox reaches the laptop or the host.
-- **Opened by:** `simstim forward devbox/auth-fix 3000`, which adds a `port` rule in the session layer, and the row shows it. `simstim policy allow port 3000 --in devbox/auth-fix` adds one without forwarding.
+- **Opened by:** `simstim forward devbox/auth-fix 3000`, which grants the port through `port.grant` on the supervisor (and revokes grants it opened when `forward` exits, keeping any pre-existing grant). The session row shows active granted ports (`Ports`). Once P1.12 adds policy rules, `simstim policy allow port 3000 --in devbox/auth-fix` adds a persistent grant without forwarding.
 - **Path:** while the grant holds, the supervisor listens on the Unix socket `paths.PortSocket(id, port)`, `$XDG_RUNTIME_DIR/<name>/p/<id>/<port>.sock` (0600, in a 0700 folder). `forward` runs `ssh -N -L 127.0.0.1:<port>:<socket>`. Each connection becomes a `port` stream, and the guest init connects it to `127.0.0.1:<port>` inside the sandbox. No TCP port opens on the host.
 - **List:** `ports` shows the guest's claim of its listening ports, marked as claimed, and the granted ones.
 - **No port named:** for a walled session, `forward` with no ports lists the claimed ports and asks which to forward, and without a terminal it forwards none. The guest never chooses a laptop port alone. A Docker Sandboxes sandbox took another sandbox's OAuth callback port that way ([v0.42.0](https://github.com/docker/sbx-releases/releases/tag/v0.42.0)).
 - **Browser:** pages from a session run in the laptop's browser at a localhost origin, which shares cookies with other local apps by port ([RFC 6265, 8.5](https://datatracker.ietf.org/doc/html/rfc6265#section-8.5)). The first forward of a walled session shows a notice that says so, and suggests `http://<id>.localhost:<port>`, which browsers send to the loopback address.
 - **Transports:** `forward` stays SSH-only, as [0013](decisions/0013-host-providers.md) says.
-- **Reverse (P1.9):** `forward --reverse <laptop port>[:<guest port>]` lets a sandbox reach one service on the laptop, such as a database, on `own` hosts only. The guest init listens on the guest's own loopback. Each connection becomes an `rport` stream (5.2) through the supervisor and the bridge to the client, which dials only that laptop port on `127.0.0.1`. Nothing listens on the host. The row shows it, and the audit log records each connection ([question 58](#15-open-questions)).
+- **Reverse (deferred from v1):** per [0053](decisions/0053-rebuild-with-open-source-parts.md) and [reuse](../research/reuse.md#13-ports-p19-spec-74), `forward --reverse` and `port.reverse` (`rport` streams) are deferred from v1; forward ports use OpenSSH `-L` to the supervisor's Unix socket alone.
 
 ### 7.5 Devices
 
@@ -1957,6 +1957,7 @@ The supervisor serves `paths.Socket(id)` with the holder's protocol. It answers 
 | `rename`, `kill` | supervisor | |
 | `peek`, `send` | passed to the guest holder | |
 | `ports` | both | The claim, and the granted ports |
+| `port.grant`, `port.revoke` | supervisor | Open or close the host Unix socket `paths.PortSocket(id, port)` for one guest port (7.4) |
 | `debug.*` | both | The supervisor's own files, and the guest's through the `ctl` stream |
 | `secrets` | supervisor | Only before the sandbox starts, as today |
 | `policy.ls`, `policy.add`, `policy.rm`, `policy.check` | supervisor | New |
@@ -1989,7 +1990,8 @@ New bridge ops. The bridge serves the ops of section 14 in a new `internal/host/
 | `image.ls`, `image.pull`, `image.install`, `image.status`, `image.rm` | `images` | List the host's images, fetch one by digest, check the layers that the laptop copied, report progress, and remove one | 20.2 |
 | `host.facts` | `facts` | The host's facts and health items | 14.10.2, 14.11.1 |
 | `host.drain` | `drain` | Sets or clears the drain mark | 14.11.3 |
-| `port.reverse` | `rport` | Carries each `rport` stream from the session's supervisor to the client, on an `own` host only. The client dials only the laptop port that `forward --reverse` named, on `127.0.0.1`, and closes the stream when that port refuses. | 7.4 |
+| `port.grant`, `port.revoke` | `port.grant` | Passes a port grant or revoke to a walled session's supervisor, which opens or removes `paths.PortSocket(id, port)` | 7.4 |
+| `port.reverse` | `rport` | Deferred from v1 per [0053](decisions/0053-rebuild-with-open-source-parts.md) and [reuse](../research/reuse.md#13-ports-p19-spec-74). | 7.4 |
 | `host.purge` | `purge` | Removes what the helper put on the host, and reports it | 14.12 |
 | `policy.ls`, `policy.add`, `policy.rm`, `policy.check`, `policy.replace`, `policy.log`, `spawn`, `exec`, `stop`, `arm`, `pull.begin`, `pull.read`, `pulled` | `policy`, `spawn`, `stop`, `arm`, `pull.bundle` | The bridge passes these to the session's supervisor | 6, 10.4 |
 | `cp.list`, `cp.read`, `checkpoints`, `rewind`, `image.save`, `image.keep`, `image.drop` | `cp`, `rewind`, `image.save` | The bridge passes these to the session's supervisor, from P5 | 10.4, 21.1 to 21.3 |

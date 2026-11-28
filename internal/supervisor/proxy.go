@@ -73,7 +73,7 @@ func (s *Supervisor) serveConn(conn net.Conn) {
 		Protocol: version.Protocol,
 		Version:  version.Version,
 		Role:     "supervisor",
-		Features: []string{"put"},
+		Features: []string{"put", "port.grant"},
 	}); err != nil {
 		return
 	}
@@ -189,6 +189,10 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 	case "kill":
 		reply(map[string]bool{"killed": true}, nil)
 		go s.requestStop("killed by request", false)
+	case "port.grant":
+		s.handlePortGrant(w, req)
+	case "port.revoke":
+		s.handlePortRevoke(w, req)
 	case "peek", "send", "ports":
 		s.forwardHolderRequest(w, req)
 	default:
@@ -287,11 +291,8 @@ func (s *Supervisor) forwardHolderRequest(w *proto.Writer, req proto.Request) {
 			fail("protocol", "invalid port list from guest holder", "Try again.")
 			return
 		}
-		cleaned := cleanPorts(ports)
-		if cleaned == nil {
-			cleaned = []api.Port{}
-		}
-		resp.Result, _ = json.Marshal(cleaned)
+		merged := s.mergePorts(cleanPorts(ports))
+		resp.Result, _ = json.Marshal(merged)
 		_ = w.WriteJSON(proto.TResponse, resp)
 	case "send":
 		var res struct {
@@ -368,7 +369,11 @@ func (s *Supervisor) pumpGuestToBridge(hr *bufio.Reader, w *proto.Writer) {
 			s.refuseFrame("guest", f.Type)
 			return
 		}
-		if err := w.Write(f.Type, f.Payload); err != nil {
+		payload := f.Payload
+		if f.Type == proto.TAttached {
+			payload = markAttachedWalled(payload)
+		}
+		if err := w.Write(f.Type, payload); err != nil {
 			return
 		}
 	}

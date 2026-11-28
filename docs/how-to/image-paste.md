@@ -8,6 +8,12 @@ While attached, copy a screenshot, then press **Ctrl+V** (Alt+V on Windows). The
 - Uploaded files are private to your user on the host, and deleted after a day.
 - The key is a setting: `attach.image_paste_key` in [config.toml](../reference/config.md).
 
+## Walled sessions
+
+For a walled session, the host bridge streams uploaded files through the supervisor and over the link into the guest's private paste folder (`/run/simstim/paste/`), and the client pastes that guest path. The supervisor writes an audit entry for each upload.
+
+By default, walled sessions accept only images (PNG, JPEG, GIF and WebP) and PDF files, checked by file content. Other types, such as `.zip` archives, stay on your laptop and their paste goes in as plain text with a notice. To allow other file types into walled sessions, set `paste = "any"` under `[sandbox]` in [config.toml](../reference/config.md). The paste guard still refuses private files and clipboard-written paths in either mode.
+
 ## Files that stay on your laptop
 
 A drop reaches the client as a paste of file paths. So the paste guard checks each file before the upload. If it refuses one file, the client uploads nothing, sends the paste to the agent as the plain text of the paths, and shows a notice that says why.

@@ -119,6 +119,9 @@ type SessionInfo struct {
 	// Claimed is true when State, Source and Reason come from the guest
 	// inside the wall rather than from the trusted side.
 	Claimed bool `json:"claimed,omitempty"`
+	// Ports lists the guest ports currently granted for forwarding on a walled
+	// session (spec 7.4).
+	Ports []int `json:"ports,omitempty"`
 }
 
 // ResumeArgs asks a host to start the agent of a session again, in the same
@@ -234,6 +237,38 @@ type Port struct {
 	Address string `json:"address"`
 	PID     int    `json:"pid"`
 	Process string `json:"process,omitempty"`
+	// Claimed is true when the port was reported by a guest inside a wall
+	// (spec 7.4).
+	Claimed bool `json:"claimed,omitempty"`
+	// Granted is true when the supervisor currently exposes this port on a
+	// private Unix socket on the host.
+	Granted bool `json:"granted,omitempty"`
+	// Socket is the host-side Unix socket path while Granted is true.
+	Socket string `json:"socket,omitempty"`
+}
+
+// PortGrantArgs asks the host to grant or revoke forwarding for one port of a
+// walled session ("port.grant" and "port.revoke").
+type PortGrantArgs struct {
+	ID   string `json:"id"`
+	Port int    `json:"port"`
+}
+
+// PortGrantResult is the answer to "port.grant": the host-side Unix socket
+// that ssh -L connects to for a walled session.
+type PortGrantResult struct {
+	Port           int    `json:"port"`
+	Socket         string `json:"socket"`
+	AlreadyGranted bool   `json:"already_granted,omitempty"`
+	// FirstForward is true on the first port grant of a walled session's run,
+	// so the client can display the browser localhost cookie notice once.
+	FirstForward bool `json:"first_forward,omitempty"`
+}
+
+// PortRevokeResult is the answer to "port.revoke".
+type PortRevokeResult struct {
+	Port    int  `json:"port"`
+	Revoked bool `json:"revoked"`
 }
 
 // DeleteResult says what deleting a session did.

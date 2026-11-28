@@ -15,6 +15,11 @@ type HolderHeader struct {
 	Session string `json:"session"`
 }
 
+// PortHeader is the JSON header of a link.KindPort stream (supervisor -> guest).
+type PortHeader struct {
+	Port int `json:"port"`
+}
+
 // PutHeader is the JSON header of a link.KindPut stream.
 type PutHeader struct {
 	Name   string `json:"name"`

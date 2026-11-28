@@ -77,6 +77,9 @@ type Manifest struct {
 	Image *ManifestImage `json:"image,omitempty"`
 	// Agents is the SHA-256 digest of the agents disk this session uses.
 	Agents string `json:"agents,omitempty"`
+	// GrantedPorts records guest ports currently granted on a walled session's
+	// supervisor (spec 7.4).
+	GrantedPorts []int `json:"granted_ports,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -224,7 +227,7 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"agent": true, "cwd": true, "env": true, "term": true, "limits": true, "runtime": true, "status": true,
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
-		"wall": true, "guest": true, "image": true, "agents": true}
+		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

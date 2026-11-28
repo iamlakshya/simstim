@@ -353,6 +353,8 @@ type Attached struct {
 	Live int64 `json:"live"`
 	// Exited is true when the agent has already exited.
 	Exited bool `json:"exited,omitempty"`
+	// Walled is true when the session runs behind a supervisor and guest init.
+	Walled bool `json:"walled,omitempty"`
 }
 
 // Resize changes the session's window size.

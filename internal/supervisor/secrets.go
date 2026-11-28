@@ -156,6 +156,7 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 		cancel()
 	}
 
+	s.closeAllPorts()
 	s.closeSocket()
 	<-s.acceptDone
 	s.closeAllConns()
@@ -165,6 +166,7 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 
 	s.mu.Lock()
 	_ = s.mem.Reap(s.id)
+	s.m.GrantedPorts = nil
 	s.ended = true
 	switch {
 	case system:
@@ -182,6 +184,7 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 
 func (s *Supervisor) finishSandboxExit(ex Exit) {
 	close(s.doneCh)
+	s.closeAllPorts()
 	s.closeSocket()
 	<-s.acceptDone
 	s.closeAllConns()
@@ -190,6 +193,7 @@ func (s *Supervisor) finishSandboxExit(ex Exit) {
 	_ = s.sb.Destroy()
 
 	s.mu.Lock()
+	s.m.GrantedPorts = nil
 	if !s.ended && !s.stopping {
 		s.ended = true
 		newKills := s.mem.Reap(s.id)

@@ -11,8 +11,9 @@ import (
 // in this file, a new session's secrets (secrets.go), its missing folder
 // (folders.go), trust in a repository's setup script (setup.go), the resume
 // of a session whose agent ended (resume.go), stopping a session while
-// keeping its state (stop.go), and SFTP/SSH-exec/bundle-pull file transfers.
-var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle}
+// keeping its state (stop.go), SFTP/SSH-exec/bundle-pull file transfers, and
+// port grants for walled sessions (bridge_ports.go).
+var moreFeatures = []string{"agents.check", "doctor.fix", "secrets", "mkdir", "setup.trust", "resume", "stop", api.FeatureSFTP, api.FeatureSSHExec, api.FeaturePullBundle, "port.grant"}
 
 func init() { Features = append(Features, moreFeatures...) }
 
@@ -47,6 +48,8 @@ func (b *bridge) handleMore(req proto.Request) bool {
 		}
 		v, err := Stop(a)
 		b.reply(req.ID, v, err)
+	case "port.grant", "port.revoke":
+		b.handlePortGrant(req)
 	default:
 		return false
 	}

@@ -95,6 +95,11 @@ type Supervisor struct {
 	connMu sync.Mutex
 	conns  map[net.Conn]struct{}
 
+	portMu         sync.Mutex
+	portGrants     map[int]*portGrant
+	hadPortForward bool
+	portsClosed    bool
+
 	stopOnce   sync.Once
 	stopCh     chan stopRequest
 	doneCh     chan struct{}
@@ -156,6 +161,7 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		limiter:    newEventLimiter(MaxCtlEventsPerSec),
 		pending:    map[uint64]chan proto.Response{},
 		conns:      map[net.Conn]struct{}{},
+		portGrants: map[int]*portGrant{},
 		lastHB:     time.Now(),
 		stopCh:     make(chan stopRequest, 1),
 		doneCh:     make(chan struct{}),

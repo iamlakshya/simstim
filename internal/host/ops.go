@@ -445,6 +445,7 @@ func deleteSession(id string, res *DeleteResult) error {
 	}
 	if isWalled(m) {
 		_ = os.RemoveAll(paths.GuestRuntimeDir(id))
+		_ = os.RemoveAll(paths.PortDir(id))
 	}
 	res.Deleted = true
 	return nil

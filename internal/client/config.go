@@ -88,6 +88,14 @@ type Settings struct {
 		// `new --memory-max` sets it for one session.
 		MemoryMax string `toml:"memory_max"`
 	} `toml:"sessions"`
+	// Sandbox holds defaults for walled sessions.
+	Sandbox struct {
+		// Paste sets which file types image paste and drag-and-drop may upload
+		// into a walled session: "images-and-pdf" (PNG, JPEG, GIF, WebP and
+		// PDF only, the default) or "any". The paste guard still refuses
+		// private files and clipboard-written paths in either mode.
+		Paste string `toml:"paste"`
+	} `toml:"sandbox"`
 	// Keymap rebinds launcher commands by name ("session: delete"). A value is
 	// a key, a list of keys, or "" to unbind. `config keymap` lists the names.
 	Keymap map[string]any `toml:"keymap"`
@@ -111,6 +119,7 @@ func DefaultSettings() Settings {
 	}
 	s.Attach.Scrollback = "keep"
 	s.Sessions.MemoryMax = "auto"
+	s.Sandbox.Paste = "images-and-pdf"
 	return s
 }
 
@@ -377,6 +386,9 @@ func LoadSettingsChecked() (Settings, string) {
 	}
 	if s.Sessions.MemoryMax == "" {
 		s.Sessions.MemoryMax = d.Sessions.MemoryMax
+	}
+	if s.Sandbox.Paste == "" {
+		s.Sandbox.Paste = d.Sandbox.Paste
 	}
 	return s, ""
 }

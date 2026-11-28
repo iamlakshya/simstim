@@ -18,10 +18,32 @@ import (
 // error that a site forgot to clean still prints clean.
 
 // printPorts prints a session's ports. A process in the session names
-// itself, so its name is the session's own text.
+// itself, so its name is the session's own text. Walled sessions mark each
+// port as claimed by the guest, granted by the supervisor, or both (spec 7.4).
 func printPorts(w io.Writer, ports []client.Port) {
 	for _, p := range ports {
-		fmt.Fprintf(w, "%-6d %-16s %s (pid %d)\n", p.Port, client.CleanLine(p.Address), client.CleanLine(p.Process), p.PID)
+		addr := client.CleanLine(p.Address)
+		if !p.Claimed && !p.Granted {
+			fmt.Fprintf(w, "%-6d %-16s %s (pid %d)\n", p.Port, addr, client.CleanLine(p.Process), p.PID)
+			continue
+		}
+		tag := portStateTag(p)
+		if p.PID > 0 {
+			fmt.Fprintf(w, "%-6d %-16s %s (pid %d) [%s]\n", p.Port, addr, client.CleanLine(p.Process), p.PID, tag)
+		} else {
+			fmt.Fprintf(w, "%-6d %-16s - [%s]\n", p.Port, addr, tag)
+		}
+	}
+}
+
+func portStateTag(p client.Port) string {
+	switch {
+	case p.Claimed && p.Granted:
+		return "claimed, granted"
+	case p.Granted:
+		return "granted"
+	default:
+		return "claimed"
 	}
 }
 

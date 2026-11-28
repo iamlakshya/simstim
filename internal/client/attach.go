@@ -38,7 +38,9 @@ type AttachOptions struct {
 	State    *AttachState
 	// Interactive allows SSH prompts on the first connection.
 	Interactive bool
-	In, Out     *os.File
+	// Walled marks a session known to run behind a supervisor and guest init.
+	Walled  bool
+	In, Out *os.File
 }
 
 // AttachResult says how an attach ended.
@@ -89,6 +91,8 @@ type attacher struct {
 	// clipUnread says that the paste guard could not read the clipboard in
 	// this attach, which its debug log said once.
 	clipUnread bool
+	// walled is true when the attached session runs behind a supervisor.
+	walled bool
 }
 
 // Attach connects to a session and runs it in this terminal until the user
@@ -137,6 +141,7 @@ func Attach(ctx context.Context, o AttachOptions) (AttachResult, error) {
 	if err != nil {
 		return AttachResult{}, err
 	}
+	a.walled = o.Walled || att.Walled
 	DebugLog().Debug("attached", diag.CatKey, diag.CatAttach, "mode", att.Mode, "from", att.From, "live", att.Live)
 
 	original, err := xterm.GetState(a.fd)
@@ -468,5 +473,9 @@ func (a *attacher) imageKey(ctx context.Context, p keys.Piece) {
 		return
 	}
 	a.swallow[1] = true
+	if !pasteTypeAllowed(a.walled, a.o.Settings.Sandbox.Paste, img) {
+		a.notify(ctx, `did not upload clipboard image: not a recognised image (PNG, JPEG, GIF, WebP). Try: set paste = "any" under [sandbox] in config.toml.`)
+		return
+	}
 	a.sendUpload(ctx, "clipboard.png", img)
 }

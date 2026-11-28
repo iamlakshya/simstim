@@ -40,6 +40,9 @@ func fillWallInfo(info *SessionInfo, m *Manifest) {
 		}
 	}
 	info.Claimed = m.Status.Claimed && info.Alive && info.State != StateLost
+	if info.Alive && len(m.GrantedPorts) > 0 {
+		info.Ports = slices.Clone(m.GrantedPorts)
+	}
 }
 
 func fillAgentManifest(m *Manifest, userArgv, argv []string, agent agents.Agent, known, inline bool, hooks []string, sessionUUID string) {
