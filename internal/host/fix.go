@@ -67,6 +67,7 @@ func findFixes(a api.FixArgs) []fixItem {
 	out = append(out, currentLinkFix()...)
 	out = append(out, staleSocketsFix()...)
 	out = append(out, oldHelpersFix()...)
+	out = append(out, bwrapFix()...)
 	return out
 }
 

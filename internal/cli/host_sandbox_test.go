@@ -287,8 +287,36 @@ func TestPrintSandboxesBlockEdgeCases(t *testing.T) {
 		if !strings.Contains(hints.String(), "apparmor-profiles") {
 			t.Errorf("expected AppArmor hint for restricted userns, got:\n%s", hints.String())
 		}
+		if strings.Count(hints.String(), "sudo") != 1 {
+			t.Errorf("expected single sudo command in AppArmor fallback hint, got:\n%s", hints.String())
+		}
 		if strings.Contains(hints.String(), "CONFIG_SECURITY_LANDLOCK") {
 			t.Errorf("Landlock proc.Fix leaked into userns hint:\n%s", hints.String())
+		}
+	})
+
+	t.Run("Ubuntu 24.04 missing bwrap prints one sudo command Try hint", func(t *testing.T) {
+		var rows, hints bytes.Buffer
+		wantCmd := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap apparmor-profiles apparmor-utils && install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict && apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict'"
+		p := api.CapProbe{
+			OS: "linux", Kernel: "6.8.0-45-generic",
+			Bwrap: false, LandlockABI: 4, Seccomp: true,
+			UserNS: false, UserNSRestricted: true,
+			Walls: []api.WallProbe{{
+				Driver: "process", Level: "process", OK: false,
+				Reason: "bubblewrap (bwrap) is not installed",
+				Fix:    wantCmd,
+			}},
+		}
+		printProcessWallLines(&rows, &hints, p)
+		if !strings.Contains(rows.String(), "bubblewrap (bwrap) is not installed") {
+			t.Errorf("rows =\n%s", rows.String())
+		}
+		if !strings.Contains(hints.String(), "Try: "+wantCmd) {
+			t.Errorf("hints =\n%s", hints.String())
+		}
+		if strings.Count(hints.String(), "sudo") != 1 {
+			t.Errorf("expected one sudo command in hints, got:\n%s", hints.String())
 		}
 	})
 

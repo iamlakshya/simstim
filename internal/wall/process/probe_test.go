@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/wall"
 )
 
@@ -91,8 +92,12 @@ func TestProbeWithScenarios(t *testing.T) {
 		if p.OK {
 			t.Fatalf("probe OK without bwrap: %+v", p)
 		}
-		if !strings.Contains(p.Reason, "bubblewrap") || p.Fix != "sudo apt install bubblewrap" {
-			t.Errorf("reason=%q fix=%q", p.Reason, p.Fix)
+		wantFix := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap'"
+		if !strings.Contains(p.Reason, "bubblewrap") || p.Fix != wantFix {
+			t.Errorf("reason=%q fix=%q, want %q", p.Reason, p.Fix, wantFix)
+		}
+		if strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("expected single sudo command, got %q", p.Fix)
 		}
 		if p.Facts["userns"] != "true" {
 			t.Errorf("expected direct userns check to pass: %+v", p.Facts)
@@ -121,8 +126,12 @@ func TestProbeWithScenarios(t *testing.T) {
 		if p.Facts["apparmor_userns"] != "true" || p.Facts["bwrap_apparmor"] != "blocked" {
 			t.Errorf("facts = %+v", p.Facts)
 		}
-		if !strings.Contains(p.Reason, "AppArmor") || !strings.Contains(p.Fix, "apparmor-profiles") || !strings.Contains(p.Fix, "bwrap-userns-restrict") {
-			t.Errorf("reason=%q fix=%q", p.Reason, p.Fix)
+		wantFix := "sudo sh -c 'apt-get update && apt-get install -y apparmor-profiles apparmor-utils && install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict && apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict'"
+		if !strings.Contains(p.Reason, "AppArmor") || p.Fix != wantFix {
+			t.Errorf("reason=%q fix=%q, want %q", p.Reason, p.Fix, wantFix)
+		}
+		if strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("expected single sudo command, got %q", p.Fix)
 		}
 	})
 
@@ -166,12 +175,13 @@ func TestProbeWithScenarios(t *testing.T) {
 			},
 		)
 		p := ProbeWith(ctx, d)
-		if p.OK || !strings.HasPrefix(p.Fix, "sudo cp "+appArmorBwrapExtra) {
-			t.Errorf("probe = %+v", p)
+		wantFix := "sudo sh -c 'install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict && apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict'"
+		if p.OK || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
 		}
 	})
 
-	t.Run("ubuntu 24.04 missing bwrap suggests bubblewrap and apparmor-profiles", func(t *testing.T) {
+	t.Run("ubuntu 24.04 missing bwrap suggests bubblewrap and apparmor-profiles in one sudo", func(t *testing.T) {
 		d := baseDeps(
 			map[string]string{
 				etcOSRelease:       "ID=ubuntu\nVERSION_ID=\"24.04\"\n",
@@ -182,8 +192,107 @@ func TestProbeWithScenarios(t *testing.T) {
 			func(string, []string) ([]byte, error) { return nil, errors.New("EPERM") },
 		)
 		p := ProbeWith(ctx, d)
-		if p.OK || !strings.Contains(p.Fix, "sudo apt install bubblewrap apparmor-profiles") {
+		wantFix := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap apparmor-profiles apparmor-utils && install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict && apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict'"
+		if p.OK || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
+		}
+	})
+
+	t.Run("ubuntu 24.04 missing bwrap with extra profile already on disk", func(t *testing.T) {
+		d := baseDeps(
+			map[string]string{
+				etcOSRelease:       "ID=ubuntu\nVERSION_ID=\"24.04\"\n",
+				procMaxUserNS:      "31176\n",
+				procAppArmorUserNS: "1\n",
+				appArmorBwrapExtra: "profile bwrap ...",
+			},
+			map[string]string{"unshare": "/usr/bin/unshare"},
+			func(string, []string) ([]byte, error) { return nil, errors.New("EPERM") },
+		)
+		p := ProbeWith(ctx, d)
+		wantFix := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap && install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict && apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict'"
+		if p.OK || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
+		}
+	})
+
+	t.Run("ubuntu 24.10 restricted missing bwrap without profile gets profile install too", func(t *testing.T) {
+		d := baseDeps(
+			map[string]string{
+				etcOSRelease:       "ID=ubuntu\nVERSION_ID=\"24.10\"\n",
+				procMaxUserNS:      "31176\n",
+				procAppArmorUserNS: "1\n",
+			},
+			nil,
+			func(string, []string) ([]byte, error) { return nil, errors.New("EPERM") },
+		)
+		p := ProbeWith(ctx, d)
+		if p.OK || !strings.Contains(p.Fix, "bwrap-userns-restrict") || strings.Count(p.Fix, "sudo") != 1 {
 			t.Errorf("probe = %+v", p)
+		}
+	})
+
+	t.Run("ubuntu 25.04 missing bwrap with profile installed only installs bubblewrap", func(t *testing.T) {
+		d := baseDeps(
+			map[string]string{
+				etcOSRelease:          "ID=ubuntu\nVERSION_ID=\"25.04\"\n",
+				procMaxUserNS:         "31176\n",
+				procAppArmorUserNS:    "1\n",
+				appArmorBwrapRestrict: "profile bwrap ...",
+			},
+			nil,
+			func(string, []string) ([]byte, error) { return nil, errors.New("EPERM") },
+		)
+		p := ProbeWith(ctx, d)
+		wantFix := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap'"
+		if p.OK || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
+		}
+	})
+
+	t.Run("custom bwrap outside /usr/bin/bwrap under AppArmor", func(t *testing.T) {
+		d := baseDeps(
+			map[string]string{
+				etcOSRelease:       "ID=ubuntu\nVERSION_ID=\"24.04\"\n",
+				procMaxUserNS:      "31176\n",
+				procAppArmorUserNS: "1\n",
+			},
+			map[string]string{"bwrap": "/usr/local/bin/bwrap", "true": "/usr/bin/true"},
+			func(_ string, args []string) ([]byte, error) {
+				if len(args) == 1 && args[0] == "--version" {
+					return []byte("bubblewrap 0.11.0\n"), nil
+				}
+				return []byte("bwrap: setting up uid map: Permission denied\n"), errors.New("exit status 1")
+			},
+		)
+		p := ProbeWith(ctx, d)
+		wantFix := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap apparmor-profiles apparmor-utils && install -m 0644 /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/bwrap-userns-restrict && apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict'"
+		if p.OK || !strings.Contains(p.Reason, "/usr/local/bin/bwrap") || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
+		}
+	})
+
+	t.Run("custom bwrap outside /usr/bin/bwrap when system bwrap and profile exist", func(t *testing.T) {
+		d := baseDeps(
+			map[string]string{
+				etcOSRelease:          "ID=ubuntu\nVERSION_ID=\"24.04\"\n",
+				procMaxUserNS:         "31176\n",
+				procAppArmorUserNS:    "1\n",
+				appArmorBwrapRestrict: "profile bwrap ...",
+				systemBwrapPath:       "bin",
+			},
+			map[string]string{"bwrap": "/usr/local/bin/bwrap", "true": "/usr/bin/true"},
+			func(_ string, args []string) ([]byte, error) {
+				if len(args) == 1 && args[0] == "--version" {
+					return []byte("bubblewrap 0.11.0\n"), nil
+				}
+				return []byte("bwrap: setting up uid map: Permission denied\n"), errors.New("exit status 1")
+			},
+		)
+		p := ProbeWith(ctx, d)
+		wantFix := "sudo apparmor_parser -r " + appArmorBwrapRestrict
+		if p.OK || !strings.Contains(p.Reason, "/usr/local/bin/bwrap") || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
 		}
 	})
 
@@ -244,8 +353,10 @@ func TestProbeWithScenarios(t *testing.T) {
 			func(string, []string) ([]byte, error) { return nil, errors.New("EPERM") },
 		)
 		p := ProbeWith(ctx, d)
-		if p.OK || !strings.Contains(p.Reason, "max_user_namespaces") {
-			t.Errorf("probe = %+v", p)
+		conf := "/etc/sysctl.d/50-" + brand.Name + "-userns.conf"
+		wantFix := "sudo sh -c 'printf \"user.max_user_namespaces = 15000\\n\" > " + conf + " && sysctl -p " + conf + "'"
+		if p.OK || !strings.Contains(p.Reason, "max_user_namespaces") || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
 		}
 	})
 
@@ -256,8 +367,10 @@ func TestProbeWithScenarios(t *testing.T) {
 			func(string, []string) ([]byte, error) { return nil, errors.New("EPERM") },
 		)
 		p := ProbeWith(ctx, d)
-		if p.OK || !strings.Contains(p.Reason, "unprivileged_userns_clone") {
-			t.Errorf("probe = %+v", p)
+		conf := "/etc/sysctl.d/50-" + brand.Name + "-userns.conf"
+		wantFix := "sudo sh -c 'printf \"kernel.unprivileged_userns_clone = 1\\n\" > " + conf + " && sysctl -p " + conf + "'"
+		if p.OK || !strings.Contains(p.Reason, "unprivileged_userns_clone") || p.Fix != wantFix || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("probe = %+v, want Fix=%q", p, wantFix)
 		}
 	})
 
@@ -315,6 +428,15 @@ func TestProbeWithScenarios(t *testing.T) {
 			if p.Fix != want {
 				t.Errorf("distro %s: fix = %q, want %q", id, p.Fix, want)
 			}
+		}
+	})
+
+	t.Run("package manager lookpath fallback without os-release", func(t *testing.T) {
+		d := baseDeps(nil, map[string]string{"apt-get": "/usr/bin/apt-get"}, func(string, []string) ([]byte, error) { return nil, errors.New("no") })
+		p := ProbeWith(ctx, d)
+		want := "sudo sh -c 'apt-get update && apt-get install -y bubblewrap'"
+		if p.Fix != want || strings.Count(p.Fix, "sudo") != 1 {
+			t.Errorf("fallback fix = %q, want %q", p.Fix, want)
 		}
 	})
 

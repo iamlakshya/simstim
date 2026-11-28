@@ -103,7 +103,7 @@ func TestFixesFindAndApply(t *testing.T) {
 
 	done := Fixes(api.FixArgs{Apply: true, IDs: []string{"current-link", "sockets", "old-helpers"}})
 	for _, f := range done {
-		if f.ID != "terminfo" && (!f.Done || f.Error != "") {
+		if f.ID != "terminfo" && f.ID != bwrapFixID && (!f.Done || f.Error != "") {
 			t.Errorf("%s: %+v", f.ID, f)
 		}
 	}

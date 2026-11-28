@@ -10,6 +10,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/wall"
+	"github.com/iamlakshya/simstim/internal/wall/process"
 )
 
 // pinHostFloor probes the host during host add / host create, prints the
@@ -223,7 +224,7 @@ func printUserNSLine(rows, hints io.Writer, p api.CapProbe, proc *api.WallProbe)
 			if procFailedOnUserNS(p, proc) && proc.Fix != "" {
 				fmt.Fprintf(hints, "    Try: %s\n", proc.Fix)
 			} else if p.Bwrap {
-				fmt.Fprintf(hints, "    Try: sudo apt install apparmor-profiles && sudo cp /usr/share/apparmor/extra-profiles/bwrap-userns-restrict /etc/apparmor.d/ && sudo apparmor_parser -r /etc/apparmor.d/bwrap-userns-restrict\n")
+				fmt.Fprintf(hints, "    Try: %s\n", process.AppArmorFallbackCmd())
 			}
 			return
 		}

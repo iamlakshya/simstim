@@ -59,16 +59,18 @@ func hostDoctorCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor <host>",
 		Short: "Check a host's setup, and with --fix fix what it can",
-		Long: "Checks systemd, terminfo, memory caps, swap and the agents on a host.\n" +
+		Long: "Checks systemd, terminfo, memory caps, swap, bubblewrap and the agents on a host.\n" +
 			"It checks that sessions keep running after you log out. It also checks the start-up entry\n" +
-			"that brings sessions back after a reboot. It warns when the host has less memory than\n" +
-			"an agent's docs ask for. It warns when a program in one session could drive another\n" +
-			"through its socket. For a VM made by host create lima, it checks, on this computer, that\n" +
-			"the VM cannot reach services on this computer's loopback address.\n\n" +
+			"that brings sessions back after a reboot. It checks that bubblewrap can start a sandbox\n" +
+			"and prints one sudo command when a host needs bubblewrap or Ubuntu's AppArmor profile.\n" +
+			"It warns when the host has less memory than an agent's docs ask for. It warns when a\n" +
+			"program in one session could drive another through its socket. For a VM made by host\n" +
+			"create lima, it checks, on this computer, that the VM cannot reach services on this\n" +
+			"computer's loopback address.\n\n" +
 			"With --fix it offers to fix what it found: sessions that stop when you log out, the start-up\n" +
 			"entry and Ghostty's terminfo. It also fixes a broken current helper link, stale session sockets\n" +
-			"and old helper versions. Each fix is shown and explained before it runs. A fix that needs root\n" +
-			"is printed for you.",
+			"and old helper versions. Each fix is shown and explained before it runs. A fix that needs root,\n" +
+			"such as installing bubblewrap or Ubuntu's AppArmor profile, is printed for you.",
 		Example: "  " + brand.Name + " host doctor my-vps\n  " + brand.Name + " host doctor my-vps --fix\n  " + brand.Name + " host doctor my-vps --json",
 		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

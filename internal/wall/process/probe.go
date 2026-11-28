@@ -104,6 +104,8 @@ type probeState struct {
 	profilePath      string
 	hasProfile       bool
 	hasExtraProfile  bool
+	bwrapPath        string
+	hasSystemBwrap   bool
 	bwrapFound       bool
 	bwrapOK          bool
 	bwrapRunErr      string
@@ -124,7 +126,7 @@ func ProbeWith(ctx context.Context, d ProbeDeps) wall.Probe {
 	}
 
 	st := collectProbeState(ctx, d, &p)
-	diagnoseProcessProbe(&p, st)
+	diagnoseProcessProbe(&p, st, d.LookPath)
 	return p
 }
 
@@ -137,6 +139,7 @@ func collectProbeState(ctx context.Context, d ProbeDeps, p *wall.Probe) probeSta
 		secOK:            d.SeccompOK(),
 		appArmorRestrict: readIntEquals(d.ReadFile, procAppArmorUserNS, 1),
 		hasExtraProfile:  pathExists(d.Stat, appArmorBwrapExtra),
+		hasSystemBwrap:   pathExists(d.Stat, systemBwrapPath),
 	}
 	st.maxUserNS, st.hasMaxUserNS = readInt(d.ReadFile, procMaxUserNS)
 	st.unprivClone, st.hasUnprivClone = readInt(d.ReadFile, procUnprivUserNSClone)
@@ -175,6 +178,7 @@ func probeBwrapState(ctx context.Context, d ProbeDeps, p *wall.Probe, st *probeS
 	facts := p.Facts
 	bwrapPath, bwrapErr := d.LookPath("bwrap")
 	st.bwrapFound = bwrapErr == nil && bwrapPath != ""
+	st.bwrapPath = bwrapPath
 	var userNSOK bool
 
 	if st.bwrapFound {
@@ -215,7 +219,7 @@ func recordBwrapAppArmorFact(facts map[string]string, st *probeState) {
 	}
 }
 
-func diagnoseProcessProbe(p *wall.Probe, st probeState) {
+func diagnoseProcessProbe(p *wall.Probe, st probeState, lookPath func(string) (string, error)) {
 	switch {
 	case kernelOlderThan513(st.release):
 		p.Reason = fmt.Sprintf("kernel %s is older than Linux 5.13", st.release)
@@ -228,16 +232,15 @@ func diagnoseProcessProbe(p *wall.Probe, st probeState) {
 		p.Fix = "run on a Linux host with CONFIG_SECCOMP_FILTER enabled (not inside a restricted container)"
 	case !st.bwrapFound:
 		p.Reason = "bubblewrap (bwrap) is not installed"
-		p.Fix = missingBwrapFix(st.osInfo, st.appArmorRestrict, st.hasProfile, st.hasExtraProfile)
+		p.Fix = missingBwrapFix(st.osInfo, lookPath, st.appArmorRestrict, st.hasProfile, st.hasExtraProfile)
 	case !st.bwrapOK && st.hasMaxUserNS && st.maxUserNS == 0:
 		p.Reason = "user namespaces are disabled (user.max_user_namespaces = 0)"
-		p.Fix = "sudo sysctl -w user.max_user_namespaces=15000"
+		p.Fix = userNSSysctlFix("user.max_user_namespaces", "15000")
 	case !st.bwrapOK && st.hasUnprivClone && st.unprivClone == 0:
 		p.Reason = "unprivileged user namespaces are disabled (kernel.unprivileged_userns_clone = 0)"
-		p.Fix = "sudo sysctl -w kernel.unprivileged_userns_clone=1"
+		p.Fix = userNSSysctlFix("kernel.unprivileged_userns_clone", "1")
 	case !st.bwrapOK && st.appArmorRestrict:
-		p.Reason = "Ubuntu's AppArmor user-namespace restriction blocks bubblewrap (kernel.apparmor_restrict_unprivileged_userns = 1)"
-		p.Fix = appArmorBwrapFix(st.profilePath, st.hasExtraProfile)
+		p.Reason, p.Fix = appArmorBwrapDiagnosis(st, lookPath)
 	case !st.bwrapOK:
 		if st.bwrapRunErr != "" {
 			p.Reason = "bubblewrap could not start a sandbox: " + st.bwrapRunErr
@@ -353,42 +356,6 @@ func parseOSRelease(data string) osReleaseInfo {
 		}
 	}
 	return info
-}
-
-func missingBwrapFix(osInfo osReleaseInfo, appArmorRestrict, hasProfile, hasExtraProfile bool) string {
-	if appArmorRestrict && !hasProfile && (osInfo.ID == "ubuntu" || strings.Contains(osInfo.IDLike, "ubuntu")) {
-		if hasExtraProfile {
-			return "sudo apt install bubblewrap && sudo cp " + appArmorBwrapExtra + " /etc/apparmor.d/ && sudo apparmor_parser -r " + appArmorBwrapRestrict
-		}
-		if osInfo.VersionID == "24.04" || osInfo.VersionID == "23.10" {
-			return "sudo apt install bubblewrap apparmor-profiles && sudo cp " + appArmorBwrapExtra + " /etc/apparmor.d/ && sudo apparmor_parser -r " + appArmorBwrapRestrict
-		}
-	}
-	switch {
-	case osInfo.ID == "debian" || osInfo.ID == "ubuntu" || strings.Contains(osInfo.IDLike, "debian"):
-		return "sudo apt install bubblewrap"
-	case osInfo.ID == "fedora" || osInfo.ID == "rhel" || osInfo.ID == "centos" || osInfo.ID == "rocky" || osInfo.ID == "almalinux" || strings.Contains(osInfo.IDLike, "fedora") || strings.Contains(osInfo.IDLike, "rhel"):
-		return "sudo dnf install bubblewrap"
-	case osInfo.ID == "arch" || osInfo.ID == "manjaro" || strings.Contains(osInfo.IDLike, "arch"):
-		return "sudo pacman -S bubblewrap"
-	case osInfo.ID == "alpine":
-		return "sudo apk add bubblewrap"
-	case strings.Contains(osInfo.ID, "suse") || strings.Contains(osInfo.IDLike, "suse"):
-		return "sudo zypper install bubblewrap"
-	default:
-		return "install the bubblewrap package"
-	}
-}
-
-func appArmorBwrapFix(profilePath string, hasExtraProfile bool) string {
-	switch {
-	case profilePath != "":
-		return "sudo apparmor_parser -r " + profilePath
-	case hasExtraProfile:
-		return "sudo cp " + appArmorBwrapExtra + " /etc/apparmor.d/ && sudo apparmor_parser -r " + appArmorBwrapRestrict
-	default:
-		return "sudo apt install apparmor-profiles && sudo cp " + appArmorBwrapExtra + " /etc/apparmor.d/ && sudo apparmor_parser -r " + appArmorBwrapRestrict
-	}
 }
 
 func readString(readFile func(string) ([]byte, error), path string) string {

@@ -32,6 +32,7 @@ simstim doctor --fix
 | | The `current` helper link is broken, so hooks and the restore unit cannot find the helper: points it at the helper in use. |
 | | Session sockets with no session behind them: removes them. |
 | | Old helper versions that nothing uses: removes them, keeping the newest three and every one in use. Each install does this by itself too. |
+| | Bubblewrap missing or blocked by Ubuntu's AppArmor user-namespace restriction: prints one `sudo` command for you to run (the doctor never runs `sudo`). |
 | `doctor --fix` | SSH configs generated for hosts you removed: removes them. |
 | | ControlMaster sockets whose SSH master died, which can make connections hang: removes them. |
 
@@ -50,8 +51,8 @@ The doctor never uses sudo. When a fix needs root, for example linger on some ho
 | An agent is "not installed" | `simstim agents install <agent> --host my-server` runs its installer in a session ([install agents](install-agents.md)). An agent installed by hand must be on your `PATH` in a login shell. |
 | An agent asks you to log in | Run its own login in a session; `host doctor` prints the command. |
 | Sessions stop when you log out | Linger is off: `host doctor` says so, and `host doctor --fix` turns it on. |
-| `bubblewrap (bwrap) is not installed` in `host doctor` | Install the distribution's `bubblewrap` package (for example `sudo apt install bubblewrap` on Debian or Ubuntu), then run `host doctor` again ([sandboxes](sandboxes.md#install-bubblewrap)). |
-| `user namespaces are restricted by AppArmor` in `host doctor` | On Ubuntu 24.04, install `apparmor-profiles` and load `/usr/share/apparmor/extra-profiles/bwrap-userns-restrict` into `/etc/apparmor.d/` with `apparmor_parser -r` ([sandboxes](sandboxes.md#install-bubblewrap)). |
+| `bubblewrap (bwrap) is not installed` in `host doctor` | Run the one-time `sudo` command that `host doctor` prints on the host to install the distribution's `bubblewrap` package, then run `host doctor` again ([sandboxes](sandboxes.md#install-bubblewrap)). |
+| `user namespaces are restricted by AppArmor` in `host doctor` | On Ubuntu 24.04, run the one-time `sudo` command that `host doctor` prints to install `apparmor-profiles` and load `/usr/share/apparmor/extra-profiles/bwrap-userns-restrict` into `/etc/apparmor.d/` ([sandboxes](sandboxes.md#install-bubblewrap)). |
 | The screen looks wrong after attaching | Detach and attach again. If it stays wrong, open an issue with your terminal's name and version. |
 | A session `ended (out of memory)` | The session's memory cap stopped the agent. Resume it in the same session: `simstim resume my-server/app`, or `u` in the launcher. Claude Code and Codex pick up the same conversation. `--memory-max 4G` gives it a bigger cap ([memory](memory.md#when-the-cap-stops-an-agent)). |
 | A session needs you: "close to its memory cap (2.7 of 2.9 GiB)" | The session's memory cap can soon stop a process, often the agent. Save your work first, then see [when a session comes close to its cap](memory.md#when-a-session-comes-close-to-its-cap). |
