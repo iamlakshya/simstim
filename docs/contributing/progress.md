@@ -24,6 +24,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 - **A new start on the published base (27 November 2026).** The branch's code is back to `main` plus the 17 finished tasks: a small product that works. The research, the specs, the plans and the decision records are kept as they were.
 - **Reuse first.** Each remaining task is built with maintained open-source parts where they meet the need. [Reuse](../research/reuse.md) gives the choice for every area: bubblewrap for the process wall, one systemd unit per session, a model gateway route in the egress process, SFTP and git bundles for files, the system `ssh` with pinned host keys, and Lima for a Mac as a host.
 - **Day 1 first.** The first working product is the daily-use path: a Mac client and a Linux server host, a session with Claude Code or Codex, attach and detach, files in and out, then stop and destroy. Later tasks stay in scope and follow it.
+- **Milestone M1, checked on a real Linux host (28 November 2026).** From a Mac client to a Debian 13 host, this works: host add with the sandbox report; sessions at the process wall (bubblewrap with seccomp and Landlock), where the session cannot see the host's home or keys; the egress allowlist, which refuses unknown hosts; Claude Code and Codex reaching their providers only through the model gateway, with the key held outside the sandbox; copying files and folders in and out; stop, resume and remove, with nothing left behind. The last step, a logged-in run with real accounts, waits on the owner's tokens.
 
 ## Every task
 
