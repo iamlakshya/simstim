@@ -119,7 +119,13 @@ func TestSupervisorExecOverBridgeLinkStream(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	tmp := t.TempDir()
+	// A short folder: the session's socket lives under it, and macOS allows
+	// only 104 bytes in a Unix socket's path, which t.TempDir() exceeds.
+	tmp, err := os.MkdirTemp("/tmp", "sup-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(tmp) })
 	t.Setenv("HOME", tmp)
 	t.Setenv("XDG_RUNTIME_DIR", filepath.Join(tmp, "run"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(tmp, "state"))
