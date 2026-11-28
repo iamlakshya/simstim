@@ -150,6 +150,11 @@ func addImages(cmd *cobra.Command, p *string, usage string) {
 	markSharedFlag(cmd.Flags().Lookup("images"))
 }
 
+func addIn(cmd *cobra.Command, p *string, usage string) {
+	cmd.Flags().StringVar(p, "in", "", usage)
+	markSharedFlag(cmd.Flags().Lookup("in"))
+}
+
 // oldFlagValue writes to the target flag's value so last-flag-wins semantics
 // hold when both the old and new flags appear, and records that the old flag
 // was used so the command warns once.

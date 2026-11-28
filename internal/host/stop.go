@@ -40,6 +40,9 @@ func Stop(a api.StopArgs) (*StopResult, error) {
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if isWalled(m) {
+		return stopSandbox(id, m)
+	}
 	running := alive(id)
 	if !running && m.Status.State == StateStopped {
 		if m.Run.Unit != "" {

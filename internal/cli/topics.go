@@ -65,6 +65,9 @@ const (
 		"then one Try: line with the next step. With --json, it is one JSON line on stderr instead."
 	ExitCodesOutro = "The shell gives 128 plus the number of the signal that ended a program, so Ctrl+C " +
 		"outside an attach gives 130. SIGTERM gives 130 too, because both cancel."
+	ExecExitCodesIntro = "`exec` exits with the code of the command that it ran, or one of these codes " +
+		"when no command ran or the command did not exit on its own. Errors before the command starts " +
+		"still print Error: and Try: on stderr."
 )
 
 // topics are the help topics.
@@ -95,9 +98,8 @@ func conceptsText() string {
 	return paragraph(ConceptsIntro) + "\n\n" + strings.TrimRight(columns(rows, "  "), "\n")
 }
 
-// exitCodesText is the text of help exit-codes: the table of exit codes,
-// the same one that printError reads. It holds the table of section 5.1
-// only: P1.13 adds that of 5.2, the codes of exec, with exec.
+// exitCodesText is the text of help exit-codes: the table of exit codes
+// (cli-spec 5.1) followed by the codes of exec (cli-spec 5.2).
 func exitCodesText() string {
 	rows := make([][]string, 0, 1+2*len(exitCodes))
 	rows = append(rows, []string{"Code", "Kind", "Meaning"})
@@ -108,7 +110,14 @@ func exitCodesText() string {
 		}
 		rows = append(rows, []string{strconv.Itoa(e.Code), kind, e.Meaning + "\n" + e.Examples}, nil)
 	}
-	return paragraph(ExitCodesIntro) + "\n\n" + columns(rows[:len(rows)-1], "") + "\n" + paragraph(ExitCodesOutro)
+	execRows := make([][]string, 0, 1+len(execExitCodes))
+	execRows = append(execRows, []string{"Exit", "Case"})
+	for _, e := range execExitCodes {
+		execRows = append(execRows, []string{e.Exit, e.Case})
+	}
+	return paragraph(ExitCodesIntro) + "\n\n" + columns(rows[:len(rows)-1], "") + "\n" +
+		paragraph(ExitCodesOutro) + "\n\nexec\n\n" + paragraph(ExecExitCodesIntro) + "\n\n" +
+		strings.TrimRight(columns(execRows, ""), "\n")
 }
 
 // columns lays rows out in columns, after indent. Every column but the last

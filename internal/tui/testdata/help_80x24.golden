@@ -10,15 +10,15 @@
     ~/src/app · 6.1 of 8 GiB · s4
   ── Keys ────────────────────────────────────────────────────────────────────
 
-    ↑↓ jk          move                 w              next waiting session
-    1–9            open that row        a              add host
-    esc            back to hosts        s              guided setup
-    n              new session          i              host details
-    enter          attach               /              search every host
+    ↑↓ jk          move                 y              copy attach command
+    1–9            open that row        w              next waiting session
+    esc            back to hosts        a              add host
+    n              new session          s              guided setup
+    enter          attach               i              host details
+    t              shell in sandbox     /              search every host
     space          peek at the screen   alt+e          show ended
     r f2           rename               q              quit
     d              delete               ctrl+o         commands
     u              resume               ctrl+c ctrl+c  quit
-    y              copy attach command
 
     esc close

@@ -130,6 +130,11 @@ func StartDeferred(a api.SessionStartArgs) (*SessionInfo, error) {
 	if err != nil {
 		return nil, UserError("not_found", "no session "+a.ID, "List sessions to find its ID.")
 	}
+	if m.SandboxOf != "" {
+		return nil, UserError("bad_request",
+			"session "+m.Name+" runs inside another session's sandbox and cannot use deferred start",
+			"Start sessions in an existing sandbox with new --in without --copy or --seed.")
+	}
 	if alive(a.ID) {
 		return nil, UserError("agent_running", "session "+m.Name+" is already running", "Attach to the running session.")
 	}

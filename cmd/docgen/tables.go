@@ -157,7 +157,11 @@ func exitCodesPage() []byte {
 		}
 		fmt.Fprintf(&b, "| %d | %s | %s | %s |\n", e.Code, kind, e.Meaning, e.Examples)
 	}
-	b.WriteString("\n" + prose(cli.ExitCodesOutro) + "\n")
+	b.WriteString("\n" + prose(cli.ExitCodesOutro) + "\n\n## `exec`\n\n" + prose(cli.ExecExitCodesIntro) + "\n\n")
+	b.WriteString("| Case | Exit |\n| --- | --- |\n")
+	for _, e := range cli.ExecExitCodes() {
+		fmt.Fprintf(&b, "| %s | %s |\n", e.Case, e.Exit)
+	}
 	return []byte(b.String())
 }
 

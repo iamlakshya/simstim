@@ -89,5 +89,31 @@ func validatePackageSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			})
 		}
 	}
+	if v := s.Sandbox.Shell; v != "" {
+		if strings.TrimSpace(v) == "" || strings.ContainsAny(v, "\x00\r\n") {
+			pos := ins.Pos("sandbox", "shell")
+			out = append(out, configFinding{
+				Path:     abbrev,
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Severity: "error",
+				Code:     "bad_value",
+				Message:  "sandbox.shell must be a shell path or command name without control characters",
+			})
+		}
+	}
+	for _, rel := range s.Sandbox.Keep {
+		if _, err := api.CheckKeepPath(rel); err != nil {
+			pos := ins.Pos("sandbox", "keep")
+			out = append(out, configFinding{
+				Path:     abbrev,
+				Line:     pos.Line,
+				Column:   pos.Column,
+				Severity: "error",
+				Code:     api.KeepRefusedCode,
+				Message:  err.Error(),
+			})
+		}
+	}
 	return out
 }

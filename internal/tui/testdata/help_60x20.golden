@@ -5,6 +5,7 @@
     esc            back to hosts
     n              new session
     enter          attach
+    t              shell in sandbox
     space          peek at the screen
     r f2           rename
     d              delete
@@ -17,4 +18,3 @@
     /              search every host
     alt+e          show ended
     q              quit
-    ctrl+o         commands

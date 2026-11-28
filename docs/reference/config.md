@@ -34,6 +34,8 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sandbox.system` | string | `"reset"` | Says whether a microvm's root filesystem resets at each start ("reset", the default) or keeps its changes on the session disk ("keep"). `new --keep-system` sets "keep" for one session. |
 | `sandbox.sudo` | boolean | `false` | Lets the user `agent` run sudo without a password inside a microvm sandbox. Refused on process and gvisor walls with sudo_wall. |
 | `sandbox.docker` | boolean | `false` | Starts the image's dockerd on first use inside a microvm sandbox and adds `agent` to the docker group. `new --docker` turns it on for one session. Refused on process and gvisor walls with docker_wall. |
+| `sandbox.shell` | string | — | Names the shell started by `shell` inside a sandbox, such as "/bin/bash" or "zsh". Leave empty to use the sandbox's login shell. |
+| `sandbox.keep` | array of string | — | Lists relative file paths under /home/agent to keep across sandbox restarts, such as [".bash_history"]. Startup and hook files such as .bashrc and .profile are refused (keep_refused). |
 | `network.min_release_age` | string | `"7d"` | Sets the minimum release age for package managers inside a sandbox, as a whole number of days from "0d" to "365d". "0d" turns the age check off. |
 | `network.model_budget` | integer | — | Caps the total model tokens a walled session may use across gateway requests. 0 turns the cap off. |
 | `network.upload_budget` | string | `"16M"` | Caps bytes uploaded per host per hour from a walled session to non-model hosts, such as "16M". "0" turns the cap off. |

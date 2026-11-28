@@ -133,6 +133,16 @@ type NewArgs struct {
 	// (sandbox.sudo, isolation spec 17.10). Refused on other walls with
 	// sudo_wall.
 	Sudo bool `json:"sudo,omitempty"`
+	// In names an existing session whose sandbox this session joins (spec 6.11).
+	In string `json:"in,omitempty"`
+	// Task is a short one-line description of the work for the session row.
+	Task string `json:"task,omitempty"`
+	// Keep lists relative files under /home/agent to keep across sandbox
+	// restarts, such as ".bash_history" (spec 6.11). Shell startup and hook
+	// files are refused with keep_refused.
+	Keep []string `json:"keep,omitempty"`
+	// Shell overrides the login shell started by `shell` inside a sandbox.
+	Shell string `json:"shell,omitempty"`
 }
 
 // WallInfo is a session's wall, in its row.
@@ -208,6 +218,11 @@ type SessionInfo struct {
 	// Usage holds the session's cumulative model token usage and configured
 	// budget (isolation spec 17.8).
 	Usage *SessionUsage `json:"usage,omitempty"`
+	// SandboxOf names the first session of this session's sandbox when this
+	// session runs inside another session's sandbox (spec 6.11).
+	SandboxOf string `json:"sandbox_of,omitempty"`
+	// Task is the short task description given at session start, if any.
+	Task string `json:"task,omitempty"`
 }
 
 // ResumeArgs asks a host to start the agent of a session again, in the same
@@ -246,11 +261,13 @@ type StopArgs struct {
 	ID string `json:"id"`
 }
 
-// StopResult is what a stop did: the session's updated row, and whether
-// the session was already stopped.
+// StopResult is what a stop did: the session's updated row, whether the
+// session was already stopped, and every session stopped when stopping a
+// multi-session sandbox (spec 6.11).
 type StopResult struct {
-	Session        SessionInfo `json:"session"`
-	AlreadyStopped bool        `json:"already_stopped,omitempty"`
+	Session        SessionInfo   `json:"session"`
+	AlreadyStopped bool          `json:"already_stopped,omitempty"`
+	Sessions       []SessionInfo `json:"sessions,omitempty"`
 }
 
 // Check is one line of the host doctor.
@@ -371,6 +388,9 @@ type DeleteResult struct {
 	// try. An older helper sends neither.
 	WorktreeCode string `json:"worktree_code,omitempty"`
 	WorktreeHint string `json:"worktree_hint,omitempty"`
+	// Sessions lists every session removed when deleting the primary session
+	// of a multi-session sandbox (spec 6.11).
+	Sessions []SessionInfo `json:"sessions,omitempty"`
 }
 
 // FoldersResult is what the new-session dialog completes folders from.

@@ -60,6 +60,10 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 		}
 		return nil, UserError("cache_path_invalid", msg, hint)
 	}
+	keepFiles, err := validateKeepFiles(a.Keep)
+	if err != nil {
+		return nil, err
+	}
 	argv, kind, agent, known, err := pickAgent(a)
 	if err != nil {
 		return nil, err
@@ -95,7 +99,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 		}
 	}()
 
-	guestArg0, extraRO, extraPathDirs := mapAgentMounts(resolved, searchPath, agent)
+	guestArg0, extraRO, extraPathDirs := mapAllAgentMounts(resolved, searchPath, agent)
 	argv[0] = guestArg0
 	name := strings.TrimSpace(a.Name)
 	if name == "" {
@@ -115,6 +119,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 		Run:     Runtime{Socket: paths.Socket(id), BootID: BootID()},
 		Status:  Status{State: StateStarting, Since: now},
 		Restart: Restart{Policy: "resume", MaxAttempts: 3},
+		Task:    strings.TrimSpace(a.Task),
 		Wall: &WallRecord{
 			Level:            level,
 			Driver:           driver,
@@ -122,7 +127,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			Preset:           string(egress.PresetBalanced),
 			WorkspaceHost:    wsHost,
 			WorkspaceGuest:   wsGuest,
-			StateDirs:        slices.Clone(agent.StateDirs),
+			StateDirs:        allAgentStateDirs(),
 			CacheDirs:        cacheDirs,
 			ExtraRO:          extraRO,
 			At:               now,
@@ -135,6 +140,8 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			BoundSecrets:     boundSecrets,
 			ExposedSecrets:   exposedSecrets,
 			SubscriptionAuth: subscriptionAuth,
+			Keep:             keepFiles,
+			Shell:            strings.TrimSpace(a.Shell),
 		},
 		HostName:    a.HostName,
 		SandboxName: name,

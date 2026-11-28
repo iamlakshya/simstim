@@ -209,6 +209,7 @@ func registry() []*command {
 				return needAgent(m)
 			},
 			run: (*Model).attachSelected, instead: (*Model).enterEnded},
+		{noun: "session", verb: "shell", short: "shell in sandbox", cli: "shell", keys: []binding{{"t", onSessions}}, why: needAgent, run: (*Model).openSandboxShell},
 		{noun: "session", verb: "peek", short: "peek at the screen", cli: "show --screen", keys: []binding{{"space", onSessions}}, why: needScreen, run: (*Model).openPreview},
 		{noun: "session", verb: "rename", cli: "rename", keys: []binding{{"r", onSessions}, {"f2", onSessions}}, why: needSession, run: (*Model).startRename},
 		{noun: "session", verb: "delete", cli: "rm", keys: []binding{{"d", onSessions}}, why: needSession, run: (*Model).confirmDelete},

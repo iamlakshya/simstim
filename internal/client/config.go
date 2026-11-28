@@ -154,6 +154,13 @@ type Settings struct {
 		// it on for one session. Refused on process and gvisor walls with
 		// docker_wall.
 		Docker bool `toml:"docker"`
+		// Shell names the shell started by `shell` inside a sandbox, such as
+		// "/bin/bash" or "zsh". Leave empty to use the sandbox's login shell.
+		Shell string `toml:"shell"`
+		// Keep lists relative file paths under /home/agent to keep across
+		// sandbox restarts, such as [".bash_history"]. Startup and hook files
+		// such as .bashrc and .profile are refused (keep_refused).
+		Keep []string `toml:"keep"`
 	} `toml:"sandbox"`
 	// Network holds defaults for sandbox network policy.
 	Network struct {

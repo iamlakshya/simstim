@@ -11,7 +11,7 @@ import (
 
 // sandboxFeatures are the bridge features for sandboxes and runtime delivery
 // (isolation spec 10.5 and 14.9.3).
-var sandboxFeatures = []string{"sandbox", "arm", "runtime"}
+var sandboxFeatures = []string{"sandbox", "arm", "runtime", "spawn"}
 
 func init() { Features = append(Features, sandboxFeatures...) }
 
@@ -68,6 +68,14 @@ func (b *bridge) handleSandbox(req proto.Request) bool {
 		}
 		res, err := InstallRuntime(a)
 		b.reply(req.ID, res, err)
+	case "spawn":
+		var a NewArgs
+		if err := json.Unmarshal(req.Args, &a); err != nil {
+			b.reply(req.ID, nil, UserError("bad_request", "the spawn request is not valid JSON", "Update the client."))
+			return true
+		}
+		v, err := SpawnInSandbox(a)
+		b.reply(req.ID, v, err)
 	default:
 		return false
 	}

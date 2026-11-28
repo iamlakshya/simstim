@@ -102,13 +102,7 @@ func RunBridge(in io.Reader, out io.Writer) error {
 				return nil
 			}
 		case proto.TAttach:
-			var a proto.Attach
-			if json.Unmarshal(f.Payload, &a) == nil {
-				b.note("attach", 0)
-				if err := b.attach(a); err != nil {
-					_ = w.WriteJSON(proto.TError, proto.Error{Code: "attach_failed", Message: err.Error(), Hint: "List sessions; it may have been deleted."})
-				}
-			}
+			b.dispatchAttach(f.Payload)
 		case proto.TInput:
 			if b.traced {
 				// When the bridge read the key, for the holder's trace.
@@ -149,6 +143,16 @@ func (b *bridge) dispatchRequest(payload []byte, r *bufio.Reader, out io.Writer)
 	return false
 }
 
+func (b *bridge) dispatchAttach(payload []byte) {
+	var a proto.Attach
+	if json.Unmarshal(payload, &a) != nil {
+		return
+	}
+	b.note("attach", 0)
+	if err := b.attach(a); err != nil {
+		_ = b.w.WriteJSON(proto.TError, proto.Error{Code: "attach_failed", Message: err.Error(), Hint: "List sessions; it may have been deleted."})
+	}
+}
 func (b *bridge) reply(id uint64, v any, err error) {
 	b.noteReply(id)
 	resp := proto.Response{ID: id, OK: err == nil}

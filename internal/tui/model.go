@@ -379,6 +379,8 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 		return m.onFolders(msg)
 	case startedMsg:
 		return m.onStarted(msg)
+	case shellOpenedMsg:
+		return m.onShellOpened(msg)
 	case resumedMsg:
 		return m.onResumed(msg)
 	case attachDoneMsg:

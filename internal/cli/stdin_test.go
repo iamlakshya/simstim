@@ -18,6 +18,7 @@ var stdinAllowed = map[string]string{
 	"prompts":  "the prompter reads p.in only through readLine, which reads through answer",
 	"pickSession": "the picker reads os.Stdin only through keyread.For: the terminal's one reader, which answer shares, " +
 		"so the picker and the questions never make a second reader, which on Windows would drop what waits in the console",
+	"runExec": "exec forwards redirected non-terminal stdin bytes straight to the sandboxed command and never reads interactive prompt answers",
 }
 
 // lineReads are the calls that read a line or a buffer of their own. Only

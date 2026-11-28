@@ -192,6 +192,9 @@ func prepareCopyInItems(settings client.Settings, h client.Host, copyFlags []str
 
 func startNewWithP114(cmd *cobra.Command, conn *client.Conn, h client.Host, a client.NewArgs, prep *preparedNewP114) (*client.Session, error) {
 	a.HostName = h.Name
+	if a.In != "" || prep == nil {
+		return startSession(cmd, conn, h, a)
+	}
 	a.CPUs = prep.cpus
 	a.DiskMax = prep.diskMax
 	a.Env = prep.env

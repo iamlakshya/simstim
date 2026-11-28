@@ -16,9 +16,10 @@ const (
 
 // sessRow is one row of the sessions list.
 type sessRow struct {
-	kind rowKind
-	h    *hostConn
-	s    client.Session
+	kind   rowKind
+	h      *hostConn
+	s      client.Session
+	indent bool // true for child sessions drawn under their sandbox's primary session
 }
 
 func (r sessRow) key() sessKey { return sessKey{r.h.name(), r.s.ID} }
@@ -51,11 +52,7 @@ func (m *Model) rows() []sessRow {
 		return nil
 	}
 	if h := m.selectedHost(); h != nil {
-		var out []sessRow
-		for _, s := range m.sessionsOf(h) {
-			out = append(out, sessRow{kind: rowSession, h: h, s: s})
-		}
-		return out
+		return groupSandboxRows(h, m.sessionsOf(h))
 	}
 	var out []sessRow
 	for _, h := range m.hosts {
@@ -63,13 +60,38 @@ func (m *Model) rows() []sessRow {
 		switch {
 		case len(list) > 0:
 			out = append(out, sessRow{kind: rowHeader, h: h})
-			for _, s := range list {
-				out = append(out, sessRow{kind: rowSession, h: h, s: s})
-			}
+			out = append(out, groupSandboxRows(h, list)...)
 		case h.status == stFailed:
 			out = append(out, sessRow{kind: rowHeader, h: h}, sessRow{kind: rowNote, h: h})
 		case h.status == stOffline:
 			out = append(out, sessRow{kind: rowHeader, h: h})
+		}
+	}
+	return out
+}
+
+// groupSandboxRows orders sessions of one host so every child session whose
+// primary session is visible sits directly underneath its primary session,
+// indented (isolation spec 6.11).
+func groupSandboxRows(h *hostConn, list []client.Session) []sessRow {
+	present := make(map[string]bool, len(list))
+	for _, s := range list {
+		present[s.ID] = true
+	}
+	children := map[string][]client.Session{}
+	var roots []client.Session
+	for _, s := range list {
+		if s.SandboxOf != "" && present[s.SandboxOf] {
+			children[s.SandboxOf] = append(children[s.SandboxOf], s)
+			continue
+		}
+		roots = append(roots, s)
+	}
+	out := make([]sessRow, 0, len(list))
+	for _, r := range roots {
+		out = append(out, sessRow{kind: rowSession, h: h, s: r})
+		for _, c := range children[r.ID] {
+			out = append(out, sessRow{kind: rowSession, h: h, s: c, indent: true})
 		}
 	}
 	return out

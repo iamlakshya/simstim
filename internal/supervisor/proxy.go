@@ -54,6 +54,10 @@ func (s *Supervisor) fullPeer(conn net.Conn) bool {
 }
 
 func (s *Supervisor) serveConn(conn net.Conn) {
+	s.serveSessionConn(s.id, conn)
+}
+
+func (s *Supervisor) serveSessionConn(sessionID string, conn net.Conn) {
 	defer conn.Close()
 	r := bufio.NewReaderSize(conn, 64<<10)
 	w := proto.NewWriter(conn)
@@ -73,7 +77,7 @@ func (s *Supervisor) serveConn(conn net.Conn) {
 		Protocol: version.Protocol,
 		Version:  version.Version,
 		Role:     "supervisor",
-		Features: []string{"put", "port.grant", "sftp", "ssh.exec", "arm"},
+		Features: []string{"put", "port.grant", "sftp", "ssh.exec", "arm", "spawn", "stop"},
 	}); err != nil {
 		return
 	}
@@ -103,11 +107,11 @@ func (s *Supervisor) serveConn(conn net.Conn) {
 				}
 				continue
 			}
-			if !s.handleRequest(w, req) {
+			if !s.handleRequest(sessionID, conn, r, w, req) {
 				return
 			}
 		case proto.TAttach:
-			s.handleAttach(conn, r, w, f)
+			s.handleAttach(sessionID, conn, r, w, f)
 			return
 		case proto.TUploadBegin:
 			s.handleUpload(conn, r, w, f.Payload)
@@ -154,7 +158,7 @@ func (s *Supervisor) refuseFrame(dir string, t proto.Type) {
 	})
 }
 
-func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
+func (s *Supervisor) handleRequest(sessionID string, conn net.Conn, r *bufio.Reader, w *proto.Writer, req proto.Request) bool {
 	reply := func(v any, perr *proto.Error) {
 		resp := proto.Response{ID: req.ID, OK: perr == nil, Error: perr}
 		if v != nil {
@@ -165,7 +169,13 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 	switch req.Op {
 	case "info":
 		s.mu.Lock()
-		m := *s.m
+		sess := s.sessions[sessionID]
+		if sess == nil {
+			s.mu.Unlock()
+			reply(nil, &proto.Error{Code: "not_found", Message: "session not in sandbox", Hint: "List sessions with ls."})
+			return true
+		}
+		m := *sess.m
 		s.mu.Unlock()
 		reply(m, nil)
 	case "rename":
@@ -178,11 +188,21 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 		}
 		name := strings.TrimSpace(args.Name)
 		s.mu.Lock()
-		s.m.Name = name
-		mCopy := *s.m
+		sess := s.sessions[sessionID]
+		if sess == nil {
+			s.mu.Unlock()
+			reply(nil, &proto.Error{Code: "not_found", Message: "session not in sandbox", Hint: "List sessions with ls."})
+			return true
+		}
+		sess.m.Name = name
+		mCopy := *sess.m
 		s.mu.Unlock()
-		_ = s.save(&mCopy, false)
-		s.audit.Record(AuditEntry{Event: "rename", Session: s.id, Detail: api.CleanText(name, 100)})
+		if sessionID == s.id {
+			_ = s.save(&mCopy, false)
+		} else {
+			_ = mCopy.Save()
+		}
+		s.audit.Record(AuditEntry{Event: "rename", Session: sessionID, Detail: api.CleanText(name, 100)})
 		reply(map[string]string{"name": name}, nil)
 	case "sockets":
 		reply(host.SocketsState{PeerCheck: s.peerCheck, Version: version.Version}, nil)
@@ -195,8 +215,21 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 	case "arm":
 		s.handleArm(w, req)
 	case "kill":
+		if sessionID != s.id {
+			s.killChildSession(sessionID)
+			reply(map[string]bool{"killed": true}, nil)
+			return false
+		}
 		reply(map[string]bool{"killed": true}, nil)
 		go s.requestStop("killed by request", false)
+	case "stop":
+		reply(map[string]bool{"stopped": true}, nil)
+		go s.requestStop("stopped by request", false)
+	case "spawn":
+		s.handleSpawn(w, req)
+	case "exec":
+		s.handleExecConn(conn, r, w, req)
+		return false
 	case "port.grant":
 		s.handlePortGrant(w, req)
 	case "port.revoke":
@@ -206,15 +239,15 @@ func (s *Supervisor) handleRequest(w *proto.Writer, req proto.Request) bool {
 	case "policy.reload":
 		s.handlePolicyReload(w, req)
 	case "peek", "send", "ports":
-		s.forwardHolderRequest(w, req)
+		s.forwardHolderRequest(sessionID, w, req)
 	default:
 		reply(nil, &proto.Error{Code: "unknown_op", Message: "unknown request " + req.Op, Hint: "Update the host helper."})
 	}
 	return true
 }
 
-func (s *Supervisor) openHolderStream(ctx context.Context) (*link.Stream, *bufio.Reader, *proto.Writer, error) {
-	st, err := s.link.Open(ctx, link.KindHolder, guest.HolderHeader{Session: s.id})
+func (s *Supervisor) openHolderStream(ctx context.Context, sessionID string) (*link.Stream, *bufio.Reader, *proto.Writer, error) {
+	st, err := s.link.Open(ctx, link.KindHolder, guest.HolderHeader{Session: sessionID})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("open holder stream: %w", err)
 	}
@@ -239,7 +272,7 @@ func (s *Supervisor) openHolderStream(ctx context.Context) (*link.Stream, *bufio
 	return st, hr, hw, nil
 }
 
-func (s *Supervisor) forwardHolderRequest(w *proto.Writer, req proto.Request) {
+func (s *Supervisor) forwardHolderRequest(sessionID string, w *proto.Writer, req proto.Request) {
 	fail := func(code, msg, hint string) {
 		_ = w.WriteJSON(proto.TResponse, proto.Response{ID: req.ID, Error: &proto.Error{Code: code, Message: msg, Hint: hint}})
 	}
@@ -258,7 +291,7 @@ func (s *Supervisor) forwardHolderRequest(w *proto.Writer, req proto.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	st, hr, hw, err := s.openHolderStream(ctx)
+	st, hr, hw, err := s.openHolderStream(ctx, sessionID)
 	if err != nil {
 		fail("session_gone", "the session's guest holder did not answer", "Check the session status with ls.")
 		return
@@ -324,13 +357,13 @@ func (s *Supervisor) forwardHolderRequest(w *proto.Writer, req proto.Request) {
 // handleAttach pumps frames between conn (the bridge) and a link.KindHolder
 // stream. It enforces the frame-type allowlist in both directions and NEVER
 // reads or modifies TOutput or TSnapshot payloads (byte-exact).
-func (s *Supervisor) handleAttach(conn net.Conn, r *bufio.Reader, w *proto.Writer, attachFrame proto.Frame) {
+func (s *Supervisor) handleAttach(sessionID string, conn net.Conn, r *bufio.Reader, w *proto.Writer, attachFrame proto.Frame) {
 	var a proto.Attach
 	if json.Unmarshal(attachFrame.Payload, &a) == nil {
-		s.noteAttach(a)
+		s.noteAttach(sessionID, a)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	st, hr, hw, err := s.openHolderStream(ctx)
+	st, hr, hw, err := s.openHolderStream(ctx, sessionID)
 	cancel()
 	if err != nil {
 		_ = w.WriteJSON(proto.TError, proto.Error{Code: "attach_failed", Message: err.Error(), Hint: "List sessions; it may have been stopped."})

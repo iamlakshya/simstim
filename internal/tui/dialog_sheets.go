@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -50,8 +51,25 @@ func deleteDialog(h *hostConn, s client.Session) *confirm {
 	if name == "" {
 		name = d.ID
 	}
+	lines := client.DeleteLines(s, host, homePath(h, d.Cwd))
+	if s.SandboxOf == "" {
+		var children []string
+		for _, c := range h.sessions {
+			if c.SandboxOf == s.ID {
+				cd := shown(c)
+				cn := cd.Name
+				if cn == "" {
+					cn = cd.ID
+				}
+				children = append(children, cn)
+			}
+		}
+		if len(children) > 0 {
+			lines = append(lines, fmt.Sprintf("This also destroys the sandbox and %d other session(s): %s.", len(children), strings.Join(children, ", ")))
+		}
+	}
 	return &confirm{
-		title: "Delete " + name + "?", lines: client.DeleteLines(s, host, homePath(h, d.Cwd)), danger: true,
+		title: "Delete " + name + "?", lines: lines, danger: true,
 		yes: hint{"enter", "delete"}, no: hint{"esc", "keep"},
 		run: func(m *Model) tea.Cmd { return m.deleteSession(host, s) },
 	}

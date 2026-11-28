@@ -20,8 +20,19 @@ func applyWallLandlock() error {
 	if err != nil {
 		return err
 	}
-	_ = os.Unsetenv(process.LandlockEnvVar())
-	return process.ApplyLandlock(cfg)
+	envVar := process.LandlockEnvVar()
+	_ = os.Unsetenv(envVar)
+	if err := process.ApplyLandlock(cfg); err != nil {
+		return err
+	}
+	prefix := envVar + "="
+	cleanEnv := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, prefix) {
+			cleanEnv = append(cleanEnv, kv)
+		}
+	}
+	return reexecAfterLandlock(cleanEnv)
 }
 
 func guestHolderEnv(sock, hookSock, manifestPath, logPath string) []string {

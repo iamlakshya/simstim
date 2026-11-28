@@ -2,6 +2,7 @@ package client
 
 import (
 	"maps"
+	"slices"
 
 	"github.com/iamlakshya/simstim/internal/api"
 )
@@ -101,17 +102,54 @@ func ValidatePackageSettings(s Settings) error {
 	return nil
 }
 
+// CheckSandboxKeep validates every [sandbox] keep entry and returns normalized
+// paths, or a KindRefused UserError with code "keep_refused" (spec 6.11).
+func CheckSandboxKeep(keep []string) ([]string, error) {
+	if len(keep) == 0 {
+		return nil, nil
+	}
+	out := make([]string, 0, len(keep))
+	for _, raw := range keep {
+		clean, err := api.CheckKeepPath(raw)
+		if err != nil {
+			return nil, &UserError{
+				Msg:  err.Error(),
+				Hint: "Remove shell startup and hook files (such as .bashrc or .profile) from [sandbox] keep in config.toml.",
+				Code: api.KeepRefusedCode,
+				Kind: KindRefused,
+			}
+		}
+		if !slices.Contains(out, clean) {
+			out = append(out, clean)
+		}
+	}
+	return out, nil
+}
+
 // withPackageSettings fills and validates a session's package manager, microvm
-// defaults and network budget settings from config.toml when the session is
-// walled or explicitly specifies them.
+// defaults, network budget and sandbox keep/shell defaults from config.toml
+// when the session is walled or explicitly specifies them.
 func withPackageSettings(a NewArgs) (NewArgs, error) {
 	walled := a.Wall != "" && a.Wall != "none"
+	s := LoadSettings()
+	if len(a.Keep) == 0 && walled && len(s.Sandbox.Keep) > 0 {
+		a.Keep = slices.Clone(s.Sandbox.Keep)
+	}
+	if len(a.Keep) > 0 {
+		keep, err := CheckSandboxKeep(a.Keep)
+		if err != nil {
+			return a, err
+		}
+		a.Keep = keep
+	}
+	if a.Shell == "" && (walled || a.In != "") && s.Sandbox.Shell != "" {
+		a.Shell = s.Sandbox.Shell
+	}
 	if !walled && a.PackageManagers == "" && a.MinReleaseAge == "" &&
 		a.ModelBudget == 0 && a.UploadBudget == "" && len(a.SandboxEnv) == 0 &&
 		a.Image == "" && !a.KeepSystem && !a.Docker && !a.Sudo {
 		return a, nil
 	}
-	s := LoadSettings()
 	if a.PackageManagers == "" {
 		a.PackageManagers = s.Sandbox.PackageManagers
 	}

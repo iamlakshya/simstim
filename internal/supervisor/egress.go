@@ -66,6 +66,9 @@ func (s *Supervisor) initEgress() error {
 	}
 	s.egress = client
 	s.egressStop = stopFn
+	for _, extra := range s.m.Wall.ExtraAgents {
+		s.allowAgentEgress(ctx, extra)
+	}
 	return nil
 }
 

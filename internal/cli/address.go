@@ -28,8 +28,7 @@ import (
 // from the word that the user typed: a session renamed since the cache saw
 // it is not found, and a new session of that name is found.
 
-// staleAfter is the age after which an address without a host asks a host
-// for its list again, instead of using the session cache (question C-3).
+// staleAfter is the age after which an address without a host re-queries hosts (C-3).
 const staleAfter = 60 * time.Second
 
 // address is a session that a command line names, before the command
@@ -373,6 +372,7 @@ type found struct {
 	host client.Host
 	conn *client.Conn
 	s    *client.Session
+	list []client.Session
 }
 
 // open dials the address's host, finds the session in the host's live
@@ -398,7 +398,7 @@ func (a address) open(ctx context.Context, cmd *cobra.Command, fn func(context.C
 	if err != nil {
 		return err
 	}
-	return fn(ctx, found{host: a.host, conn: conn, s: s})
+	return fn(ctx, found{host: a.host, conn: conn, s: s, list: list})
 }
 
 // find finds the address's session in list, the host's live list: a known

@@ -144,14 +144,15 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 	ctlCancel()
 
 	// If ctl "stop" was acknowledged, wall-init is already running its own
-	// shutdown with StopGrace; give it that window before escalating with Stop.
+	// shutdown with StopGrace plus keep-file persistence; give it that window
+	// plus a short buffer before escalating with Stop.
 	if ctlErr == nil {
 		waitCh := make(chan struct{})
 		go func() {
 			_ = s.sb.Wait()
 			close(waitCh)
 		}()
-		rem := time.Until(deadline)
+		rem := time.Until(deadline) + 2*time.Second
 		if rem > 0 {
 			t := time.NewTimer(rem)
 			select {
@@ -176,6 +177,7 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 	}
 
 	s.closeAllPorts()
+	s.closeChildSockets()
 	s.closeSocket()
 	<-s.acceptDone
 	s.closeAllConns()
@@ -196,14 +198,19 @@ func (s *Supervisor) finishStop(reason string, system bool) {
 		s.m.Status.Claimed = false
 	}
 	mCopy := *s.m
+	childCopies := s.finalizeChildrenLocked(reason, system)
 	s.mu.Unlock()
 	_ = s.save(&mCopy, true)
+	for _, cc := range childCopies {
+		_ = cc.Save()
+	}
 	s.audit.Record(AuditEntry{Event: "kill", Session: s.id, Detail: reason})
 }
 
 func (s *Supervisor) finishSandboxExit(ex Exit) {
 	close(s.doneCh)
 	s.closeAllPorts()
+	s.closeChildSockets()
 	s.closeSocket()
 	<-s.acceptDone
 	s.closeAllConns()
@@ -239,9 +246,13 @@ func (s *Supervisor) finishSandboxExit(ex Exit) {
 		s.audit.Record(AuditEntry{Event: "link_error", Session: s.id, ExitCode: &code, Signal: ex.Signal, OOM: oom})
 	}
 	mCopy := *s.m
+	childCopies := s.finalizeChildrenLocked("the sandbox exited unexpectedly", false)
 	s.mu.Unlock()
 	s.closeAlerts()
 	_ = s.save(&mCopy, true)
+	for _, cc := range childCopies {
+		_ = cc.Save()
+	}
 }
 
 func (s *Supervisor) finishLinkClosed() {

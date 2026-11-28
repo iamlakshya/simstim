@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/sandbox"
 )
@@ -62,6 +63,8 @@ type Spec struct {
 	StateDirs      []string
 	CacheHost      string
 	CacheDirs      []string
+	KeepHost       string
+	KeepFiles      []string
 	ExtraRO        []Mount
 	ExtraRW        []Mount
 	GuestPATH      string
@@ -249,6 +252,14 @@ func validateSpec(spec Spec, fsOps planFS) error {
 	if len(spec.CacheDirs) > 0 && !filepath.IsAbs(spec.CacheHost) {
 		return errors.New("process wall: cache folder must be an absolute path when cache dirs are set. Try: check session cache paths")
 	}
+	for _, rel := range spec.KeepFiles {
+		if _, err := api.CheckKeepPath(rel); err != nil {
+			return fmt.Errorf("process wall: %s (%w). Try: remove startup files from sandbox.keep", api.KeepRefusedCode, err)
+		}
+	}
+	if len(spec.KeepFiles) > 0 && !filepath.IsAbs(spec.KeepHost) {
+		return errors.New("process wall: keep folder must be an absolute path when keep files are set. Try: check session state paths")
+	}
 	for _, m := range append(slices.Clone(spec.ExtraRO), spec.ExtraRW...) {
 		if !filepath.IsAbs(m.Source) || !filepath.IsAbs(m.Dest) {
 			return fmt.Errorf("process wall: mount %q -> %q must use absolute paths. Try: use full paths", m.Source, m.Dest)
@@ -396,6 +407,10 @@ func appendWritableMounts(args []string, spec Spec, guestRun string) (outArgs, s
 		guestPath := GuestHome + "/" + slash
 		cachePaths = append(cachePaths, hostPath)
 		args = append(args, "--bind", hostPath, guestPath)
+	}
+	if spec.KeepHost != "" && len(spec.KeepFiles) > 0 {
+		statePaths = append(statePaths, spec.KeepHost)
+		args = append(args, "--bind", spec.KeepHost, guestRun+"/keep")
 	}
 	args = append(args, "--bind", spec.WorkspaceHost, spec.WorkspaceGuest)
 	for _, m := range spec.ExtraRW {

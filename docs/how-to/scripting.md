@@ -57,7 +57,7 @@ Esc, Ctrl+C, the end of input, or a signal at a question cancels. The command pr
 
 JSON keeps integer sizes exact, including values above 2 to the power of 53. Use an integer type when reading them.
 
-These commands take `--json`: `ls`, `show`, `new --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host test`, `host upgrade`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `agents login`, `config check`, `config keymap` and `version`. `new` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
+These commands take `--json`: `ls`, `show`, `new --detach`, `shell --detach`, `resume --detach`, `ports`, `doctor`, `host ls`, `host show`, `host test`, `host upgrade`, `host doctor`, `host restore`, `host status`, `host alerts`, `host alerts log`, `agents ls`, `agents login`, `config check`, `config keymap` and `version`. `new`, `shell` and `resume` need `--detach` with `--json`, because an attached session owns the terminal.
 
 <!-- test: help (needs a host) -->
 ```sh

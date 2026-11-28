@@ -48,6 +48,23 @@ var exitCodes = []ExitCode{
 // ExitCodes returns the table of exit codes, for the reference docs.
 func ExitCodes() []ExitCode { return exitCodes }
 
+// ExecExitCode is one row of the exec exit-code table (cli-spec 5.2).
+type ExecExitCode struct {
+	Case, Exit string
+}
+
+var execExitCodes = []ExecExitCode{
+	{Case: "The command ran and exited", Exit: "Its code"},
+	{Case: "A signal N ended the command", Exit: "128 + N"},
+	{Case: "--timeout ran out", Exit: "124"},
+	{Case: "exec failed before the command started: any kind above", Exit: "125"},
+	{Case: "The command was found, but could not run", Exit: "126"},
+	{Case: "The command was not found", Exit: "127"},
+}
+
+// ExecExitCodes returns the exit codes of `exec` (cli-spec 5.2).
+func ExecExitCodes() []ExecExitCode { return execExitCodes }
+
 // exitCode is the exit code of an error of kind k.
 func exitCode(k client.Kind) int {
 	for _, e := range exitCodes {
@@ -258,10 +275,18 @@ func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled, asJSO
 			return se.code
 		}
 	}
+	var code int
 	if asJSON {
-		return printErrorJSON(w, err, cmd, signalled)
+		code = printErrorJSON(w, err, cmd, signalled)
+	} else {
+		code = printError(w, err, cmd, colour, signalled)
 	}
-	return printError(w, err, cmd, colour, signalled)
+	// Per cli-spec 5.2, any pre-command failure in `exec` exits with 125
+	// while still printing the Error: and Try: lines on stderr.
+	if !signalled && cmd != nil && cmd.Name() == "exec" && code != 0 {
+		return 125
+	}
+	return code
 }
 
 // colourOn reports whether f should get colour: it is a terminal, NO_COLOR
@@ -283,6 +308,7 @@ var synonyms = map[string]map[string]string{
 		"del":      "rm",
 		"connect":  "attach",
 		"open":     "attach",
+		"ssh":      "shell",
 		"create":   "new",
 		"run":      "new",
 		"install":  "agents install",

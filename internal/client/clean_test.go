@@ -28,10 +28,10 @@ const tidy = "]52;c;aGk=ok"
 // TestCleanSession checks every string of a session row, and that the
 // cleaned row shares no list with the host's.
 func TestCleanSession(t *testing.T) {
-	in := Session{ID: dirty, Name: dirty, Agent: dirty, Cwd: dirty, State: dirty, Source: dirty, Reason: dirty,
+	in := Session{ID: dirty, Name: dirty, SandboxOf: dirty, Task: dirty, Agent: dirty, Cwd: dirty, State: dirty, Source: dirty, Reason: dirty,
 		Signal: dirty, Unit: dirty, HostVersion: dirty, MissingSecrets: []string{dirty}, Secrets: []string{dirty}}
 	got := CleanSession(in)
-	want := Session{ID: tidy, Name: tidy, Agent: tidy, Cwd: tidy, State: tidy, Source: tidy, Reason: tidy,
+	want := Session{ID: tidy, Name: tidy, SandboxOf: tidy, Task: tidy, Agent: tidy, Cwd: tidy, State: tidy, Source: tidy, Reason: tidy,
 		Signal: tidy, Unit: tidy, HostVersion: tidy, MissingSecrets: []string{tidy}, Secrets: []string{tidy}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("CleanSession = %+v, want %+v", got, want)

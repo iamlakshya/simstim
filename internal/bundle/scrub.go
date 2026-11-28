@@ -109,7 +109,7 @@ var formatWords = func() map[string]bool {
 var productWords = func() map[string]bool {
 	words := map[string]bool{}
 	for _, w := range []string{brand.Name, brand.DisplayName, brand.HostBinary, brand.VTBinary, brand.Slice,
-		"setup", "host", "new", "ls", "show", "agents", "image", "attach", "resume", "flip", "send", "kill", "rename", "ports",
+		"setup", "host", "new", "ls", "show", "agents", "image", "attach", "shell", "exec", "resume", "flip", "send", "kill", "rename", "ports",
 		"forward", "pull", "cp", "doctor", "debug", "config", "ssh-config", "ssh-proxy", "demo", "version", "start", "stop", "save", "profile",
 		"bundle", "add", "rm", "rekey", "test", "status", "create", "destroy", "restore", "idle", "upgrade", "alerts", "keys",
 		"terminal", "keymap", "path", "check", "install", "login", "log", "off", "set", "show", "completion", "help", "delete",

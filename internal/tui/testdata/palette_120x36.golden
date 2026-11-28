@@ -14,13 +14,13 @@
 
 
 
-
   ── Commands ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     ❯ ses
 
     ▍ New session                                                                                                  n
       Peek at the screen                                                                                       space
+      Shell in sandbox                                                                                             t
       Attach session                                                                                           enter
       Rename session                                                                                               r
       Delete session                                                                                               d

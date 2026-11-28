@@ -13,6 +13,8 @@ Examples:
 Sessions:
   new         Start a session on a host, and attach to it
   attach      Attach to a session
+  shell       Open a shell inside a session's sandbox
+  exec        Run one command inside a session's sandbox
   resume      Start a session's agent again after it ended, and attach to it
   stop        Stop a session and keep its state for resume or restore
   ls          List sessions on every host, or on one

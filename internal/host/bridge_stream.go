@@ -18,7 +18,7 @@ import (
 // into raw link-frame relay mode after its TResponse (isolation spec 10.5).
 func isStreamingOp(op string) bool {
 	switch op {
-	case "sftp", "ssh.exec":
+	case "sftp", "ssh.exec", "exec":
 		return true
 	default:
 		return false
@@ -43,12 +43,17 @@ func (b *bridge) serveStream(req proto.Request, r *bufio.Reader, out io.Writer) 
 		return false
 	}
 	if !isWalled(m) {
+		if req.Op == "exec" {
+			b.reply(req.ID, nil, UserError("not_walled", m.Name+" has no sandbox wall", "Start a walled session with --wall process, or use ssh for an unwalled host."))
+			return false
+		}
 		b.reply(req.ID, nil, UserError("bad_request", "streaming "+req.Op+" applies only to walled sessions", "Connect to an unwalled session directly."))
 		return false
 	}
 
+	rootID := sandboxRootID(m)
 	d := net.Dialer{Timeout: 3 * time.Second}
-	supConn, err := d.DialContext(context.Background(), "unix", paths.Socket(target.ID))
+	supConn, err := d.DialContext(context.Background(), "unix", paths.Socket(rootID))
 	if err != nil {
 		b.reply(req.ID, nil, UserError("sandbox_stopped",
 			fmt.Sprintf("session %s is not running", m.Name),

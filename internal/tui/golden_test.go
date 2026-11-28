@@ -83,6 +83,30 @@ func TestGolden(t *testing.T) {
 			hs.key("down")
 			return hs.m
 		}},
+		{"sandbox_group", func(t *testing.T, w, h int) *Model {
+			hs := sessions(t, w, h)
+			hc := hs.m.hostByName("atlas-dev")
+			if hc != nil && len(hc.sessions) > 0 {
+				hc.sessions[0].Wall = &api.WallInfo{Level: "process", Driver: "process"}
+				primary := hc.sessions[0]
+				hc.sessions = append(hc.sessions,
+					client.Session{
+						ID: "sb-sh1", Name: primary.Name + "-sh", SandboxOf: primary.ID,
+						Agent: "shell", Cwd: primary.Cwd, State: api.StateIdle, Alive: true,
+						Since: primary.Since, CreatedAt: primary.CreatedAt.Add(time.Minute),
+						Wall: primary.Wall,
+					},
+					client.Session{
+						ID: "sb-ag2", Name: primary.Name + "-codex", SandboxOf: primary.ID,
+						Agent: "codex", Cwd: primary.Cwd, State: api.StateWorking, Alive: true,
+						Since: primary.Since, CreatedAt: primary.CreatedAt.Add(2 * time.Minute),
+						Wall: primary.Wall,
+					},
+				)
+				hs.m.syncSel()
+			}
+			return hs.m
+		}},
 		{"debug_mark", func(t *testing.T, w, h int) *Model {
 			hs := sessions(t, w, h)
 			hs.be.debugFile = "/state/debug/client-1.jsonl"

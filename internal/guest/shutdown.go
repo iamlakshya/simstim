@@ -17,6 +17,7 @@ func (r *runner) beginShutdown(grace time.Duration) {
 		go func() {
 			defer close(r.shutdownDone)
 			r.stopHolders(grace)
+			r.saveKeepFiles()
 			r.signalStop()
 		}()
 	})

@@ -27,6 +27,8 @@ simstim attach my-vps/auth-fix      # go back to a session
 | --- | --- |
 | [`new`](new.md) | Start a session on a host, and attach to it |
 | [`attach`](attach.md) | Attach to a session |
+| [`shell`](shell.md) | Open a shell inside a session's sandbox |
+| [`exec`](exec.md) | Run one command inside a session's sandbox |
 | [`resume`](resume.md) | Start a session's agent again after it ended, and attach to it |
 | [`stop`](stop.md) | Stop a session and keep its state for resume or restore |
 | [`ls`](ls.md) | List sessions on every host, or on one |

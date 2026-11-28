@@ -172,6 +172,13 @@
   },
   {
     "v": 1,
+    "command": "session: shell",
+    "keys": [
+      "t"
+    ]
+  },
+  {
+    "v": 1,
     "command": "session: peek",
     "keys": [
       "space"

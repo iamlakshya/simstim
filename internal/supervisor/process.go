@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func (p *processSandbox) Wait() Exit {
 func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 	wsHost := m.Cwd
 	wsGuest := process.WorkspaceGuestPath(wsHost)
-	var stateDirs, cacheDirs []string
+	var stateDirs, cacheDirs, keepFiles []string
 	var extraRO, extraRW []process.Mount
 	shareNet := false
 	if m.Wall != nil {
@@ -46,6 +47,7 @@ func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 		}
 		stateDirs = append([]string(nil), m.Wall.StateDirs...)
 		cacheDirs = append([]string(nil), m.Wall.CacheDirs...)
+		keepFiles = append([]string(nil), m.Wall.Keep...)
 		for _, wm := range m.Wall.ExtraRO {
 			extraRO = append(extraRO, process.Mount{Source: wm.Source, Dest: wm.Dest, ReadOnly: true})
 		}
@@ -58,6 +60,10 @@ func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 	if !shareNet {
 		extraEnv = append(extraEnv, brand.Env("GUEST_PROXY")+"=1")
 	}
+	var keepHost string
+	if len(keepFiles) > 0 {
+		keepHost = filepath.Join(paths.SessionStateDir(id), "_keep")
+	}
 	return &processSandbox{
 		inner: process.NewSandbox(process.Spec{
 			SessionID:      id,
@@ -68,6 +74,8 @@ func NewProcessSandbox(id, helperExe string, m *host.Manifest) Sandbox {
 			StateDirs:      stateDirs,
 			CacheHost:      paths.SessionCachesDir(id),
 			CacheDirs:      cacheDirs,
+			KeepHost:       keepHost,
+			KeepFiles:      keepFiles,
 			ExtraRO:        extraRO,
 			ExtraRW:        extraRW,
 			GuestPATH:      envLookup(m.Env, "PATH"),

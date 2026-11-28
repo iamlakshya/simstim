@@ -72,6 +72,49 @@ type StartReq struct {
 	BoundSecretEnv    string   `json:"bound_secret_env,omitempty"`
 	BoundPlaceholders []string `json:"bound_placeholders,omitempty"`
 	SubscriptionRoute string   `json:"subscription_route,omitempty"`
+	Keep              []string `json:"keep,omitempty"`
+}
+
+// SpawnReq is the arguments object of the ctl "spawn" request (spec 6.11, 10.3).
+type SpawnReq struct {
+	Session   string   `json:"session"`
+	Name      string   `json:"name,omitempty"`
+	Agent     string   `json:"agent"`
+	Argv      []string `json:"argv"`
+	Env       []string `json:"env,omitempty"`
+	Secrets   []string `json:"secrets,omitempty"`
+	Cwd       string   `json:"cwd"`
+	Term      string   `json:"term,omitempty"`
+	Cols      int      `json:"cols"`
+	Rows      int      `json:"rows"`
+	RunHook   string   `json:"run_hook,omitempty"`
+	Notes     []string `json:"notes,omitempty"`
+	AgentID   string   `json:"agent_session_id,omitempty"`
+	IDSource  string   `json:"id_source,omitempty"`
+	Ephemeral bool     `json:"ephemeral,omitempty"`
+}
+
+// SpawnResp is the result object of the ctl "spawn" request (spec 10.3).
+type SpawnResp struct {
+	PID       int `json:"pid"`
+	HolderPID int `json:"holder_pid,omitempty"`
+	Cols      int `json:"cols,omitempty"`
+	Rows      int `json:"rows,omitempty"`
+}
+
+// KillSessionReq stops one spawned session's holder inside a running sandbox.
+type KillSessionReq struct {
+	Session string `json:"session"`
+	GraceMS int    `json:"grace_ms,omitempty"`
+}
+
+// ExecReq is the arguments object of the ctl "exec" request (spec 10.3).
+type ExecReq struct {
+	ID        string   `json:"id"`
+	Argv      []string `json:"argv"`
+	Cwd       string   `json:"cwd,omitempty"`
+	TimeoutMS int64    `json:"timeout_ms,omitempty"`
+	Env       []string `json:"env,omitempty"`
 }
 
 // StartResp is the result object of the ctl "start" request.

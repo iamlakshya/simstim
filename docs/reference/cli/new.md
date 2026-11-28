@@ -38,6 +38,7 @@ simstim new my-vps --agent claude --detach --json
 | `--env-file <stringArray>` | read non-secret K=V or K environment variables from a file on this laptop (repeatable) |
 | `--expose <strings>` | expose a secret from config.toml's [secrets] directly in a walled session's environment (repeatable, or comma-separated) |
 | `--image <string>` | microvm image reference or saved image name (default: sandbox.image in config.toml) |
+| `--in <string>` | start this session inside an existing session's sandbox |
 | `--inline` | start the agent in its inline mode, so your terminal keeps its scrollback (see agents.inline in config.toml) |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
 | `--keep-system` | keep microvm root filesystem changes across stops (default: reset) |
@@ -50,6 +51,7 @@ simstim new my-vps --agent claude --detach --json
 | `--seed <stringArray>` | seed the session from a git repository on this laptop as a git bundle (repeatable) |
 | `--seed-dirty` | with `--seed`, include uncommitted changes and non-ignored untracked files as one commit |
 | `--setup-script` | run the repository's setup script this time, whatever your answer for it |
+| `--task <string>` | a short note describing the task for this session |
 | `--wall <string>` | sandbox wall level: none, process or gvisor |
 | `-w`, `--worktree` | give the session its own git worktree and branch |
 

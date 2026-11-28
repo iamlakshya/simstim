@@ -10,11 +10,11 @@
 
     ▍ New session                                      n
       Peek at the screen                           space
+      Shell in sandbox                                 t
       Attach session                               enter
       Rename session                                   r
       Delete session                                   d
       Resume session · the agent still runs            u
       All sessions
-      Next waiting session                             w
 
     enter run   ↑↓ move   esc close

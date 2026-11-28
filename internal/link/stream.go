@@ -1,6 +1,7 @@
 package link
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,6 +56,7 @@ type Stream struct {
 	rdl, wdl    time.Time
 	readQ       waitq // Reads that wait
 	writeQ      waitq // a Write that waits
+	goneQ       waitq // WaitPeerGone waiters
 }
 
 var _ net.Conn = (*Stream)(nil)
@@ -240,6 +242,7 @@ func (st *Stream) Close() error {
 	st.in.reset()
 	st.readQ.wake()
 	st.writeQ.wake()
+	st.goneQ.wake()
 	switch {
 	case st.peerGone:
 		// The other end closed both ways first, and dropped what waited.
@@ -357,6 +360,35 @@ func (s *Session) remove(st *Stream) {
 	s.progress.wake()
 	st.readQ.wake()
 	st.writeQ.wake()
+	st.goneQ.wake()
+}
+
+// WaitPeerGone blocks until the other end closes the stream both ways (or the
+// link ends), returning true, or until this end closes the stream or ctx is
+// cancelled, returning false. A peer's CloseWrite (half-close) does not wake
+// WaitPeerGone, so callers can tell stdin EOF from client cancellation.
+func (st *Stream) WaitPeerGone(ctx context.Context) bool {
+	s := st.s
+	s.mu.Lock()
+	for {
+		switch {
+		case st.peerGone || s.closed:
+			s.mu.Unlock()
+			return true
+		case st.closedLocal:
+			s.mu.Unlock()
+			return false
+		}
+		c := st.goneQ.wait()
+		s.mu.Unlock()
+		select {
+		case <-c:
+		case <-s.done:
+		case <-ctx.Done():
+			return false
+		}
+		s.mu.Lock()
+	}
 }
 
 // without removes st from q.

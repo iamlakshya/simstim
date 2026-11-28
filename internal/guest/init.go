@@ -107,6 +107,10 @@ type runner struct {
 	ctlW         *proto.Writer
 	holders      map[string]*managedHolder
 	managed      map[int]struct{}
+	baseEnv      []string
+	baseCwd      string
+	keepFiles    []string
+	execs        map[string]*pendingExec
 	shutdownOnce sync.Once
 	shutdownDone chan struct{}
 
@@ -140,6 +144,7 @@ func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 		sess:         sess,
 		holders:      map[string]*managedHolder{},
 		managed:      map[int]struct{}{},
+		execs:        map[string]*pendingExec{},
 		shutdownDone: make(chan struct{}),
 		stopCh:       make(chan struct{}),
 	}
@@ -221,6 +226,8 @@ func (r *runner) handleStream(ctx context.Context, st *link.Stream) {
 		r.servePut(st)
 	case link.KindPort:
 		r.servePort(ctx, st)
+	case link.KindExec:
+		r.serveExec(ctx, st)
 	default:
 		r.handleExtraStream(ctx, st)
 	}
@@ -320,7 +327,7 @@ func (r *runner) handleCtlRequest(ctx context.Context, w *proto.Writer, req prot
 		r.beginShutdown(grace)
 		reply(map[string]any{}, nil)
 	default:
-		reply(nil, &proto.Error{Code: "unknown_op", Message: "unknown ctl op " + req.Op, Hint: "Update the host helper."})
+		r.handleMoreCtl(ctx, reply, req)
 	}
 }
 
@@ -355,22 +362,12 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check /run permissions inside the sandbox."}
 	}
 
-	agentEnv, err := applyStartPackageSettings(a, a.Env)
-	if err != nil {
-		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check sandbox.package_managers and network.min_release_age."}
-	}
-	agentEnv = applyStartCaches(a, agentEnv)
-	agentEnv, err = applyStartGateway(a, agentEnv)
-	if err != nil {
-		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the agent's model gateway configuration."}
-	}
-	if r.opts.MicroVM {
-		chownPathForAgent(envLookup(agentEnv, "HOME"))
-		agentEnv = ensureAgentsPath(agentEnv, r.agentsBinDir())
+	agentEnv, perr := r.prepareSessionEnv(a, first)
+	if perr != nil {
+		return nil, perr
 	}
 	agentEnv = withEnvVar(agentEnv, brand.Env("HOOK_SOCK"), hookPath)
 	agentEnv = withEnvVar(agentEnv, brand.Env("SESSION"), a.Session)
-	agentEnv = withEnvVar(agentEnv, "BROWSER", filepath.Join(r.runDir, "browser"))
 
 	m := host.Manifest{
 		Schema:  1,

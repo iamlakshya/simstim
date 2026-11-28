@@ -10,11 +10,12 @@ import (
 
 func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 	var pkgLevel, minAge, proxyURL, boundSecretEnv, subscriptionRoute string
-	var userEnv, boundPlaceholders, cacheDirs []string
+	var userEnv, boundPlaceholders, cacheDirs, keep []string
 	if s.m.Wall != nil {
 		pkgLevel = s.m.Wall.PackageManagers
 		minAge = s.m.Wall.MinReleaseAge
 		cacheDirs = slices.Clone(s.m.Wall.CacheDirs)
+		keep = slices.Clone(s.m.Wall.Keep)
 		if len(s.m.Wall.SandboxEnv) > 0 {
 			keys := make([]string, 0, len(s.m.Wall.SandboxEnv))
 			for k := range s.m.Wall.SandboxEnv {
@@ -56,5 +57,6 @@ func (s *Supervisor) buildStartReq(secretEnv, notes []string) guest.StartReq {
 		BoundSecretEnv:    boundSecretEnv,
 		SubscriptionRoute: subscriptionRoute,
 		BoundPlaceholders: boundPlaceholders,
+		Keep:              keep,
 	}
 }

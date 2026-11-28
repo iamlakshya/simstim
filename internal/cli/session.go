@@ -29,7 +29,7 @@ func termSize() (int, int) {
 }
 
 type newOpts struct {
-	agent, dir, name, base, wallLevel, image                string
+	agent, dir, name, base, wallLevel, image, in, task      string
 	detach, worktree, inline, setup, noSetup, mkdir, asJSON bool
 	keepSystem, docker                                      bool
 	usedOldDir, usedOldSetup, usedOldNoSetup                bool
@@ -88,6 +88,8 @@ func newCmd() *cobra.Command {
 	cmd.Flags().StringVar(&o.image, "image", "", "microvm image reference or saved image name (default: sandbox.image in config.toml)")
 	cmd.Flags().BoolVar(&o.keepSystem, "keep-system", false, "keep microvm root filesystem changes across stops (default: reset)")
 	cmd.Flags().BoolVar(&o.docker, "docker", false, "start the image's dockerd on first use inside a microvm (see sandbox.docker in config.toml)")
+	addIn(cmd, &o.in, "start this session inside an existing session's sandbox")
+	cmd.Flags().StringVar(&o.task, "task", "", "a short note describing the task for this session")
 	addJSON(cmd, &o.asJSON)
 	return cmd
 }
@@ -121,48 +123,24 @@ func newArgs(cmd *cobra.Command, args []string) error {
 }
 
 func runNew(cmd *cobra.Command, args []string, o newOpts) error {
-	if o.usedOldDir {
-		warnOld(cmd, oldNewShortDir)
-	}
-	if o.usedOldSetup {
-		warnOld(cmd, oldNewSetup)
-	}
-	if o.usedOldNoSetup {
-		warnOld(cmd, oldNewNoSetup)
-	}
-	if err := beforeAttach(cmd, o.asJSON, o.detach); err != nil {
-		return err
-	}
-	if err := client.CheckSessionName(o.name); err != nil {
-		return err
-	}
-	wl, err := parseWallFlag(o.wallLevel)
+	warnOldNewFlags(cmd, o)
+	wl, err := validateNewOpts(cmd, &o)
 	if err != nil {
 		return err
-	}
-	if cmd.Flags().Changed("secret") {
-		if o.secrets, err = parseNameList("--secret", o.secrets, false, "Pass one or more secret names from [secrets] in config.toml."); err != nil {
-			return err
-		}
-	}
-	if cmd.Flags().Changed("expose") {
-		if o.expose, err = parseNameList("--expose", o.expose, false, "Pass one or more secret names from [secrets] in config.toml."); err != nil {
-			return err
-		}
 	}
 	h, err := client.FindHost(args[0])
 	if err != nil {
 		return err
 	}
-	if o.setup && o.noSetup {
-		return &client.UserError{Msg: "--setup-script and --no-setup-script cannot go together", Hint: "Pass one of them.", Code: "flags_conflict", Kind: client.KindUsage}
-	}
 	settings := client.LoadSettings()
-	prep, err := prepareNewP114(cmd, h, settings, o.dir, o.worktree, o.p114)
-	if err != nil {
-		return err
+	var prep *preparedNewP114
+	if o.in == "" {
+		prep, err = prepareNewP114(cmd, h, settings, o.dir, o.worktree, o.p114)
+		if err != nil {
+			return err
+		}
+		defer prep.cleanup()
 	}
-	defer prep.cleanup()
 	// Fetch the secrets first: a password manager may want a touch,
 	// and a failing command should not cost a connection.
 	secretNames := client.GatewaySecretNames(settings, h, o.agent, wl, o.secrets, o.expose)
@@ -183,9 +161,17 @@ func runNew(cmd *cobra.Command, args []string, o newOpts) error {
 		Worktree: o.worktree, Base: o.base, Inline: o.inline,
 		Secrets: values, SecretBinds: secretBinds, ExposedSecrets: o.expose, Wall: wl,
 		Image: o.image, KeepSystem: o.keepSystem, Docker: o.docker,
+		Task: o.task,
 	}, cols, rows)
 	if dash := cmd.ArgsLenAtDash(); dash >= 0 {
 		a.Argv = args[dash:]
+	}
+	if o.in != "" {
+		if ierr := applyNewIn(ctx, cmd, conn, h.Name, o.in, &a); ierr != nil {
+			cancel()
+			conn.Close()
+			return ierr
+		}
 	}
 	if o.setup || o.noSetup {
 		a.Setup = setupValue(o.setup)

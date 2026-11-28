@@ -28,7 +28,8 @@ func TestSuggestions(t *testing.T) {
 		{[]string{"run"}, []string{"new"}, help("new")},
 		{[]string{"run", "box"}, []string{"new"}, brand.Name + " new box"},
 		{[]string{"at"}, []string{"attach"}, brand.Name + " attach"},
-		{[]string{"ssh", "box"}, []string{"ssh-config"}, help("ssh-config")},
+		{[]string{"ssh", "box"}, []string{"shell"}, brand.Name + " ls"},
+		{[]string{"ssh", "box/abcd2345"}, []string{"shell"}, brand.Name + " shell box/abcd2345"},
 		{[]string{"foo", "box"}, nil, help("")},
 		// kill is an old name of rm: a word near it suggests rm.
 		{[]string{"kil"}, []string{"rm"}, brand.Name + " rm"},

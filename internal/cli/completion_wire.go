@@ -145,6 +145,8 @@ func argCompletionBindings() []argCompletionBinding {
 
 	add(completeSessionAt(0),
 		[]string{"attach"},
+		[]string{"shell"},
+		[]string{"exec"},
 		[]string{"show"},
 		[]string{"rm"},
 		[]string{"resume"},
@@ -204,6 +206,7 @@ func flagCompletionBindings() []flagCompletionBinding {
 		{path: []string{"host", "rm"}, flag: "confirm", fn: completeConfirmHost},
 		{path: []string{"host", "rekey"}, flag: "confirm", fn: completeConfirmHost},
 		{path: []string{"new"}, flag: "agent", fn: completeAgents},
+		{path: []string{"new"}, flag: "in", fn: completeSessions},
 		{path: []string{"new"}, flag: "wall", fn: completeFixed(wallItems)},
 		{path: []string{"new"}, flag: "secret", fn: completeSecrets},
 		{path: []string{"new"}, flag: "expose", fn: completeSecrets},

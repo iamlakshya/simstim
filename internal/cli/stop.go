@@ -27,11 +27,29 @@ func stopCmd() *cobra.Command {
 					return err
 				}
 				if asJSON {
-					return printJSON(sessionObject(h.Name, res.Session))
+					obj := sessionObject(h.Name, res.Session)
+					if len(res.Sessions) > 1 {
+						list := make([]map[string]any, 0, len(res.Sessions))
+						for _, ss := range res.Sessions {
+							list = append(list, sessionObject(h.Name, ss))
+						}
+						obj["sessions"] = list
+					}
+					return printJSON(obj)
 				}
 				d := client.CleanSession(res.Session)
 				if res.AlreadyStopped {
 					say(cmd, "%s (%s) on %s is already stopped.\n", d.Name, d.ID, h.Name)
+					return nil
+				}
+				if len(res.Sessions) > 1 {
+					primary := client.CleanSession(res.Sessions[0])
+					say(cmd, "Stopped sandbox on %s (%d sessions):\n", shown(h.Name), len(res.Sessions))
+					for _, ss := range res.Sessions {
+						cs := client.CleanSession(ss)
+						say(cmd, "  %s (%s)\n", cs.Name, cs.ID)
+					}
+					say(cmd, "Resume it with %s resume %s.\n", brand.Name, client.CommandTarget(h.Name, primary.ID))
 					return nil
 				}
 				say(cmd, "Stopped %s (%s) on %s. Resume it with %s resume %s.\n",

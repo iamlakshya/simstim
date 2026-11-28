@@ -147,6 +147,7 @@ func cleanLines(list []string, clean func(string) string) []string {
 // the host sent cleaned. Requests use the row as the host sent it.
 func CleanSession(s Session) Session {
 	s.ID, s.Name, s.Agent = CleanLine(s.ID), CleanLine(s.Name), CleanLine(s.Agent)
+	s.SandboxOf, s.Task = CleanLine(s.SandboxOf), CleanLine(s.Task)
 	s.Cwd = CleanPath(s.Cwd)
 	s.State, s.Source, s.Reason = CleanLine(s.State), CleanLine(s.Source), CleanLine(s.Reason)
 	s.Signal, s.Unit, s.HostVersion = CleanLine(s.Signal), CleanLine(s.Unit), CleanLine(s.HostVersion)

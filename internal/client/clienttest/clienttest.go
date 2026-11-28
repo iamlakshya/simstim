@@ -65,6 +65,8 @@ type Transport struct {
 	// OnRequest, if set, gets the op of each request that reaches the
 	// bridge, before the bridge answers it.
 	OnRequest func(op string)
+	// OnNew, if set, gets each decoded "new" request before the bridge answers it.
+	OnNew func(api.NewArgs)
 	// Fixes is what doctor.fix lists, and applies as done.
 	Fixes []api.Fix
 	// NewID, if set, is the session ID that "new" returns instead of "fake2".
@@ -255,6 +257,9 @@ func (t *Transport) answer(req proto.Request) proto.Response {
 		// A session that runs nothing: the fake only says that it started.
 		var a api.NewArgs
 		_ = json.Unmarshal(req.Args, &a)
+		if t.OnNew != nil {
+			t.OnNew(a)
+		}
 		t.mu.Lock()
 		id := "fake2"
 		switch {

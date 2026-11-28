@@ -94,6 +94,11 @@ type Manifest struct {
 	CopyIn        []api.CopyInSpec     `json:"copy_in,omitempty"`
 	CopiesPending bool                 `json:"copies_pending,omitempty"`
 	SeedRepos     []api.SeedRepoRecord `json:"seed_repos,omitempty"`
+	// SandboxOf names the first (primary) session ID when this session runs
+	// inside another session's sandbox (spec 6.11).
+	SandboxOf string `json:"sandbox_of,omitempty"`
+	// Task is the short task description given at session start, if any.
+	Task string `json:"task,omitempty"`
 
 	extra map[string]json.RawMessage
 }
@@ -146,7 +151,10 @@ type WallRecord struct {
 	// SubscriptionAuth records how a subscription gateway (such as Codex
 	// ChatGPT sign-in) is armed: "host" (read from the host user's own login
 	// file) or "secret:<NAME>" (pushed from the client). Values are never stored here.
-	SubscriptionAuth string `json:"subscription_auth,omitempty"`
+	SubscriptionAuth string   `json:"subscription_auth,omitempty"`
+	Keep             []string `json:"keep,omitempty"`
+	Shell            string   `json:"shell,omitempty"`
+	ExtraAgents      []string `json:"extra_agents,omitempty"`
 }
 
 // GuestMemClaim holds the guest's untrusted view of memory inside the wall
@@ -285,7 +293,8 @@ func (m *Manifest) UnmarshalJSON(b []byte) error {
 		"labels": true, "restart": true, "git": true, "setup_hook": true, "resume_hook": true, "stop_hook": true, "run_hook": true,
 		"setup_hash": true, "secrets": true, "missing_secrets": true, "debug_until": true,
 		"wall": true, "guest": true, "image": true, "agents": true, "granted_ports": true, "usage": true,
-		"host_name": true, "sandbox_name": true, "copy_in": true, "copies_pending": true, "seed_repos": true}
+		"host_name": true, "sandbox_name": true, "copy_in": true, "copies_pending": true, "seed_repos": true,
+		"sandbox_of": true, "task": true}
 	for k := range all {
 		if known[k] {
 			delete(all, k)

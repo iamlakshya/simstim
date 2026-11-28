@@ -50,6 +50,10 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 	if err != nil {
 		return RestoreResult{}, false
 	}
+	if m.SandboxOf != "" {
+		// Child sessions wake together with their primary sandbox session.
+		return RestoreResult{}, false
+	}
 	r := RestoreResult{ID: id, Name: m.Name}
 	unlock, err := lockSession(id)
 	if err != nil {
@@ -160,6 +164,9 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 			_ = mm.Save()
 		}
 	}
+	if m.SandboxOf == "" && isWalled(m) {
+		wakeSandboxChildren(m.ID)
+	}
 	return argv, why, nil
 }
 
@@ -241,7 +248,15 @@ func resumeArgv(m *Manifest) ([]string, string, error) {
 	}
 	for i, s := range argv {
 		if s == "$SHELL" {
-			argv[i] = LoginShell()
+			if isWalled(m) {
+				pref := ""
+				if m.Wall != nil {
+					pref = m.Wall.Shell
+				}
+				argv[i] = resolveSandboxShell(pref)
+			} else {
+				argv[i] = LoginShell()
+			}
 		}
 	}
 	argv = withOptions(argv, m.Agent.Hooks, m.Agent.Inline)

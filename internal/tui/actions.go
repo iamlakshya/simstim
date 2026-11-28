@@ -193,6 +193,102 @@ func (m *Model) attachSelected() tea.Cmd {
 	return m.jack(h, s.ID, s.Name)
 }
 
+type shellOpenedMsg struct {
+	h        *hostConn
+	hostName string
+	conn     Conn
+	s        *client.Session
+	created  bool
+	err      error
+}
+
+// openSandboxShell opens or attaches to a shell inside the selected session's
+// sandbox (or a host shell in the same folder for an unwalled session),
+// retaining the original accepted host connection (cli-spec 15.2, isolation
+// spec 6.11).
+func (m *Model) openSandboxShell() tea.Cmd {
+	h, s := m.selectedPair()
+	if h == nil || s == nil {
+		return nil
+	}
+	if ended(*s) {
+		return m.toast(toastInfo, "The selected session has ended.")
+	}
+	if !h.online() {
+		return m.toastErr(offlineErr(h))
+	}
+	settings, warnCmd := m.refreshSettings()
+	target := *s
+	c, hostName, cols, rows := h.conn, h.name(), m.width, m.height
+	return tea.Batch(warnCmd, m.bgCmd(func(ctx context.Context) tea.Msg {
+		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		opts := client.ShellOptions{Cols: cols, Rows: rows, Settings: settings}
+		if cc, ok := c.(*client.Conn); ok {
+			sess, created, err := client.OpenShellSession(cctx, cc, target, opts)
+			return shellOpenedMsg{h: h, hostName: hostName, conn: c, s: sess, created: created, err: err}
+		}
+		sess, created, err := openShellOnConn(cctx, c, target, opts)
+		return shellOpenedMsg{h: h, hostName: hostName, conn: c, s: sess, created: created, err: err}
+	}))
+}
+
+func openShellOnConn(ctx context.Context, c Conn, target client.Session, opts client.ShellOptions) (*client.Session, bool, error) {
+	walled := target.Wall != nil && target.Wall.Level != "" && target.Wall.Level != "none"
+	if !walled {
+		args := client.SessionArgs(client.NewArgs{Agent: "shell", Cwd: target.Cwd, Name: opts.Name}, opts.Cols, opts.Rows, opts.Settings)
+		s, err := c.NewSession(ctx, args)
+		return s, err == nil, err
+	}
+	list, err := c.Sessions(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing, ok := client.FindShellSession(list, target); ok {
+		return &existing, false, nil
+	}
+	args := client.SessionArgs(client.NewArgs{
+		In:    target.ID,
+		Agent: "shell",
+		Name:  opts.Name,
+		Shell: opts.Settings.Sandbox.Shell,
+	}, opts.Cols, opts.Rows, opts.Settings)
+	s, err := c.NewSession(ctx, args)
+	return s, err == nil, err
+}
+
+func (m *Model) onShellOpened(msg shellOpenedMsg) tea.Cmd {
+	if msg.err != nil {
+		return m.toastErr(msg.err)
+	}
+	if msg.s == nil {
+		return nil
+	}
+	// Verify the original accepted host connection is still live and unchanged;
+	// never resolve a new host under an old selection (cli-spec 15.2).
+	var found *hostConn
+	for _, h := range m.hosts {
+		if h == msg.h && h.conn == msg.conn && h.name() == msg.hostName {
+			found = h
+			break
+		}
+	}
+	if found == nil {
+		return m.toastErr(&client.UserError{
+			Msg:  msg.hostName + " changed while opening the shell",
+			Hint: "Select the session again and retry.",
+			Code: "host_changed",
+		})
+	}
+	if msg.created {
+		found.sessions = append(found.sessions, *msg.s)
+		found.changes++
+	}
+	m.sel, m.autoSel = sessKey{found.name(), msg.s.ID}, false
+	m.syncSel()
+	return m.jack(found, msg.s.ID, msg.s.Name)
+}
+
 // copyAttach copies the command that attaches to the selected session. It
 // names the session by host/ID, never by its name, which can mean another
 // session (cli-spec 9.2). An address that a shell would not read back as it

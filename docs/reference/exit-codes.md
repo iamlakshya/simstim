@@ -18,3 +18,16 @@ Every command exits with one of these codes. The code comes from the kind of the
 | 130 | `cancelled` | The user or a signal cancelled. | The answer no. Esc or Ctrl+C at a question or in the picker. The end of input at a question. Ctrl+C or SIGTERM outside an attach. |
 
 The shell gives 128 plus the number of the signal that ended a program, so Ctrl+C outside an attach gives 130. SIGTERM gives 130 too, because both cancel.
+
+## `exec`
+
+`exec` exits with the code of the command that it ran, or one of these codes when no command ran or the command did not exit on its own. Errors before the command starts still print Error: and Try: on stderr.
+
+| Case | Exit |
+| --- | --- |
+| The command ran and exited | Its code |
+| A signal N ended the command | 128 + N |
+| --timeout ran out | 124 |
+| exec failed before the command started: any kind above | 125 |
+| The command was found, but could not run | 126 |
+| The command was not found | 127 |

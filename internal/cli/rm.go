@@ -99,7 +99,17 @@ func removeSession(cmd *cobra.Command, a address, yes bool) error {
 			return err
 		}
 		client.ForgetSession(f.host.Name, f.s.ID)
-		say(cmd, "Deleted %s (%s) on %s.\n", shown(f.s.Name), shown(f.s.ID), shown(f.host.Name))
+		for _, cs := range res.Sessions {
+			client.ForgetSession(f.host.Name, cs.ID)
+		}
+		if len(res.Sessions) > 1 {
+			say(cmd, "Deleted sandbox %s (%s) on %s and %d other session(s):\n", shown(f.s.Name), shown(f.s.ID), shown(f.host.Name), len(res.Sessions)-1)
+			for _, cs := range res.Sessions[1:] {
+				say(cmd, "  %s (%s)\n", shown(cs.Name), shown(cs.ID))
+			}
+		} else {
+			say(cmd, "Deleted %s (%s) on %s.\n", shown(f.s.Name), shown(f.s.ID), shown(f.host.Name))
+		}
 		note, hint := client.WorktreeNote(f.host.Name, res)
 		if note != "" {
 			say(cmd, "%s\n", sentence(note))
@@ -119,7 +129,7 @@ func confirmDelete(cmd *cobra.Command, p *prompter, f found) (bool, error) {
 		warnOld(cmd, oldRmWithoutYes)
 		return false, nil
 	}
-	ok, err := askDelete(p, f.host.Name, *f.s)
+	ok, err := askDeleteWithChildren(p, f.host.Name, *f.s, sandboxChildrenOf(f.list, f.s.ID))
 	if err != nil {
 		return true, err
 	}
@@ -127,6 +137,16 @@ func confirmDelete(cmd *cobra.Command, p *prompter, f found) (bool, error) {
 		return true, cancelled()
 	}
 	return true, nil
+}
+
+func sandboxChildrenOf(list []client.Session, primaryID string) []client.Session {
+	var out []client.Session
+	for _, s := range list {
+		if s.SandboxOf == primaryID {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // afterQuestion runs after the answer yes, before rm looks again. Tests
@@ -163,10 +183,20 @@ func stillTheSame(ctx context.Context, f found) error {
 // and what stays. The question names the session by its name. The Try:
 // line of p, when input is off, names it by host/ID (sessionPrompts).
 func askDelete(p *prompter, host string, s client.Session) (bool, error) {
+	return askDeleteWithChildren(p, host, s, nil)
+}
+
+func askDeleteWithChildren(p *prompter, host string, s client.Session, children []client.Session) (bool, error) {
 	where := shown(nameOf(s)) + " on " + shown(host)
-	lines := make([]string, 0, 4)
+	lines := make([]string, 0, 5+len(children))
 	lines = append(lines, "Delete "+where+"?")
 	lines = append(lines, client.DeleteLines(s, host, s.Cwd)...)
+	if len(children) > 0 {
+		lines = append(lines, fmt.Sprintf("This also destroys the sandbox and %d other session(s) inside it:", len(children)))
+		for _, c := range children {
+			lines = append(lines, fmt.Sprintf("  %s (%s)", shown(nameOf(c)), shown(c.ID)))
+		}
+	}
 	lines = append(lines, "Delete it?")
 	return p.confirm(qDelete, strings.Join(lines, "\n"), "a yes to delete "+where)
 }

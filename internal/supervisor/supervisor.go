@@ -85,6 +85,7 @@ type Supervisor struct {
 
 	mu               sync.Mutex
 	m                *host.Manifest
+	sessions         map[string]*sandboxSession
 	mem              host.MemTracker
 	dirty            bool
 	ended            bool
@@ -172,6 +173,7 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 		audit:      aud,
 		sb:         sb,
 		m:          m,
+		sessions:   map[string]*sandboxSession{id: {id: id, m: m}},
 		limiter:    newEventLimiter(MaxCtlEventsPerSec),
 		pending:    map[uint64]chan proto.Response{},
 		conns:      map[net.Conn]struct{}{},

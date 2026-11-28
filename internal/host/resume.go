@@ -69,6 +69,9 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err != nil {
 		return nil, UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if m.SandboxOf != "" {
+		return resumeChildInSandbox(id, m, a)
+	}
 	if alive(id) && m.Status.State != StateExited && m.Status.State != StateErrored {
 		return nil, UserError("agent_running", "the agent of "+m.Name+" still runs",
 			"Attach to it. To start it again, quit the agent first, then resume the session.")
@@ -158,6 +161,12 @@ func stopHolder(id string, m *Manifest) {
 		for alive(id) && time.Now().Before(deadline) {
 			time.Sleep(100 * time.Millisecond)
 		}
+	}
+	if m != nil && m.SandboxOf != "" {
+		// Child sessions share the primary sandbox's unit and supervisor PID;
+		// never stop the shared unit or kill the supervisor when removing a child.
+		os.Remove(paths.Socket(id))
+		return
 	}
 	switch {
 	case m != nil && m.Run.Unit != "":

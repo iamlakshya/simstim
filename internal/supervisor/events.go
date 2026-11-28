@@ -64,6 +64,15 @@ func (s *Supervisor) step() {
 	if dirty {
 		snap = *s.m
 	}
+	var childSnaps []*host.Manifest
+	for id, sess := range s.sessions {
+		if id == s.id || !sess.dirty {
+			continue
+		}
+		sess.dirty = false
+		cp := *sess.m
+		childSnaps = append(childSnaps, &cp)
+	}
 	s.mu.Unlock()
 	if dirty {
 		if err := s.save(&snap, false); err != nil {
@@ -71,6 +80,11 @@ func (s *Supervisor) step() {
 		}
 	}
 	s.checkDisk(now)
+	for _, cp := range childSnaps {
+		if err := cp.Save(); err != nil {
+			s.log.Warn("child manifest not saved", "session", cp.ID, "err", err)
+		}
+	}
 }
 
 // reconcileStatus combines trusted memory warnings with guest claims.
@@ -109,73 +123,110 @@ func (s *Supervisor) reconcileStatus(memRes host.MemTickResult) {
 }
 
 func (s *Supervisor) applyGuestEvent(ev guest.Event) {
-	if ev.Session != "" && ev.Session != s.id {
-		s.log.Warn("dropped ctl event for foreign session", "event", ev.Type, "session", ev.Session)
-		return
-	}
 	now := time.Now()
 	nowUTC := now.UTC()
-	var saveCopy *host.Manifest
+	var savePrimary *host.Manifest
+	var saveChild *host.Manifest
 
 	s.mu.Lock()
+	targetID := ev.Session
+	if targetID == "" {
+		targetID = s.id
+	}
+	sess := s.sessions[targetID]
+	if sess == nil && targetID == s.id && s.m != nil {
+		sess = &sandboxSession{id: s.id, m: s.m}
+	}
+	if sess == nil {
+		s.mu.Unlock()
+		if s.log != nil {
+			s.log.Warn("dropped ctl event for foreign session", "event", ev.Type, "session", ev.Session)
+		}
+		return
+	}
+	isPrimary := targetID == s.id
+	markDirty := func() {
+		if isPrimary {
+			s.dirty = true
+		} else {
+			sess.dirty = true
+		}
+	}
 	switch ev.Type {
 	case "heartbeat":
 		s.lastHB = now
 		s.hbSilent = false
 	case "activity":
-		s.m.LastActivityAt = nowUTC
-		s.dirty = true
+		sess.m.LastActivityAt = nowUTC
+		markDirty()
 	case "resize":
 		if ev.Cols > 0 && ev.Rows > 0 {
-			s.m.Term.Cols, s.m.Term.Rows = ev.Cols, ev.Rows
-			s.dirty = true
+			sess.m.Term.Cols, sess.m.Term.Rows = ev.Cols, ev.Rows
+			markDirty()
 		}
 	case "agent_id":
-		saveCopy = s.applyAgentID(ev, nowUTC)
+		cp := s.applyAgentID(sess, ev, nowUTC)
+		if isPrimary {
+			savePrimary = cp
+		} else {
+			saveChild = cp
+		}
 	case "status":
-		s.applyGuestStatus(ev, nowUTC)
+		s.applyGuestStatus(sess, ev, nowUTC)
 	case "alert":
-		s.applyGuestAlert(ev)
+		s.applyGuestAlert(sess, ev)
 	case "ports":
 		s.applyGuestPorts(ev, nowUTC)
 	case "mem":
 		s.applyGuestMem(ev, nowUTC)
 	case "ended":
-		saveCopy = s.applyGuestEnded(ev, nowUTC)
+		cp := s.applyGuestEnded(sess, ev, nowUTC)
+		if isPrimary {
+			savePrimary = cp
+		} else {
+			saveChild = cp
+		}
 	}
 	s.mu.Unlock()
 
-	if saveCopy != nil {
-		_ = s.save(saveCopy, false)
+	if savePrimary != nil {
+		_ = s.save(savePrimary, false)
+	}
+	if saveChild != nil {
+		_ = saveChild.Save()
 	}
 }
 
 // applyAgentID checks and records an agent session ID reported by the guest.
 // Caller holds s.mu.
-func (s *Supervisor) applyAgentID(ev guest.Event, nowUTC time.Time) *host.Manifest {
-	agent, _ := agents.Find(s.m.Agent.Kind)
+func (s *Supervisor) applyAgentID(sess *sandboxSession, ev guest.Event, nowUTC time.Time) *host.Manifest {
+	agent, _ := agents.Find(sess.m.Agent.Kind)
 	if err := agent.CheckID(ev.AgentID); err != nil {
-		s.log.Warn("session ID from guest not kept", "reason", err.Error(), "kind", s.m.Agent.Kind)
+		s.log.Warn("session ID from guest not kept", "session", sess.id, "reason", err.Error(), "kind", sess.m.Agent.Kind)
 		return nil
 	}
-	if ev.AgentID == s.m.Agent.AgentSessionID {
+	if ev.AgentID == sess.m.Agent.AgentSessionID {
 		return nil
 	}
-	s.m.Agent.AgentSessionID = ev.AgentID
-	s.m.Agent.IDSource = "hook"
-	s.m.Agent.IDHistory = append(s.m.Agent.IDHistory, host.IDEvent{ID: ev.AgentID, Source: ev.IDSource, At: nowUTC})
-	s.dirty = true
-	cp := *s.m
+	sess.m.Agent.AgentSessionID = ev.AgentID
+	sess.m.Agent.IDSource = "hook"
+	sess.m.Agent.IDHistory = append(sess.m.Agent.IDHistory, host.IDEvent{ID: ev.AgentID, Source: ev.IDSource, At: nowUTC})
+	if sess.id == s.id {
+		s.dirty = true
+	} else {
+		sess.dirty = true
+	}
+	cp := *sess.m
 	return &cp
 }
 
 // applyGuestStatus stores a guest status claim while the sandbox is alive.
 // Caller holds s.mu.
-func (s *Supervisor) applyGuestStatus(ev guest.Event, nowUTC time.Time) {
-	if s.ended {
+func (s *Supervisor) applyGuestStatus(sess *sandboxSession, ev guest.Event, nowUTC time.Time) {
+	if s.ended || sess.ended {
 		return
 	}
-	s.m.Guest = &host.GuestClaims{
+	sess.m.Guest = &host.GuestClaims{
 		State:      ev.State,
 		Source:     ev.Source,
 		Reason:     ev.Reason,
@@ -186,36 +237,40 @@ func (s *Supervisor) applyGuestStatus(ev guest.Event, nowUTC time.Time) {
 	if s.alerts != nil {
 		s.alerts.StateChanged()
 	}
-	if s.m.Status.Source != host.SrcMemory || ev.State == host.StateNeedsInput {
-		s.m.Status = host.Status{
+	if sess.m.Status.Source != host.SrcMemory || ev.State == host.StateNeedsInput {
+		sess.m.Status = host.Status{
 			State:      ev.State,
 			Since:      nowUTC,
 			Source:     ev.Source,
 			Reason:     ev.Reason,
 			FullScreen: ev.FullScreen,
-			OOM:        s.m.Status.OOM,
+			OOM:        sess.m.Status.OOM,
 			Claimed:    true,
 		}
-		if s.m.Status.OOM && ev.State != host.StateNeedsInput && ev.Reason == "" {
-			s.m.Status.Reason = api.ReasonChildOOM
+		if sess.m.Status.OOM && ev.State != host.StateNeedsInput && ev.Reason == "" {
+			sess.m.Status.Reason = api.ReasonChildOOM
 		}
 	}
-	s.dirty = true
+	if sess.id == s.id {
+		s.dirty = true
+	} else {
+		sess.dirty = true
+	}
 }
 
 // applyGuestAlert forwards an allowlisted agent-side alert. Caller holds s.mu.
-func (s *Supervisor) applyGuestAlert(ev guest.Event) {
-	if s.ended || s.alerts == nil {
+func (s *Supervisor) applyGuestAlert(sess *sandboxSession, ev guest.Event) {
+	if s.ended || sess.ended || s.alerts == nil {
 		return
 	}
 	switch ev.Kind {
 	case alerts.NeedsInput:
-		ae := s.makeAlert(alerts.NeedsInput)
+		ae := s.makeSessionAlert(sess.m, alerts.NeedsInput)
 		ae.Detail = ev.Detail
 		s.alerts.Notify(ae)
 	case alerts.TurnDone:
 		if ev.TurnNS > 0 {
-			ae := s.makeAlert(alerts.TurnDone)
+			ae := s.makeSessionAlert(sess.m, alerts.TurnDone)
 			ae.Turn = time.Duration(ev.TurnNS)
 			s.alerts.Notify(ae)
 		}
@@ -255,8 +310,8 @@ func (s *Supervisor) applyGuestMem(ev guest.Event, nowUTC time.Time) {
 // guest claim while the sandbox process itself is still alive. Trusted end,
 // OOM reaping, and link_silent teardown happen only when the sandbox exits.
 // Caller holds s.mu.
-func (s *Supervisor) applyGuestEnded(ev guest.Event, nowUTC time.Time) *host.Manifest {
-	if s.ended || s.stopping {
+func (s *Supervisor) applyGuestEnded(sess *sandboxSession, ev guest.Event, nowUTC time.Time) *host.Manifest {
+	if s.ended || s.stopping || sess.ended {
 		return nil
 	}
 	code := ev.ExitCode
@@ -264,26 +319,30 @@ func (s *Supervisor) applyGuestEnded(ev guest.Event, nowUTC time.Time) *host.Man
 	if code != 0 || ev.Signal != "" {
 		state = host.StateErrored
 	}
-	s.m.Guest = &host.GuestClaims{
+	sess.m.Guest = &host.GuestClaims{
 		State:     state,
 		Source:    "guest",
 		Since:     nowUTC,
 		UpdatedAt: nowUTC,
 	}
-	if s.m.Status.Source != host.SrcMemory {
-		s.m.Status = host.Status{
+	if sess.m.Status.Source != host.SrcMemory {
+		sess.m.Status = host.Status{
 			State:    state,
 			Since:    nowUTC,
 			ExitCode: &code,
 			Signal:   ev.Signal,
-			OOM:      s.m.Status.OOM,
+			OOM:      sess.m.Status.OOM,
 			Source:   "guest",
 			Claimed:  true,
 		}
 	}
-	s.dirty = false
-	s.audit.Record(AuditEntry{Event: "guest_end", Session: s.id, ExitCode: &code, Signal: ev.Signal})
-	cp := *s.m
+	if sess.id == s.id {
+		s.dirty = false
+	} else {
+		sess.dirty = false
+	}
+	s.audit.Record(AuditEntry{Event: "guest_end", Session: sess.id, ExitCode: &code, Signal: ev.Signal})
+	cp := *sess.m
 	return &cp
 }
 
@@ -322,11 +381,15 @@ func (s *Supervisor) closeAlerts() {
 	}
 }
 
-// makeAlert builds an alert event. Caller holds s.mu.
+// makeAlert builds an alert event for the primary session. Caller holds s.mu.
 func (s *Supervisor) makeAlert(kind string) alerts.Event {
+	return s.makeSessionAlert(s.m, kind)
+}
+
+func (s *Supervisor) makeSessionAlert(m *host.Manifest, kind string) alerts.Event {
 	return alerts.Event{
 		Event:   kind,
-		Session: alerts.Session{ID: s.id, Name: s.m.Name, Agent: s.m.Agent.Kind, Dir: s.m.Cwd},
+		Session: alerts.Session{ID: m.ID, Name: m.Name, Agent: m.Agent.Kind, Dir: m.Cwd},
 	}
 }
 
@@ -366,10 +429,16 @@ func (s *Supervisor) noteTyping(p []byte) {
 	}
 }
 
-func (s *Supervisor) noteAttach(a proto.Attach) {
+func (s *Supervisor) noteAttach(sessionID string, a proto.Attach) {
 	s.mu.Lock()
-	s.m.LastAttachedAt = time.Now().UTC()
-	s.mem.NoteAttach(a.Reconnect)
-	s.dirty = true
+	if sess := s.sessions[sessionID]; sess != nil {
+		sess.m.LastAttachedAt = time.Now().UTC()
+		if sessionID == s.id {
+			s.mem.NoteAttach(a.Reconnect)
+			s.dirty = true
+		} else {
+			sess.dirty = true
+		}
+	}
 	s.mu.Unlock()
 }

@@ -343,6 +343,10 @@ func (m *Model) sessRowView(r sessRow, n int, c sessColumns, selected, withHost 
 		q = m.prompt.in.value()
 	}
 	name := nameSegs(s.Name, c.name, sBold, q)
+	if r.indent {
+		innerW := max(c.name-2, 4)
+		name = append([]seg{{"  ", sPlain}}, nameSegs(s.Name, innerW, sBold, q)...)
+	}
 	if m.rename != nil && m.rename.key == r.key() {
 		name = []seg{{fit(m.rename.in.view(c.name, true), c.name), sPlain}}
 	}

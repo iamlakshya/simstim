@@ -595,6 +595,7 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim doctor [flags]` | Check this machine and its terminal. [Reference](../reference/cli/doctor.md) |
 | `simstim doctor keys [flags]` | Show each key as the terminal sends it, and the client's own keys. [Reference](../reference/cli/doctor_keys.md) |
 | `simstim doctor terminal [flags]` | Ask this terminal what it supports: keys, colours and more. [Reference](../reference/cli/doctor_terminal.md) |
+| `simstim exec <host>/<session> [--timeout <duration>] -- <command>… [flags]` | Run one command inside a session's sandbox. [Reference](../reference/cli/exec.md) |
 | `simstim events [<host>\|<host>/<session>] [flags]` | Read recent session events, or follow them as they happen. [Reference](../reference/cli/events.md) |
 | `simstim fork <host>/<session> [flags]` | Copy a sandbox into independent sessions. [Reference](../reference/cli/fork.md) |
 | `simstim forward <host>/<session> [<port>…] [flags]` | Forward chosen session ports, or one laptop port in reverse. [Reference](../reference/cli/forward.md) |
@@ -651,7 +652,7 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim rm [<host>/<session>\|-] [flags]` | Delete a session, after a question. [Reference](../reference/cli/rm.md) |
 | `simstim send <host>/<session> <text> [flags]` | Type text into a session without attaching, then press Enter. [Reference](../reference/cli/send.md) |
 | `simstim setup [flags]` | Set up step by step: a host, its agents, and their logins. [Reference](../reference/cli/setup.md) |
-| `simstim shell <host>/<session> [flags]` | Open a shell beside a session. [Reference](../reference/cli/shell.md) |
+| `simstim shell [<host>/<session>\|-] [flags]` | Open a shell inside a session's sandbox. [Reference](../reference/cli/shell.md) |
 | `simstim show [<host>/<session>\|-] [flags]` | Describe one session, or print its last screen with `--screen`. [Reference](../reference/cli/show.md) |
 | `simstim ssh-config [flags]` | Prepare the local SSH configuration for sandbox tools. [Reference](../reference/cli/ssh-config.md) |
 | `simstim stop <host>/<session> [flags]` | Stop a sandbox and keep its work and conversation. [Reference](../reference/cli/stop.md) |
@@ -722,7 +723,7 @@ These parts of the spec are planned, and are not in the current build:
 - the disk check in the add-host wizard's test step;
 - editing a host from host details.
 
-Parts of the exit codes are not built yet either. A prompt with input off, such as `host destroy` in a script, reads no answer as no and exits with 130, not 4. Task C4 of [the CLI plan](cli-plan.md) builds that. `exec` and its exit codes come with task P1.13 of [the isolation plan](isolation-plan.md). Until that plan builds policies and tiers, no command exits with 5.
+Parts of the exit codes are not built yet either. A prompt with input off, such as `host destroy` in a script, reads no answer as no and exits with 130, not 4. Task C4 of [the CLI plan](cli-plan.md) builds that. Until that plan builds policies and tiers, no command exits with 5.
 
 ### Held network requests
 

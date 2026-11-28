@@ -95,6 +95,7 @@ var hostKinds = map[string]Kind{
 	"no_recorder":     KindFailed,
 	"not_a_repo":      KindFailed,
 	"not_found":       KindNotFound,
+	"not_walled":      KindFailed,
 	"profile":         KindFailed,
 	"protocol":        KindFailed,
 	"read":            KindFailed,

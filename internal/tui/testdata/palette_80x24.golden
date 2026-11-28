@@ -10,6 +10,7 @@
 
     ▍ New session                                                          n
       Peek at the screen                                               space
+      Shell in sandbox                                                     t
       Attach session                                                   enter
       Rename session                                                       r
       Delete session                                                       d
@@ -19,6 +20,5 @@
       New session, with the form
       Copy attach command                                                  y
       Test host
-      Settings
 
     enter run   ↑↓ move   esc close

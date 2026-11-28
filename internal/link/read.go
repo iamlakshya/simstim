@@ -303,6 +303,7 @@ func (s *Session) onClose(p []byte) error {
 		// The other end reads no more and has forgotten the stream, so
 		// bytes not yet sent, and this end's close, would be dropped.
 		st.peerGone = true
+		st.goneQ.wake()
 		// An end never gets weaker: a later close keeps a refusal or a
 		// reset.
 		st.refused = st.refused || code == closeRefused

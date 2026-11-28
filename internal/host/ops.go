@@ -69,6 +69,9 @@ func New(a NewArgs) (_ *SessionInfo, err error) {
 	if err := checkNewArgs(a); err != nil {
 		return nil, err
 	}
+	if strings.TrimSpace(a.In) != "" {
+		return SpawnInSandbox(a)
+	}
 	if a.Wall != "" && a.Wall != "none" {
 		return newWalled(a)
 	}
@@ -169,6 +172,7 @@ func buildManifest(a NewArgs, id, cwd, kind string, argv, env []string, term str
 		HostName:    a.HostName,
 		SandboxName: name,
 		CopyIn:      a.CopyIn,
+		Task:        strings.TrimSpace(a.Task),
 	}
 	m.Git = gi
 	m.Secrets = secrets
@@ -320,8 +324,8 @@ func infoFrom(m *Manifest, alive bool) SessionInfo {
 		CPUs: m.Limits.CPUs, DiskMax: m.Limits.DiskMax, SeedRepos: seedRepos, CopiesPending: m.CopiesPending,
 		HostVersion: m.HostVersion, Cols: m.Term.Cols, Rows: m.Term.Rows, MissingSecrets: m.MissingSecrets,
 		Secrets: m.Secrets, FullScreen: st.FullScreen && alive,
-		DebugUntil: debugUntil(m, alive),
-		Usage:      m.Usage.Clone(),
+		DebugUntil: debugUntil(m, alive), Usage: m.Usage.Clone(),
+		SandboxOf: m.SandboxOf, Task: m.Task,
 	}
 	fillWallInfo(&info, m)
 	return info
@@ -477,7 +481,8 @@ func deleteSession(id string, expectedName *string, res *DeleteResult) error {
 		}
 	}
 	stopHolder(id, m)
-	if m != nil {
+	if m != nil && m.SandboxOf == "" {
+		res.Sessions = append([]SessionInfo{infoFrom(m, false)}, deleteSandboxChildren(id)...)
 		var kept *proto.Error
 		if res.Worktree, kept = removeWorktree(m.Git); kept != nil {
 			res.WorktreeCode, res.WorktreeHint = kept.Code, kept.Hint
@@ -486,7 +491,7 @@ func deleteSession(id string, expectedName *string, res *DeleteResult) error {
 	if err := removeSessionDir(paths.SessionDir(id)); err != nil {
 		return fmt.Errorf("remove the files of session %s: %w", id, err)
 	}
-	if isWalled(m) {
+	if m != nil && m.SandboxOf == "" && isWalled(m) {
 		_ = os.RemoveAll(paths.GuestRuntimeDir(id))
 		_ = os.RemoveAll(paths.PortDir(id))
 	}
