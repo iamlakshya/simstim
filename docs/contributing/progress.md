@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 41 |
-| To do | 58 |
+| Done | 43 |
+| To do | 56 |
 | **All** | **99** |
 
 ## Current focus
@@ -79,7 +79,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | C4 | cli | Day 1 | Done | Prompts, pickers and machine output |
 | C3 | cli | Day 1 | Done | Help that teaches |
 | C5 | cli | Day 1 | Done | Session verbs |
-| C6 | cli | Day 1 | To do | One meaning for each flag |
+| C6 | cli | Day 1 | Done | One meaning for each flag |
 | C7 | cli | Day 1 | Done | Host commands |
 | C8 | cli | Day 1 | Done | Agents: install and log in |
 | C9 | cli | Day 1 | Done | `config check` |
@@ -97,7 +97,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P2.17 | 2 | Later | To do | More agent rows |
 | P2.7 | 2 | Later | To do | Budgets and stricter targets |
 | P2.9 | 2 | Later | To do | A repository's own file |
-| P3.1 | 3 | Later | To do | The boot pair |
+| P3.1 | 3 | Later | Done | The boot pair |
 | H9 | 3 | Later | To do | Runtime delivery and the host cache |
 | P3.2 | 3 | Later | Done | Images |
 | P3.3 | 3 | Later | Done | The Cloud Hypervisor driver |
