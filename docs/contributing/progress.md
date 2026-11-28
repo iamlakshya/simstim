@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 20 |
-| To do | 79 |
+| Done | 21 |
+| To do | 78 |
 | **All** | **99** |
 
 ## Current focus
@@ -49,7 +49,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.4 | 1 | Day 1 | Done | The supervisor, the guest init and the holder's guest mode |
 | P1.5 | 1 | Day 1 | To do | The process wall |
 | P1.6 | 1 | Day 1 | To do | The files door |
-| P1.7 | 1 | Day 1 | To do | The egress process, first version |
+| P1.7 | 1 | Day 1 | Done | The egress process, first version |
 | P1.8 | 1 | Day 1 | To do | The client and the launcher |
 | P1.12 | 1 | Day 1 | To do | Layers, profiles and locks |
 | P1.13 | 1 | Day 1 | To do | Shells and commands in a sandbox |
