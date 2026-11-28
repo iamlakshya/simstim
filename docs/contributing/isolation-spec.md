@@ -943,11 +943,11 @@ The sandbox never sees the host user's home, `$XDG_RUNTIME_DIR` (the systemd use
 - **Microvm wall:** the guest init also makes a `dummy0` interface with the default route, and a guest nftables rule that redirects all TCP to a transparent shim on `127.0.0.1:3129`. The shim reads the original address with `SO_ORIGINAL_DST`, and the DNS stub maps it back to the name (synthetic mode, below). UDP and ICMP have no path.
 - Each flow becomes one `egress` stream, with the header `{"via":"explicit|transparent","host":"api.anthropic.com","port":443}`. The supervisor passes the stream to the egress process. The guest never gives an IP address that the egress process trusts: the egress process resolves the name itself.
 
-**DNS (P2).** `/etc/resolv.conf` points to a stub on `127.0.0.53:53` in the guest. Each query becomes a `dns` stream with the raw DNS message. The egress process answers with `golang.org/x/net/dns/dnsmessage`:
+**DNS (P2).** On a bubblewrap process wall (`0056`), direct DNS stays disabled (guest processes have zero capabilities to bind port 53) and tools resolve names through the explicit proxy on the trusted side, so no disallowed name leaves the host. When a wall enables the guest DNS stub (microVMs on `127.0.0.53:53` UDP and TCP, or a wall with pre-bound stub sockets), `/etc/resolv.conf` points to the stub and each query becomes a `dns` stream with the raw DNS message. The egress process answers with `golang.org/x/net/dns/dnsmessage`:
 
-- A granted name gets its real addresses (process and gvisor walls) or a synthetic address from `198.18.0.0/15`, unique for the session (microvm).
-- On a microvm, a name that no rule covers also gets a synthetic address, under the unknown actions `ask`, `allow` and `classify`. The egress process looks nothing up. It decides when a flow reaches that address, as for any unknown flow.
-- Any other name gets `NXDOMAIN`, and is never sent upstream. This stops DNS tunnelling.
+- A granted name gets its real addresses (`real` mode) or a synthetic address from `198.18.0.0/15`, unique for the session (`synthetic` mode on microVMs).
+- In `synthetic` mode, a name that no rule covers also gets a synthetic address under the unknown actions `ask` and `allow` (and `classify` later). The egress process looks nothing up. It decides when a flow reaches that address, as for any unknown flow.
+- Any denied, locked or other disallowed name gets `NXDOMAIN`, and is never sent upstream. Non-`IN` class queries get `REFUSED`. This stops DNS tunnelling.
 - `HTTPS` and `SVCB` queries get an empty answer, so clients do not learn ECH keys.
 
 Before P2 there is no stub, and lookups in the guest fail. Tools that use the proxy still work.

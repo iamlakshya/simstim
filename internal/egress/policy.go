@@ -65,6 +65,10 @@ type UnknownAction string
 const (
 	// UnknownDeny refuses unmatched flows immediately (the v1 default).
 	UnknownDeny UnknownAction = "deny"
+	// UnknownAsk refuses unmatched flows immediately with the grant hint and,
+	// in synthetic DNS mode, assigns a synthetic 198.18.0.0/15 IP without
+	// querying upstream so the transparent flow reaches the policy engine.
+	UnknownAsk UnknownAction = "ask"
 	// UnknownAllow permits unmatched flows and logs them as "allow-unknown".
 	UnknownAllow UnknownAction = "allow"
 )
@@ -190,9 +194,9 @@ func compileSnapshot(cfg Config, grants []rule) (*policySnapshot, error) {
 		unknown = UnknownDeny
 	}
 	switch unknown {
-	case UnknownDeny, UnknownAllow:
+	case UnknownDeny, UnknownAsk, UnknownAllow:
 	default:
-		return nil, fmt.Errorf("egress: unknown network.unknown action %q. Try: use deny or allow", unknown)
+		return nil, fmt.Errorf("egress: unknown network.unknown action %q. Try: use deny, ask or allow", unknown)
 	}
 	if _, err := api.ParsePackageManagers(cfg.Sandbox.PackageManagers); err != nil {
 		return nil, fmt.Errorf("egress: %w", err)
@@ -383,6 +387,9 @@ func (e *Engine) Decide(req Request) Decision {
 	if s.unknown == UnknownAllow {
 		return Decision{Action: ActionAllow, Mode: ModeSplice, Rule: "unknown:allow", Why: "allowed by unknown=allow"}
 	}
+	if s.unknown == UnknownAsk {
+		return Decision{Action: ActionDeny, Rule: "unknown:ask", Why: e.DenyHint(host, req.Port)}
+	}
 	return Decision{Action: ActionDeny, Rule: "unknown:deny", Why: e.DenyHint(host, req.Port)}
 }
 
@@ -421,6 +428,9 @@ func (e *Engine) DecideDNS(rawHost string) Decision {
 	}
 	if s.unknown == UnknownAllow {
 		return Decision{Action: ActionAllow, Rule: "unknown:allow"}
+	}
+	if s.unknown == UnknownAsk {
+		return Decision{Action: ActionDeny, Rule: "unknown:ask", Why: "unknown host requires approval"}
 	}
 	return Decision{Action: ActionDeny, Rule: "unknown:deny", Why: "not allowed by policy"}
 }

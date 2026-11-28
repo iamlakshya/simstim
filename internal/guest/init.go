@@ -52,9 +52,13 @@ func Run() error {
 		runDir = filepath.Join("/run", brand.Name)
 	}
 	opts := RunOptions{
-		Proxy: os.Getenv(brand.Env("GUEST_PROXY")) == "1",
+		Proxy:   os.Getenv(brand.Env("GUEST_PROXY")) == "1",
+		DNS:     os.Getenv(brand.Env("GUEST_DNS")) == "1",
+		DNSAddr: os.Getenv(brand.Env("GUEST_DNS_ADDR")),
 	}
 	_ = os.Unsetenv(brand.Env("GUEST_PROXY"))
+	_ = os.Unsetenv(brand.Env("GUEST_DNS"))
+	_ = os.Unsetenv(brand.Env("GUEST_DNS_ADDR"))
 	return RunConnWithOptions(conn, runDir, opts)
 }
 
@@ -62,6 +66,9 @@ func Run() error {
 type RunOptions struct {
 	Proxy      bool
 	ProxyAddrs []string
+	DNS        bool
+	DNSAddr    string
+	OnDNSReady func(udpAddr, tcpAddr net.Addr)
 }
 
 type managedHolder struct {
@@ -112,19 +119,10 @@ func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 	defer cancel()
 
 	var wg sync.WaitGroup
-	var px *Proxy
-	if opts.Proxy {
-		var perr error
-		px, perr = ListenProxy(ctx, r, opts.ProxyAddrs...)
-		if perr != nil {
-			_ = sess.Close()
-			return perr
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			px.Serve(ctx)
-		}()
+	svc, err := startLoopbackServices(ctx, r, opts, &wg)
+	if err != nil {
+		_ = sess.Close()
+		return err
 	}
 
 	reapStop := startReaper(r.isManaged)
@@ -160,9 +158,7 @@ func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 	}
 	r.shutdown(3 * time.Second)
 	cancel()
-	if px != nil {
-		_ = px.Close()
-	}
+	svc.close()
 	_ = sess.Close()
 	wg.Wait()
 	return nil
@@ -172,6 +168,12 @@ func RunConnWithOptions(conn net.Conn, runDir string, opts RunOptions) error {
 // stream over the guest-to-supervisor link.
 func (r *runner) OpenEgress(ctx context.Context, hdr egress.StreamHeader) (*link.Stream, error) {
 	return r.sess.Open(ctx, link.KindEgress, hdr)
+}
+
+// OpenDNS implements DNSOpener for guest.DNSStub by opening a KindDNS stream
+// over the guest-to-supervisor link.
+func (r *runner) OpenDNS(ctx context.Context) (*link.Stream, error) {
+	return r.sess.Open(ctx, link.KindDNS, nil)
 }
 
 func (r *runner) isManaged(pid int) bool {

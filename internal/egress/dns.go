@@ -23,12 +23,14 @@ const (
 	// synthetic IPv4 addresses from 198.18.0.0/15 without querying upstream.
 	DNSModeSynthetic DNSMode = "synthetic"
 
-	// RFC 9460 HTTPS (65) and SVCB (64) RR types.
-	typeSVCB  dnsmessage.Type = 64
-	typeHTTPS dnsmessage.Type = 65
+	// RFC 9460 HTTPS (65) and SVCB (64) RR types, and RFC 1035 ANY (255) class.
+	typeSVCB  dnsmessage.Type  = 64
+	typeHTTPS dnsmessage.Type  = 65
+	classANY  dnsmessage.Class = 255
 
-	maxDNSMessageBytes = 4096
-	defaultDNSTTL      = 60
+	maxDNSMessageBytes  = 4096
+	maxDNSAnswerRecords = 16
+	defaultDNSTTL       = 60
 )
 
 // DNSOptions configures a DNSHandler.
@@ -106,6 +108,11 @@ func (h *DNSHandler) Handle(ctx context.Context, raw []byte) ([]byte, error) {
 		return buildEmptyDNS(hdr, q, dnsmessage.RCodeFormatError)
 	}
 
+	if q.Class != dnsmessage.ClassINET && q.Class != classANY {
+		h.emitAudit(q.Name.String(), "class", string(ActionDeny), "non-IN DNS class refused")
+		return buildEmptyDNS(hdr, q, dnsmessage.RCodeRefused)
+	}
+
 	name, err := normalizeHost(q.Name.String())
 	if err != nil {
 		h.emitAudit(q.Name.String(), "invalid", string(ActionDeny), err.Error())
@@ -121,6 +128,9 @@ func (h *DNSHandler) Handle(ctx context.Context, raw []byte) ([]byte, error) {
 
 	dec := h.engine.DecideDNS(name)
 	if dec.Action != ActionAllow {
+		if h.mode == DNSModeSynthetic && dec.Rule == "unknown:ask" {
+			return h.answerSynthetic(hdr, q, name, dec)
+		}
 		h.emitAudit(name, dec.Rule, string(ActionDeny), dec.Why)
 		return buildEmptyDNS(hdr, q, dnsmessage.RCodeNameError)
 	}
@@ -264,6 +274,9 @@ func buildAddrDNS(reqHdr dnsmessage.Header, q dnsmessage.Question, addrs []netip
 	}
 	if err := b.Question(q); err != nil {
 		return nil, fmt.Errorf("egress: write DNS question: %w", err)
+	}
+	if len(addrs) > maxDNSAnswerRecords {
+		addrs = addrs[:maxDNSAnswerRecords]
 	}
 	if len(addrs) > 0 {
 		if err := b.StartAnswers(); err != nil {

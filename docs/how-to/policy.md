@@ -57,12 +57,14 @@ On port 443, the egress process inspects the TLS ClientHello with Go's `crypto/t
 
 ## DNS policy
 
-When a sandbox runs the DNS stub, every query crosses the link to the egress process:
+Every sandbox DNS query crosses the private link to the egress process, which answers with `golang.org/x/net/dns/dnsmessage` and never leaks disallowed names upstream:
 
-- Disallowed and unknown names (when `unknown = "deny"`) receive `NXDOMAIN` without querying any upstream resolver.
+- **Process walls (bubblewrap):** direct DNS stays disabled (`/etc/resolv.conf` names no resolver and the sandbox has zero capabilities to bind port 53), so direct lookups such as `getent hosts example.com` fail closed and tools resolve names through the explicit loopback proxy on the trusted side.
+- **Guest DNS stub (microVMs and walls with a bound stub):** `wall-init` listens on UDP and TCP loopback sockets (`127.0.0.53:53` by default) and forwards raw DNS wire messages over `dns` link streams to the egress process.
+- Disallowed, locked and denied names receive `NXDOMAIN` without querying any upstream resolver. Non-`IN` class queries receive `REFUSED`.
 - `HTTPS` and `SVCB` queries always receive empty `NOERROR` answers without reaching upstream, so clients do not learn ECH keys.
-- In `real` mode, only `A` and `AAAA` records for allowed names are resolved, and any name resolving to a refused IP receives `NXDOMAIN`.
-- In `synthetic` mode, allowed names receive unique addresses from `198.18.0.0/15` without querying upstream.
+- In `real` mode, only `A` and `AAAA` records for allowed names are resolved, unknown names under `deny` or `ask` receive `NXDOMAIN` without reaching upstream, and any name resolving to a refused IP receives `NXDOMAIN`.
+- In `synthetic` mode (used by microVMs for transparent routing), allowed names — and unknown names when `unknown = "ask"` or `unknown = "allow"` — receive unique addresses from `198.18.0.0/15` without querying upstream; the egress process maps the address back to the name and applies policy when a connection reaches it. Under `unknown = "deny"`, unknown names receive `NXDOMAIN`.
 
 ## Audit log
 

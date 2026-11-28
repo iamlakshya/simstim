@@ -231,6 +231,118 @@ func TestDNSSyntheticMode(t *testing.T) {
 	if hdr.RCode != dnsmessage.RCodeSuccess || len(ans) != 1 || res.calls.Load() != 0 {
 		t.Errorf("synthetic unknown=allow: rcode=%v ans=%d calls=%d", hdr.RCode, len(ans), res.calls.Load())
 	}
+
+	// Under unknown=ask (P2.1 acceptance): unknown name gets a synthetic IP
+	// with zero upstream queries, while explicit deny and lock still get
+	// NXDOMAIN with zero upstream queries.
+	if err := eng.Reload(Config{
+		Sandbox: SandboxConfig{Preset: PresetLocked},
+		Network: NetworkConfig{
+			Deny:    []string{"denied.example"},
+			Unknown: UnknownAsk,
+		},
+		Lock: LockConfig{Deny: []string{"locked.example"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rawResp, err = h.Handle(context.Background(), buildTestDNSQuery(t, 13, "askme.example.", dnsmessage.TypeA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr, ans = parseDNSResponse(t, rawResp)
+	if hdr.RCode != dnsmessage.RCodeSuccess || len(ans) != 1 || res.calls.Load() != 0 {
+		t.Fatalf("synthetic unknown=ask: rcode=%v ans=%d calls=%d", hdr.RCode, len(ans), res.calls.Load())
+	}
+	askIP := netip.AddrFrom4(ans[0].Body.(*dnsmessage.AResource).A)
+	if !synthPrefix.Contains(askIP) {
+		t.Errorf("synthetic ask IP %s outside 198.18.0.0/15", askIP)
+	}
+	if mapped, ok := h.LookupSynthetic(askIP); !ok || mapped != "askme.example" {
+		t.Errorf("LookupSynthetic(%s) = %q, %v; want askme.example", askIP, mapped, ok)
+	}
+	// Transparent flow decision for askme.example must still refuse with unknown:ask.
+	if dec := eng.Decide(Request{Host: "askme.example", Port: 443}); dec.Action != ActionDeny || dec.Rule != "unknown:ask" {
+		t.Errorf("Decide(askme.example) under unknown=ask = %+v, want deny unknown:ask", dec)
+	}
+	for _, blocked := range []string{"denied.example.", "locked.example."} {
+		rawResp, err = h.Handle(context.Background(), buildTestDNSQuery(t, 14, blocked, dnsmessage.TypeA))
+		if err != nil {
+			t.Fatal(err)
+		}
+		hdr, ans = parseDNSResponse(t, rawResp)
+		if hdr.RCode != dnsmessage.RCodeNameError || len(ans) != 0 || res.calls.Load() != 0 {
+			t.Errorf("synthetic unknown=ask blocked %s: rcode=%v ans=%d calls=%d", blocked, hdr.RCode, len(ans), res.calls.Load())
+		}
+	}
+
+	// Real mode under unknown=ask still returns NXDOMAIN with zero upstream queries.
+	hReal := NewDNSHandler(DNSOptions{
+		Engine: eng,
+		Addrs:  ap,
+		Dialer: &SafeDialer{Addrs: ap, Engine: eng, Resolver: res},
+		Mode:   DNSModeReal,
+	})
+	rawResp, err = hReal.Handle(context.Background(), buildTestDNSQuery(t, 15, "askme-real.example.", dnsmessage.TypeA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr, ans = parseDNSResponse(t, rawResp)
+	if hdr.RCode != dnsmessage.RCodeNameError || len(ans) != 0 || res.calls.Load() != 0 {
+		t.Errorf("real unknown=ask: rcode=%v ans=%d calls=%d, want NXDOMAIN and 0 calls", hdr.RCode, len(ans), res.calls.Load())
+	}
+}
+
+func TestDNSRefusesNonINClassAndCapsAnswers(t *testing.T) {
+	eng, err := NewEngine(Config{Sandbox: SandboxConfig{Preset: PresetBalanced}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ap, err := NewAddressPolicyWithHosts(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	many := make([]netip.Addr, 0, 24)
+	for i := range 24 {
+		many = append(many, ip4(93, 184, 216, byte(10+i)))
+	}
+	res := &countingResolver{ips: map[string][]netip.Addr{"registry.npmjs.org": many}}
+	h := NewDNSHandler(DNSOptions{
+		Engine: eng,
+		Addrs:  ap,
+		Dialer: &SafeDialer{Addrs: ap, Engine: eng, Resolver: res},
+		Mode:   DNSModeReal,
+	})
+
+	// Chaos class query (version.bind TXT) must be refused with zero upstream lookups.
+	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: 99, RecursionDesired: true})
+	_ = b.StartQuestions()
+	_ = b.Question(dnsmessage.Question{
+		Name:  dnsmessage.MustNewName("version.bind."),
+		Type:  dnsmessage.TypeTXT,
+		Class: dnsmessage.ClassCHAOS,
+	})
+	rawChaos, err := b.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawResp, err := h.Handle(context.Background(), rawChaos)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr, ans := parseDNSResponse(t, rawResp)
+	if hdr.RCode != dnsmessage.RCodeRefused || len(ans) != 0 || res.calls.Load() != 0 {
+		t.Errorf("CHAOS query: rcode=%v ans=%d calls=%d, want REFUSED and 0 calls", hdr.RCode, len(ans), res.calls.Load())
+	}
+
+	// Many upstream IPs are capped to maxDNSAnswerRecords so UDP answers stay compact.
+	rawResp, err = h.Handle(context.Background(), buildTestDNSQuery(t, 100, "registry.npmjs.org.", dnsmessage.TypeA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr, ans = parseDNSResponse(t, rawResp)
+	if hdr.RCode != dnsmessage.RCodeSuccess || len(ans) != maxDNSAnswerRecords {
+		t.Errorf("capped A response: rcode=%v ans=%d, want %d", hdr.RCode, len(ans), maxDNSAnswerRecords)
+	}
 }
 
 func FuzzDNSHandle(f *testing.F) {
