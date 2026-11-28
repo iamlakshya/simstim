@@ -93,16 +93,7 @@ func hostDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if h.Machine != nil {
-				if check := machineChecks[h.Machine.Provider]; check != nil {
-					d.Checks = append(d.Checks, check(ctx, h))
-				}
-				if h.Machine.Provider == (lima.Provider{}).Name() {
-					if ac, ok := lima.AutostartCheck(ctx, h); ok {
-						d.Checks = append(d.Checks, ac)
-					}
-				}
-			}
+			appendLocalMachineChecks(ctx, h, &d)
 			if d.AgentChecks, err = conn.AgentChecks(ctx); err != nil {
 				return err
 			}
@@ -130,6 +121,20 @@ func hostDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
 	return cmd
+}
+
+func appendLocalMachineChecks(ctx context.Context, h client.Host, d *client.HostInfo) {
+	if h.Machine == nil {
+		return
+	}
+	if check := machineChecks[h.Machine.Provider]; check != nil {
+		d.Checks = append(d.Checks, check(ctx, h))
+	}
+	if h.Machine.Provider == (lima.Provider{}).Name() {
+		if ac, ok := lima.AutostartCheck(ctx, h); ok {
+			d.Checks = append(d.Checks, ac)
+		}
+	}
 }
 
 func probeDoctorSandbox(ctx context.Context, conn *client.Conn, _ client.Host, d *client.HostInfo) error {

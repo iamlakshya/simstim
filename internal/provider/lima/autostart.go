@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/provider"
@@ -31,7 +33,10 @@ var (
 		h, _ := os.UserHomeDir()
 		return filepath.Join(h, "Library", "LaunchAgents")
 	}
-	sudoAvailable   = checkSudoNonInteractive
+	sudoAvailable     = checkSudoNonInteractive
+	terminalAvailable = func() bool {
+		return term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stderr.Fd()))
+	}
 	bootWaitTimeout = 2 * time.Minute
 	bootWaitPoll    = time.Second
 )
@@ -81,7 +86,7 @@ func EnableAutostart(ctx context.Context, out io.Writer, inst, mode string, expl
 	if mode == AutostartBoot {
 		canSudo := interactive || sudoAvailable(ctx)
 		if !canSudo {
-			bootCmd := fmt.Sprintf("%s autostart enable --condition=boot %s", client.ShellQuote(bin), client.ShellQuote(inst))
+			bootCmd := fmt.Sprintf("%s autostart enable --condition=boot --keep-alive %s", client.ShellQuote(bin), client.ShellQuote(inst))
 			if explicit {
 				return "", &client.UserError{
 					Msg:  "enabling start at boot needs sudo, and input is off",
@@ -102,9 +107,9 @@ func EnableAutostart(ctx context.Context, out io.Writer, inst, mode string, expl
 		if _, err := provider.Exec(ctx, install, bin, "stop", inst); err != nil {
 			return "", fmt.Errorf("stop %s before enabling boot autostart: %w", inst, err)
 		}
-		fmt.Fprintf(out, "  Enabling start at boot: %s autostart enable --condition=boot %s\n", bin, inst)
+		fmt.Fprintf(out, "  Enabling start at boot: %s autostart enable --condition=boot --keep-alive %s\n", bin, inst)
 		if err := runAutostart(ctx, bin, interactive, "autostart", "enable", "--condition=boot", "--keep-alive", inst); err != nil {
-			bootCmd := fmt.Sprintf("%s autostart enable --condition=boot %s", client.ShellQuote(bin), client.ShellQuote(inst))
+			bootCmd := fmt.Sprintf("%s autostart enable --condition=boot --keep-alive %s", client.ShellQuote(bin), client.ShellQuote(inst))
 			return "", &client.UserError{
 				Msg:  fmt.Sprintf("could not enable start at boot for %s: %v", inst, err),
 				Hint: fmt.Sprintf("Run %s in a terminal, or use --autostart=login.", bootCmd),
@@ -118,11 +123,11 @@ func EnableAutostart(ctx context.Context, out io.Writer, inst, mode string, expl
 		return AutostartBoot, nil
 	}
 
-	fmt.Fprintf(out, "  Enabling start at login: %s autostart enable --condition=login %s\n", bin, inst)
+	fmt.Fprintf(out, "  Enabling start at login: %s autostart enable --condition=login --keep-alive %s\n", bin, inst)
 	if _, err := provider.Exec(ctx, install, bin, "autostart", "enable", "--condition=login", "--keep-alive", inst); err != nil {
 		return "", &client.UserError{
 			Msg:  fmt.Sprintf("could not enable autostart for %s: %v", inst, err),
-			Hint: fmt.Sprintf("%s autostart enable --condition=login %s", client.ShellQuote(bin), client.ShellQuote(inst)),
+			Hint: fmt.Sprintf("%s autostart enable --condition=login --keep-alive %s", client.ShellQuote(bin), client.ShellQuote(inst)),
 			Code: "lima_autostart",
 		}
 	}
@@ -141,7 +146,14 @@ func DisableAutostart(ctx context.Context, inst string) error {
 		return nil
 	}
 	bin := limaCommand()
-	interactive := st == AutostartBoot && client.InputAllowed(ctx)
+	interactive := st == AutostartBoot && client.InputAllowed(ctx) && terminalAvailable()
+	if st == AutostartBoot && !interactive && !sudoAvailable(ctx) {
+		return &client.UserError{
+			Msg:  fmt.Sprintf("disabling start at boot for %s needs sudo, and input is off", inst),
+			Hint: fmt.Sprintf("Run %s autostart disable %s in a terminal, then destroy the host again.", client.ShellQuote(bin), client.ShellQuote(inst)),
+			Code: "autostart_sudo",
+		}
+	}
 	if err := runAutostart(ctx, bin, interactive, "autostart", "disable", inst); err != nil {
 		return &client.UserError{
 			Msg:  fmt.Sprintf("could not disable autostart for %s: %v", inst, err),
@@ -160,12 +172,17 @@ func AutostartCheck(_ context.Context, h client.Host) (api.Check, bool) {
 	}
 	want := h.Machine.Autostart
 	state := AutostartState(h.Machine.ID)
-	if want == "" && state == AutostartOff {
+	if (want == "" || want == AutostartOff) && state == AutostartOff {
 		return api.Check{}, false
 	}
 	bin := client.ShellQuote(limaCommand())
 	inst := client.ShellQuote(h.Machine.ID)
 	c := api.Check{Name: AutostartName}
+	if want == AutostartOff {
+		c.Detail = fmt.Sprintf("%s still has %s autostart enabled", h.Name, state)
+		c.Fix = fmt.Sprintf("%s autostart disable %s", bin, inst)
+		return c, true
+	}
 	switch state {
 	case AutostartBoot:
 		c.OK = true
@@ -173,18 +190,18 @@ func AutostartCheck(_ context.Context, h client.Host) (api.Check, bool) {
 	case AutostartLogin:
 		if want == AutostartBoot {
 			c.Detail = h.Name + " starts at login, not at boot"
-			c.Fix = fmt.Sprintf("%s autostart enable --condition=boot %s", bin, inst)
+			c.Fix = fmt.Sprintf("%s autostart enable --condition=boot --keep-alive %s", bin, inst)
 		} else {
 			c.OK = true
 			c.Detail = h.Name + " starts at login (LaunchAgent via limactl autostart)"
 		}
 	default:
 		cond := want
-		if cond == "" || cond == AutostartOff {
+		if cond == "" {
 			cond = AutostartBoot
 		}
 		c.Detail = h.Name + " is not registered with limactl autostart"
-		c.Fix = fmt.Sprintf("%s autostart enable --condition=%s %s", bin, cond, inst)
+		c.Fix = fmt.Sprintf("%s autostart enable --condition=%s --keep-alive %s", bin, cond, inst)
 	}
 	return c, true
 }

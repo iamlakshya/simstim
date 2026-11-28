@@ -128,6 +128,9 @@ func EnsurePinned(ctx context.Context, out io.Writer) (string, error) {
 	if fi, err := os.Stat(stagedBin); err != nil || fi.IsDir() || fi.Mode()&0o111 == 0 {
 		return "", fmt.Errorf("the Lima %s archive has no executable bin/limactl", PinnedVersion)
 	}
+	if err := verifyPinnedBinary(ctx, stagedBin); err != nil {
+		return "", err
+	}
 	dst := PinnedDir()
 	if err := os.Rename(stage, dst); err != nil {
 		// Another process may have installed the same pinned version meanwhile.
@@ -135,10 +138,6 @@ func EnsurePinned(ctx context.Context, out io.Writer) (string, error) {
 			return bin, nil
 		}
 		return "", fmt.Errorf("install Lima %s into %s: %w", PinnedVersion, dst, err)
-	}
-	if err := verifyPinnedBinary(ctx, bin); err != nil {
-		_ = os.RemoveAll(dst)
-		return "", err
 	}
 	fmt.Fprintf(out, "  ✓ Lima %s ready (SHA-256 verified) at %s\n", PinnedVersion, dst)
 	return bin, nil
@@ -151,7 +150,7 @@ func downloadChecked(ctx context.Context, dir, url, wantSHA string) (string, err
 	}
 	resp, err := pinnedClient.Do(req)
 	if err != nil {
-		if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.Canceled) {
 			return "", fmt.Errorf("download Lima %s: %w", PinnedVersion, ctx.Err())
 		}
 		return "", &client.UserError{
@@ -183,7 +182,14 @@ func downloadChecked(ctx context.Context, dir, url, wantSHA string) (string, err
 	h := sha256.New()
 	n, err := io.Copy(io.MultiWriter(f, h), io.LimitReader(resp.Body, maxArchiveBytes+1))
 	if err != nil {
-		return "", fmt.Errorf("read Lima %s archive: %w", PinnedVersion, err)
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return "", fmt.Errorf("read Lima %s archive: %w", PinnedVersion, ctx.Err())
+		}
+		return "", &client.UserError{
+			Msg:  fmt.Sprintf("could not download Lima %s: %v", PinnedVersion, err),
+			Hint: "Check your internet connection and try again, or install Lima " + PinnedVersion + " from https://lima-vm.io/docs/installation/.",
+			Code: "lima_download",
+		}
 	}
 	if n > maxArchiveBytes {
 		return "", &client.UserError{
@@ -223,6 +229,11 @@ func extractTarGz(archivePath, dst string) error {
 	if err != nil {
 		return fmt.Errorf("resolve staging folder: %w", err)
 	}
+	root, err := os.OpenRoot(absDst)
+	if err != nil {
+		return fmt.Errorf("open staging folder: %w", err)
+	}
+	defer root.Close()
 	tr := tar.NewReader(gz)
 	var totalBytes int64
 	entries := 0
@@ -238,14 +249,14 @@ func extractTarGz(archivePath, dst string) error {
 		if entries > maxArchiveEntries {
 			return fmt.Errorf("archive has more than %d entries", maxArchiveEntries)
 		}
-		target, err := safeJoin(absDst, hdr.Name)
+		rel, err := safeRelPath(hdr.Name)
 		if err != nil {
 			return err
 		}
-		if target == absDst {
+		if rel == "." {
 			continue
 		}
-		written, err := extractEntry(tr, hdr, absDst, target, maxExtractedBytes-totalBytes)
+		written, err := extractEntry(tr, hdr, root, rel, maxExtractedBytes-totalBytes)
 		if err != nil {
 			return err
 		}
@@ -253,75 +264,115 @@ func extractTarGz(archivePath, dst string) error {
 	}
 }
 
-func safeJoin(root, name string) (string, error) {
+func safeRelPath(name string) (string, error) {
 	if strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) {
 		return "", fmt.Errorf("archive entry %q uses an absolute path", name)
 	}
 	clean := filepath.Clean(name)
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || filepath.IsAbs(clean) {
 		return "", fmt.Errorf("archive entry %q escapes its folder", name)
 	}
-	target := filepath.Join(root, clean)
-	if target != root && !strings.HasPrefix(target, root+string(filepath.Separator)) {
-		return "", fmt.Errorf("archive entry %q escapes its folder", name)
-	}
-	return target, nil
+	return clean, nil
 }
 
-func extractEntry(r io.Reader, hdr *tar.Header, root, target string, remaining int64) (int64, error) {
+func rejectSymlinkComponents(root *os.Root, rel string) error {
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	cur := ""
+	for _, p := range parts {
+		if cur == "" {
+			cur = p
+		} else {
+			cur += "/" + p
+		}
+		fi, err := root.Lstat(cur)
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("stat %s: %w", cur, err)
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("archive entry %q traverses symlink %q", rel, cur)
+		}
+	}
+	return nil
+}
+
+func extractEntry(r io.Reader, hdr *tar.Header, root *os.Root, rel string, remaining int64) (int64, error) {
 	switch hdr.Typeflag {
 	case tar.TypeDir:
-		if err := os.MkdirAll(target, 0o750); err != nil {
+		if err := rejectSymlinkComponents(root, rel); err != nil {
+			return 0, err
+		}
+		if err := root.MkdirAll(rel, 0o750); err != nil {
 			return 0, fmt.Errorf("make directory %s: %w", hdr.Name, err)
 		}
 		return 0, nil
 	case tar.TypeReg:
-		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-			return 0, fmt.Errorf("make parent for %s: %w", hdr.Name, err)
-		}
-		if hdr.Size < 0 || hdr.Size > remaining {
-			return 0, fmt.Errorf("archive exceeds %d MiB extracted limit", maxExtractedBytes>>20)
-		}
-		mode := os.FileMode(hdr.Mode & 0o755)
-		if mode == 0 {
-			mode = 0o644
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
-		if err != nil {
-			return 0, fmt.Errorf("create %s: %w", hdr.Name, err)
-		}
-		n, copyErr := io.Copy(out, io.LimitReader(r, remaining+1))
-		closeErr := out.Close()
-		if copyErr != nil {
-			return 0, fmt.Errorf("write %s: %w", hdr.Name, copyErr)
-		}
-		if closeErr != nil {
-			return 0, fmt.Errorf("close %s: %w", hdr.Name, closeErr)
-		}
-		if n > remaining {
-			return 0, fmt.Errorf("archive exceeds %d MiB extracted limit", maxExtractedBytes>>20)
-		}
-		return n, nil
+		return extractReg(r, hdr, root, rel, remaining)
 	case tar.TypeSymlink:
-		if filepath.IsAbs(hdr.Linkname) {
-			return 0, fmt.Errorf("symlink %q points to absolute path %q", hdr.Name, hdr.Linkname)
-		}
-		resolved := filepath.Clean(filepath.Join(filepath.Dir(target), hdr.Linkname)) //nolint:gosec // G305: containment under root is enforced below
-		if resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
-			return 0, fmt.Errorf("symlink %q escapes staging folder", hdr.Name)
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-			return 0, fmt.Errorf("make parent for symlink %s: %w", hdr.Name, err)
-		}
-		if err := os.Symlink(hdr.Linkname, target); err != nil {
-			return 0, fmt.Errorf("create symlink %s: %w", hdr.Name, err)
-		}
-		return 0, nil
+		return 0, extractSymlink(hdr, root, rel)
 	case tar.TypeXHeader, tar.TypeXGlobalHeader, tar.TypeGNULongName, tar.TypeGNULongLink:
 		return 0, nil
 	default:
 		return 0, fmt.Errorf("unsupported tar entry type %d for %q", hdr.Typeflag, hdr.Name)
 	}
+}
+
+func extractReg(r io.Reader, hdr *tar.Header, root *os.Root, rel string, remaining int64) (int64, error) {
+	if err := rejectSymlinkComponents(root, rel); err != nil {
+		return 0, err
+	}
+	if parent := filepath.Dir(rel); parent != "." {
+		if err := root.MkdirAll(parent, 0o750); err != nil {
+			return 0, fmt.Errorf("make parent for %s: %w", hdr.Name, err)
+		}
+	}
+	if hdr.Size < 0 || hdr.Size > remaining {
+		return 0, fmt.Errorf("archive exceeds %d MiB extracted limit", maxExtractedBytes>>20)
+	}
+	mode := os.FileMode(hdr.Mode & 0o755)
+	if mode == 0 {
+		mode = 0o644
+	}
+	out, err := root.OpenFile(rel, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	if err != nil {
+		return 0, fmt.Errorf("create %s: %w", hdr.Name, err)
+	}
+	n, copyErr := io.Copy(out, io.LimitReader(r, remaining+1))
+	closeErr := out.Close()
+	if copyErr != nil {
+		return 0, fmt.Errorf("write %s: %w", hdr.Name, copyErr)
+	}
+	if closeErr != nil {
+		return 0, fmt.Errorf("close %s: %w", hdr.Name, closeErr)
+	}
+	if n > remaining {
+		return 0, fmt.Errorf("archive exceeds %d MiB extracted limit", maxExtractedBytes>>20)
+	}
+	return n, nil
+}
+
+func extractSymlink(hdr *tar.Header, root *os.Root, rel string) error {
+	if filepath.IsAbs(hdr.Linkname) || strings.HasPrefix(hdr.Linkname, `\`) {
+		return fmt.Errorf("symlink %q points to absolute path %q", hdr.Name, hdr.Linkname)
+	}
+	if err := rejectSymlinkComponents(root, rel); err != nil {
+		return err
+	}
+	resolved := filepath.Clean(filepath.Join(filepath.Dir(rel), hdr.Linkname)) //nolint:gosec // G305: containment inside os.Root and symlink-parent checks are enforced
+	if resolved == ".." || strings.HasPrefix(resolved, ".."+string(filepath.Separator)) || filepath.IsAbs(resolved) {
+		return fmt.Errorf("symlink %q escapes staging folder", hdr.Name)
+	}
+	if parent := filepath.Dir(rel); parent != "." {
+		if err := root.MkdirAll(parent, 0o750); err != nil {
+			return fmt.Errorf("make parent for symlink %s: %w", hdr.Name, err)
+		}
+	}
+	if err := root.Symlink(hdr.Linkname, rel); err != nil {
+		return fmt.Errorf("create symlink %s: %w", hdr.Name, err)
+	}
+	return nil
 }
 
 func verifyPinnedBinary(ctx context.Context, bin string) error {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
 	"github.com/iamlakshya/simstim/internal/provider"
@@ -71,7 +72,21 @@ func TestHostAddLocalValidation(t *testing.T) {
 }
 
 func TestHostAddLocalCreatesAndConnects(t *testing.T) {
-	m, _ := withFake(t, nil)
+	m, tr := withFake(t, nil)
+	tr.Features = []string{"sandbox"}
+	tr.Answers = map[string]any{
+		"sandbox.probe": api.CapProbe{
+			OS:           "linux",
+			Arch:         "arm64",
+			Kernel:       "6.12.0",
+			Bwrap:        true,
+			BwrapVersion: "0.11.0",
+			LandlockABI:  4,
+			Seccomp:      true,
+			UserNS:       true,
+			Walls:        []api.WallProbe{{Driver: "process", Level: "process", OK: true, Version: "0.11.0"}},
+		},
+	}
 	cp := &captureLocalProvider{m: m}
 
 	origCheck, origSizing, origPin, origProv := checkLocalMac, localMacSizing, ensurePinnedLima, localMacProvider
@@ -104,8 +119,8 @@ func TestHostAddLocalCreatesAndConnects(t *testing.T) {
 	if h.Machine == nil || h.Machine.Autostart != lima.AutostartBoot || h.Machine.IdleStop != "never" || h.Labels["place"] != "desk" {
 		t.Errorf("saved host = %+v, machine = %+v", h, h.Machine)
 	}
-	if h.WallFloor == "" {
-		t.Errorf("saved host WallFloor was not pinned by pinHostFloor: %+v", h)
+	if h.WallFloor != "process" {
+		t.Errorf("saved host WallFloor = %q, want process", h.WallFloor)
 	}
 	if !strings.Contains(out, "Sandboxes on mac:") {
 		t.Errorf("stderr lacks Sandboxes block:\n%s", out)

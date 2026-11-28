@@ -227,18 +227,124 @@ func TestExtractTarGzRejectsTraversalAndSymlinkEscape(t *testing.T) {
 				mode     int64
 			}{{name: "bin/abs", typeflag: tar.TypeSymlink, linkname: "/etc/passwd", mode: 0o777}},
 		},
+		{
+			name: "chained-symlink-escape",
+			entries: []struct {
+				name     string
+				typeflag byte
+				body     string
+				linkname string
+				mode     int64
+			}{
+				{name: "a/b", typeflag: tar.TypeSymlink, linkname: "..", mode: 0o777},
+				{name: "a/b/esc", typeflag: tar.TypeSymlink, linkname: "..", mode: 0o777},
+				{name: "a/b/esc/evil", typeflag: tar.TypeReg, body: "escaped", mode: 0o644},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, _ := makeTarGz(t, tc.entries)
-			tgz := filepath.Join(t.TempDir(), "bad.tar.gz")
+			outer := t.TempDir()
+			dst := filepath.Join(outer, "stage")
+			if err := os.MkdirAll(dst, 0o750); err != nil {
+				t.Fatal(err)
+			}
+			tgz := filepath.Join(outer, "bad.tar.gz")
 			if err := os.WriteFile(tgz, raw, 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := extractTarGz(tgz, t.TempDir()); err == nil {
+			if err := extractTarGz(tgz, dst); err == nil {
 				t.Fatalf("extractTarGz(%s) succeeded, want error", tc.name)
 			}
+			if _, err := os.Stat(filepath.Join(outer, "evil")); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("extractTarGz(%s) wrote outside staging folder: %v", tc.name, err)
+			}
 		})
+	}
+}
+
+func TestEnsurePinnedVerifiesBeforePublish(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script fake limactl requires POSIX")
+	}
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+
+	// Fake limactl reports an older version than minVersion, and also checks
+	// that PinnedDir does not exist while --version runs.
+	script := "#!/bin/sh\nif [ -e \"$CHECK_DST\" ]; then echo PUBLISHED_EARLY >&2; exit 9; fi\necho 'limactl version 1.0.0'\n"
+	raw, digest := makeTarGz(t, []struct {
+		name     string
+		typeflag byte
+		body     string
+		linkname string
+		mode     int64
+	}{
+		{name: "bin/limactl", typeflag: tar.TypeReg, body: script, mode: 0o755},
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(raw)
+	}))
+	defer srv.Close()
+
+	origURL, origClient := pinnedBaseURL, pinnedClient
+	origOS, origArch := goos, goarch
+	origArchives := pinnedArchives
+	t.Cleanup(func() {
+		pinnedBaseURL, pinnedClient = origURL, origClient
+		goos, goarch = origOS, origArch
+		pinnedArchives = origArchives
+	})
+	goos, goarch = "darwin", "arm64"
+	pinnedBaseURL = srv.URL
+	pinnedClient = srv.Client()
+	pinnedArchives = map[string]pinnedArchive{
+		"darwin/arm64": {file: "lima-old.tar.gz", sha256: digest},
+	}
+	t.Setenv("CHECK_DST", PinnedDir())
+
+	_, err := EnsurePinned(context.Background(), nil)
+	var ue *client.UserError
+	if !errors.As(err, &ue) || ue.Code != "lima_version" {
+		t.Fatalf("EnsurePinned old version = %+v, want lima_version (and not published early)", err)
+	}
+	if _, statErr := os.Stat(PinnedDir()); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("PinnedDir exists after failed verification: %v", statErr)
+	}
+}
+
+func TestDownloadCheckedTimeoutAndCancel(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-block:
+		case <-r.Context().Done():
+		}
+	}))
+	defer func() {
+		close(block)
+		srv.Close()
+	}()
+
+	origClient := pinnedClient
+	t.Cleanup(func() { pinnedClient = origClient })
+	pinnedClient = srv.Client()
+
+	// Deadline exceeded yields lima_download UserError with a Try: hint.
+	tctx, cancelTimeout := context.WithTimeout(context.Background(), 40*time.Millisecond)
+	defer cancelTimeout()
+	_, err := downloadChecked(tctx, t.TempDir(), srv.URL+"/lima.tgz", strings.Repeat("0", 64))
+	var ue *client.UserError
+	if !errors.As(err, &ue) || ue.Code != "lima_download" || ue.Hint == "" {
+		t.Fatalf("downloadChecked timeout = %+v, want lima_download UserError with hint", err)
+	}
+
+	// Explicit cancellation yields context.Canceled (not lima_download).
+	cctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = downloadChecked(cctx, t.TempDir(), srv.URL+"/lima.tgz", strings.Repeat("0", 64))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("downloadChecked canceled = %v, want context.Canceled", err)
 	}
 }
 
@@ -376,15 +482,16 @@ func TestAutostartLifecycleAndDoctorCheck(t *testing.T) {
 
 	origOS := goos
 	origDaemon, origAgent := daemonPlistDir, agentPlistDir
-	origSudo, origPoll := sudoAvailable, bootWaitPoll
+	origSudo, origTerm, origPoll := sudoAvailable, terminalAvailable, bootWaitPoll
 	t.Cleanup(func() {
 		goos = origOS
 		daemonPlistDir, agentPlistDir = origDaemon, origAgent
-		sudoAvailable, bootWaitPoll = origSudo, origPoll
+		sudoAvailable, terminalAvailable, bootWaitPoll = origSudo, origTerm, origPoll
 	})
 	goos = "darwin"
 	daemonPlistDir = func() string { return daemonDir }
 	agentPlistDir = func() string { return agentDir }
+	terminalAvailable = func() bool { return false }
 	bootWaitPoll = 10 * time.Millisecond
 
 	ctx := context.Background()
@@ -417,8 +524,8 @@ func TestAutostartLifecycleAndDoctorCheck(t *testing.T) {
 	if hLogin.Machine.Autostart != AutostartLogin {
 		t.Fatalf("Autostart = %q, want login", hLogin.Machine.Autostart)
 	}
-	if !strings.Contains(out.String(), "--condition=boot") {
-		t.Errorf("fallback output did not print boot command:\n%s", out.String())
+	if !strings.Contains(out.String(), "--condition=boot --keep-alive") {
+		t.Errorf("fallback output did not print boot command with --keep-alive:\n%s", out.String())
 	}
 	if c, ok := AutostartCheck(ctx, hLogin); !ok || !c.OK || !strings.Contains(c.Detail, "starts at login") {
 		t.Errorf("AutostartCheck(login) = %+v, %v", c, ok)
@@ -450,17 +557,77 @@ func TestAutostartLifecycleAndDoctorCheck(t *testing.T) {
 		t.Errorf("AutostartCheck(boot) = %+v, %v", c, ok)
 	}
 
-	// 4. Plain Lima VM with no autostart -> AutostartCheck returns false (keeps doctor clean).
+	// 4. Plain Lima VM with no autostart or autostart = "off" -> AutostartCheck returns false.
 	plain := client.Host{Name: "plain", Machine: &client.Machine{Provider: "lima", ID: provider.MachineName("plain")}}
 	if _, ok := AutostartCheck(ctx, plain); ok {
 		t.Error("AutostartCheck returned true for plain VM with no autostart")
 	}
+	wantOff := client.Host{Name: "plain", Machine: &client.Machine{Provider: "lima", ID: provider.MachineName("plain"), Autostart: AutostartOff}}
+	if _, ok := AutostartCheck(ctx, wantOff); ok {
+		t.Error("AutostartCheck returned true for autostart = off with no plist")
+	}
+	// If autostart = "off" in config while a plist is still registered, doctor reports Fix: autostart disable.
+	bootAsOff := hBoot
+	bootAsOff.Machine = &client.Machine{Provider: "lima", ID: hBoot.Machine.ID, Autostart: AutostartOff}
+	if c, ok := AutostartCheck(ctx, bootAsOff); !ok || c.OK || !strings.Contains(c.Fix, "autostart disable "+hBoot.Machine.ID) {
+		t.Errorf("AutostartCheck(want=off, state=boot) = %+v, %v", c, ok)
+	}
 
-	// 5. Missing plist on a host expecting boot -> warns with enable command.
-	if err := os.Remove(daemonPlistPath(hBoot.Machine.ID)); err != nil {
+	// 5. Destroy on a boot-autostart VM:
+	// 5a. Piped (terminalAvailable=false) without sudo -> fails with autostart_sudo even when InputAllowed(ctx) is true.
+	sudoAvailable = func(context.Context) bool { return false }
+	terminalAvailable = func() bool { return false }
+	bc, err := p.Open(hBoot)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if c, ok := AutostartCheck(ctx, hBoot); !ok || c.OK || !strings.Contains(c.Fix, "autostart enable --condition=boot") {
+	var ue *client.UserError
+	if err := bc.Destroy(ctx); !errors.As(err, &ue) || ue.Code != "autostart_sudo" || !strings.Contains(ue.Hint, "autostart disable "+hBoot.Machine.ID) {
+		t.Fatalf("Destroy(boot, no tty, no sudo) = %+v, want autostart_sudo", err)
+	}
+	if AutostartState(hBoot.Machine.ID) != AutostartBoot {
+		t.Error("Destroy without sudo removed plist")
+	}
+	// 5b. Explicit --no-input even if terminalAvailable=true -> still refuses without sudo.
+	terminalAvailable = func() bool { return true }
+	if err := bc.Destroy(client.WithoutInput(ctx)); !errors.As(err, &ue) || ue.Code != "autostart_sudo" {
+		t.Fatalf("Destroy(boot, --no-input, no sudo) = %+v, want autostart_sudo", err)
+	}
+	// 5c. With passwordless sudo (non-interactive) -> disables LaunchDaemon and deletes VM.
+	terminalAvailable = func() bool { return false }
+	sudoAvailable = func(context.Context) bool { return true }
+	if err := bc.Destroy(client.WithoutInput(ctx)); err != nil {
+		t.Fatalf("Destroy(boot, sudo): %v", err)
+	}
+	if AutostartState(hBoot.Machine.ID) != AutostartOff {
+		t.Error("Destroy(boot, sudo) left LaunchDaemon plist behind")
+	}
+	if in, _ := find(ctx, hBoot.Machine.ID); in != nil {
+		t.Error("Destroy(boot, sudo) left VM behind")
+	}
+
+	// 5d. Interactive terminal without passwordless sudo -> invokes interactive path and succeeds.
+	hBoot2, err := p.Create(ctx, provider.Request{
+		Name: "macboot2", Autostart: AutostartBoot, AutostartExplicit: true,
+	})
+	if err != nil {
+		t.Fatalf("Create boot2: %v", err)
+	}
+	sudoAvailable = func(context.Context) bool { return false }
+	terminalAvailable = func() bool { return true }
+	bc2, err := p.Open(hBoot2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bc2.Destroy(ctx); err != nil {
+		t.Fatalf("Destroy(boot, interactive): %v", err)
+	}
+	if AutostartState(hBoot2.Machine.ID) != AutostartOff {
+		t.Error("Destroy(boot, interactive) left LaunchDaemon plist behind")
+	}
+
+	// 6. Missing plist on a host expecting boot -> warns with enable command including --keep-alive.
+	if c, ok := AutostartCheck(ctx, hBoot); !ok || c.OK || !strings.Contains(c.Fix, "autostart enable --condition=boot --keep-alive") {
 		t.Errorf("AutostartCheck(missing) = %+v, %v", c, ok)
 	}
 }
