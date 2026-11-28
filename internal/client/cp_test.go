@@ -225,7 +225,13 @@ func TestCPPlantedSecurityCases(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(remote, "collide", "a"), []byte("2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CopyFromSFTP(sc, "collide", local, CopyOptions{}); !errors.As(err, &ue) || ue.Code != "cp_path" {
+	// On a disk that ignores case (macOS by default), a overwrote A, so the
+	// fake remote has only one file and nothing collides.
+	if entries, err := os.ReadDir(filepath.Join(remote, "collide")); err != nil {
+		t.Fatal(err)
+	} else if len(entries) < 2 {
+		t.Log("skipping the case collision check: this disk ignores case")
+	} else if _, err := CopyFromSFTP(sc, "collide", local, CopyOptions{}); !errors.As(err, &ue) || ue.Code != "cp_path" {
 		t.Fatalf("case collision = %v, want cp_path", err)
 	}
 
