@@ -79,6 +79,8 @@ type RunOptions struct {
 type managedHolder struct {
 	id   string
 	sock string
+	cwd  string
+	env  []string
 	cmd  *exec.Cmd
 	done chan struct{}
 }
@@ -199,7 +201,7 @@ func (r *runner) handleStream(ctx context.Context, st *link.Stream) {
 	case link.KindPort:
 		r.servePort(ctx, st)
 	default:
-		_ = st.Close()
+		r.handleExtraStream(ctx, st)
 	}
 }
 
@@ -379,7 +381,7 @@ func (r *runner) startHolder(ctx context.Context, a StartReq) (*StartResp, *prot
 		return nil, &proto.Error{Code: "start_failed", Message: err.Error(), Hint: "Check the host helper binary."}
 	}
 
-	mh := &managedHolder{id: a.Session, sock: sockPath, cmd: cmd, done: make(chan struct{})}
+	mh := &managedHolder{id: a.Session, sock: sockPath, cwd: a.Cwd, env: append([]string(nil), agentEnv...), cmd: cmd, done: make(chan struct{})}
 	go func() {
 		_ = cmd.Wait()
 		r.mu.Lock()

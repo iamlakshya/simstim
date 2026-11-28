@@ -293,6 +293,19 @@ func (m *Manifest) Save() error {
 	return m.SaveTo(paths.Manifest(m.ID))
 }
 
+// HostDir returns the host filesystem path of the session's workspace. For
+// walled sessions this is Wall.WorkspaceHost (when set), while Cwd holds the
+// guest path inside the wall. For unwalled sessions it returns Cwd.
+func (m *Manifest) HostDir() string {
+	if m == nil {
+		return ""
+	}
+	if m.Wall != nil && m.Wall.WorkspaceHost != "" {
+		return m.Wall.WorkspaceHost
+	}
+	return m.Cwd
+}
+
 // SaveTo writes the manifest atomically to path.
 func (m *Manifest) SaveTo(path string) error {
 	m.UpdatedAt = time.Now().UTC()

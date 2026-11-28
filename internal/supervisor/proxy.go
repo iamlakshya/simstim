@@ -73,7 +73,7 @@ func (s *Supervisor) serveConn(conn net.Conn) {
 		Protocol: version.Protocol,
 		Version:  version.Version,
 		Role:     "supervisor",
-		Features: []string{"put", "port.grant"},
+		Features: []string{"put", "port.grant", "sftp", "ssh.exec"},
 	}); err != nil {
 		return
 	}
@@ -96,6 +96,12 @@ func (s *Supervisor) serveConn(conn net.Conn) {
 			var req proto.Request
 			if json.Unmarshal(f.Payload, &req) != nil {
 				return
+			}
+			if isStreamRequest(req.Op) {
+				if s.handleStreamRequest(conn, r, w, req) {
+					return
+				}
+				continue
 			}
 			if !s.handleRequest(w, req) {
 				return

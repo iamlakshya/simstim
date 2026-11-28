@@ -20,6 +20,19 @@ type PortHeader struct {
 	Port int `json:"port"`
 }
 
+// SFTPHeader is the JSON header of a link.KindSFTP stream (supervisor -> guest).
+type SFTPHeader struct {
+	Session string `json:"session,omitempty"`
+}
+
+// ExecHeader is the JSON header of a link.KindExec stream (supervisor -> guest).
+type ExecHeader struct {
+	ID      string           `json:"id,omitempty"`
+	Session string           `json:"session,omitempty"`
+	Mode    string           `json:"mode,omitempty"`
+	SSH     *api.SSHExecArgs `json:"ssh,omitempty"`
+}
+
 // PutHeader is the JSON header of a link.KindPut stream.
 type PutHeader struct {
 	Name   string `json:"name"`

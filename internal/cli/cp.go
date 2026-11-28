@@ -15,7 +15,7 @@ import (
 )
 
 func cpCmd() *cobra.Command {
-	var force, allowFlagged bool
+	var force, allowFlagged, recursive bool
 	cmd := &cobra.Command{
 		Use:   "cp <source> <destination>",
 		Short: "Copy files or folders into or out of a session over SFTP",
@@ -51,7 +51,7 @@ func cpCmd() *cobra.Command {
 			}
 			if srcRemote {
 				return runCP(cmd, srcHost+"/"+srcSess, func(ctx context.Context, h client.Host, s *client.Session) error {
-					sc, closer, err := client.OpenSFTP(ctx, h, s.ID)
+					sc, closer, err := client.OpenSessionSFTP(ctx, h, s)
 					if err != nil {
 						return err
 					}
@@ -65,7 +65,7 @@ func cpCmd() *cobra.Command {
 				})
 			}
 			return runCP(cmd, dstHost+"/"+dstSess, func(ctx context.Context, h client.Host, s *client.Session) error {
-				sc, closer, err := client.OpenSFTP(ctx, h, s.ID)
+				sc, closer, err := client.OpenSessionSFTP(ctx, h, s)
 				if err != nil {
 					return err
 				}
@@ -80,6 +80,7 @@ func cpCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "replace existing files at the destination")
+	cmd.Flags().BoolVarP(&recursive, "recursive", "r", false, "copy folders recursively (already the default)")
 	cmd.Flags().BoolVar(&allowFlagged, "allow-flagged", false, "copy files that can run code or contain hidden text without asking")
 	return cmd
 }

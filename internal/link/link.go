@@ -42,6 +42,7 @@ const (
 	KindSFTP   Kind = "sftp"   // one SFTP session of an editor
 	KindGet    Kind = "get"    // one file copied out of the guest
 	KindLayer  Kind = "layer"  // the guest's root as a tar stream, for image save
+	KindEvents Kind = "events" // host and session event stream (spec 10.5)
 )
 
 // Side is the end of a link.
@@ -99,6 +100,17 @@ var Opener = map[Kind]Side{
 	KindEgress: Guest, KindDNS: Guest, KindRPort: Guest, KindAgent: Guest,
 }
 
+// BridgeOpener is the Options.Opener table for streaming bridge connections
+// between the host/supervisor (Supervisor side, odd IDs) and the client
+// (Guest side) per isolation spec 10.5.
+var BridgeOpener = map[Kind]Side{
+	KindExec:   Supervisor,
+	KindRPort:  Supervisor,
+	KindSFTP:   Supervisor,
+	KindPort:   Supervisor,
+	KindEvents: Supervisor,
+}
+
 // The defaults of Options. With them, a link holds at most 8 MiB that the
 // other end sent and 8 MiB queued to send: 128 streams of 64 KiB each way.
 // They are the project's choice, to keep the supervisor within its budget
@@ -132,6 +144,11 @@ type Options struct {
 	// Opener replaces the package's Opener table, for a link that carries
 	// other kinds, such as one between the client and a host's bridge.
 	Opener map[Kind]Side
+	// AllowVersionMismatch skips the exact helper-version match on Supervisor
+	// links. Used on client-to-supervisor streaming bridge links (spec 10.5),
+	// where the client and host helper may run different versions of the same
+	// major protocol.
+	AllowVersionMismatch bool
 }
 
 func (o Options) withDefaults() Options {

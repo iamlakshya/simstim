@@ -8,7 +8,9 @@ simstim cp my-server/auth-fix:notes.md .
 simstim cp ./data.csv my-server/auth-fix:data.csv
 ```
 
-A relative path on the remote side starts in the session's workspace. Use `-f` to replace existing files at the destination.
+A relative path on the remote side starts in the session's workspace. Folders copy recursively by default (you may also pass `-r`). Use `-f` to replace existing files at the destination.
+
+On walled sessions, SFTP runs inside the sandbox as the user `agent` over a link stream through the supervisor, and the host helper refuses direct host SFTP for walled sessions.
 
 ## Safety checks
 

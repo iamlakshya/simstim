@@ -83,15 +83,21 @@ type closeFunc func() error
 func (f closeFunc) Close() error { return f() }
 
 // SessionSSHBackend connects sshserve (ssh-proxy) to one session on host h
-// through the host's Transport.
+// through the host's Transport. When Walled is true, SFTP and exec run inside
+// the sandbox through the supervisor's link streams (spec 10.5, 17.7).
 type SessionSSHBackend struct {
 	Host      Host
 	SessionID string
 	Transport Transport
+	Walled    bool
 }
 
-// OpenSFTP starts `<helper> sftp <id>` over the host transport.
+// OpenSFTP opens SFTP inside the sandbox (when Walled) or starts
+// `<helper> sftp <id>` over the host transport.
 func (b *SessionSSHBackend) OpenSFTP(ctx context.Context) (io.ReadWriteCloser, error) {
+	if b.Walled {
+		return openWalledSFTPStream(ctx, b.Transport, b.Host, b.SessionID)
+	}
 	remote := RemoteHelper(HelperVersion()) + " sftp " + shellWord(b.SessionID)
 	proc, err := b.Transport.Start(context.WithoutCancel(ctx), remote)
 	if err != nil {
@@ -130,10 +136,14 @@ func (b *SessionSSHBackend) DialPort(ctx context.Context, host string, port uint
 	return &procRWC{proc: proc, r: br}, nil
 }
 
-// StartExec starts `<helper> ssh-exec <id>` over the host transport and returns
-// an ExecStream that separates stdout, stderr, stdin EOF, resizes, signals and
+// StartExec starts exec inside the sandbox through the supervisor (when
+// Walled) or `<helper> ssh-exec <id>` over the host transport, returning an
+// ExecStream that separates stdout, stderr, stdin EOF, resizes, signals and
 // exit status.
 func (b *SessionSSHBackend) StartExec(ctx context.Context, args api.SSHExecArgs) (sshserve.ExecStream, error) {
+	if b.Walled {
+		return startWalledExec(ctx, b.Transport, b.Host, b.SessionID, args)
+	}
 	remote := RemoteHelper(HelperVersion()) + " ssh-exec " + shellWord(b.SessionID)
 	proc, err := b.Transport.Start(context.WithoutCancel(ctx), remote)
 	if err != nil {
@@ -163,18 +173,27 @@ func (b *SessionSSHBackend) StartExec(ctx context.Context, args api.SSHExecArgs)
 		return nil, errors.New("ssh-exec refused to start")
 	}
 
+	return newRemoteExecStream(r, w, func() error {
+		_ = proc.Stdin().Close()
+		proc.Kill()
+		_ = proc.Wait()
+		return nil
+	}), nil
+}
+
+func newRemoteExecStream(r *bufio.Reader, w *proto.Writer, closeFn func() error) *remoteExecStream {
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
 	es := &remoteExecStream{
-		proc: proc,
-		w:    w,
-		outR: outR,
-		errR: errR,
-		done: make(chan struct{}),
+		closeFn: closeFn,
+		w:       w,
+		outR:    outR,
+		errR:    errR,
+		done:    make(chan struct{}),
 	}
 	es.stdin = &protoStdinWriter{w: w}
 	go es.readLoop(r, outW, errW)
-	return es, nil
+	return es
 }
 
 type protoStdinWriter struct {
@@ -209,11 +228,11 @@ func (p *protoStdinWriter) Close() error {
 }
 
 type remoteExecStream struct {
-	proc  Proc
-	w     *proto.Writer
-	stdin *protoStdinWriter
-	outR  *io.PipeReader
-	errR  *io.PipeReader
+	closeFn func() error
+	w       *proto.Writer
+	stdin   *protoStdinWriter
+	outR    *io.PipeReader
+	errR    *io.PipeReader
 
 	done     chan struct{}
 	exitCode int
@@ -278,8 +297,8 @@ func (e *remoteExecStream) Close() error {
 	}
 	e.closed = true
 	e.closeMu.Unlock()
-	_ = e.proc.Stdin().Close()
-	e.proc.Kill()
-	_ = e.proc.Wait()
+	if e.closeFn != nil {
+		return e.closeFn()
+	}
 	return nil
 }

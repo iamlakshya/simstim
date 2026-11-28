@@ -25,6 +25,7 @@ simstim cp ./data.csv my-vps/auth-fix:data.csv
 | --- | --- |
 | `--allow-flagged` | copy files that can run code or contain hidden text without asking |
 | `-f`, `--force` | replace existing files at the destination |
+| `-r`, `--recursive` | copy folders recursively (already the default) |
 
 ## Flags from the parent command
 

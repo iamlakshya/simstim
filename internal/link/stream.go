@@ -70,6 +70,14 @@ func (s *Session) newStream(id uint32, k Kind, hdr []byte) *Stream {
 // Kind is what the stream carries.
 func (st *Stream) Kind() Kind { return st.kind }
 
+// PeerGone reports whether the other end closed the stream both ways (or the
+// link ended), as distinct from a write-only half-close via CloseWrite.
+func (st *Stream) PeerGone() bool {
+	st.s.mu.Lock()
+	defer st.s.mu.Unlock()
+	return st.peerGone || st.s.closed
+}
+
 // Header decodes the open's JSON header into v. The header holds the field
 // "kind" too.
 func (st *Stream) Header(v any) error {

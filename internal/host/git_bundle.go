@@ -148,7 +148,7 @@ func RunPullBundle(id string, in io.Reader, out io.Writer) error {
 	if err := json.NewDecoder(in).Decode(&req); err != nil && err != io.EOF {
 		return writeErr(UserError("bad_request", "pull-bundle could not read its request: "+err.Error(), "Update the client."))
 	}
-	infoAns, err := gitOp(gitOpRepoInfo, gitOpRequest{RepoInfoArgs: api.RepoInfoArgs{Dir: m.Cwd, Changes: true}})
+	infoAns, err := gitOp(gitOpRepoInfo, gitOpRequest{RepoInfoArgs: api.RepoInfoArgs{Dir: m.HostDir(), Changes: true}})
 	if err != nil {
 		return writeErr(err)
 	}

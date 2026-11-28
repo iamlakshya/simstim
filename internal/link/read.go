@@ -120,7 +120,7 @@ func (s *Session) readHello(r *bufio.Reader) error {
 	if h.Role != want {
 		return breach("the hello's role is %q, not %q", clean(h.Role), want)
 	}
-	if s.side == Supervisor && h.Version != version.Version {
+	if s.side == Supervisor && !s.opt.AllowVersionMismatch && h.Version != version.Version {
 		return &VersionError{Guest: clean(h.Version), Supervisor: version.Version}
 	}
 	s.mu.Lock()

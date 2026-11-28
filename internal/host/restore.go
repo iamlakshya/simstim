@@ -178,11 +178,12 @@ func resumeHook(m *Manifest) string {
 	}
 	// git answers in a git operation's child. When it cannot, as for
 	// git_scope, the script is not checked, so it does not run.
-	repo, top, err := repoOf(m.Cwd)
+	hostDir := m.HostDir()
+	repo, top, err := repoOf(hostDir)
 	var why string
 	switch {
 	case err != nil:
-		repo, why = m.Cwd, "could not find its repository: "+err.Error()
+		repo, why = hostDir, "could not find its repository: "+err.Error()
 	case m.SetupHash == "":
 		why = "the session kept no setup hash to check it against"
 	default:

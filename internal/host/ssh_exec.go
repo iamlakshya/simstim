@@ -78,6 +78,11 @@ func RunSSHExec(id string, in io.Reader, out io.Writer) error {
 	if err != nil {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if isWalled(m) {
+		return UserError("forbidden",
+			fmt.Sprintf("session %s runs inside a wall, so host ssh-exec is refused", id),
+			"Update the client so exec runs inside the sandbox through the supervisor.")
+	}
 	r := bufio.NewReaderSize(in, 64<<10)
 	w := proto.NewWriter(out)
 	req, args, err := readSSHExecStart(r, w)
@@ -92,10 +97,24 @@ func RunSSHExec(id string, in io.Reader, out io.Writer) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cmd := buildSSHExecCmd(ctx, m, login, args)
+	return ServeSSHExecCmd(cmd, cancel, req.ID, args, in, r, w, ExecHooks{})
+}
+
+// ExecHooks lets guest init coordinate child PID tracking with its PID 1
+// reaper and close the underlying link stream once TEnded is written.
+type ExecHooks struct {
+	Start    func(start func() error) error
+	Reaped   func(pid int)
+	AfterEnd func()
+}
+
+// ServeSSHExecCmd runs cmd with PTY or pipe framing over r and w using the
+// ssh-exec proto stream format (used on unwalled hosts and inside guest init).
+func ServeSSHExecCmd(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, args api.SSHExecArgs, rawIn io.Reader, r *bufio.Reader, w *proto.Writer, hooks ExecHooks) error {
 	if args.PTY {
-		return runSSHExecPTY(cmd, cancel, req.ID, args, in, r, w)
+		return runSSHExecPTY(cmd, cancel, reqID, args, rawIn, r, w, hooks)
 	}
-	return runSSHExecPipe(cmd, cancel, req.ID, in, r, w)
+	return runSSHExecPipe(cmd, cancel, reqID, rawIn, r, w, hooks)
 }
 
 func readSSHExecStart(r *bufio.Reader, w *proto.Writer) (proto.Request, api.SSHExecArgs, error) {
@@ -176,13 +195,28 @@ func (p *ptyHandle) close() {
 	_ = p.f.Close()
 }
 
-func runSSHExecPTY(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, args api.SSHExecArgs, rawIn io.Reader, r *bufio.Reader, w *proto.Writer) error {
+func runSSHExecPTY(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, args api.SSHExecArgs, rawIn io.Reader, r *bufio.Reader, w *proto.Writer, hooks ExecHooks) error {
 	cols, rows := clampExecSize(args.Cols, args.Rows)
-	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
+	var ptmx *os.File
+	start := func() error {
+		var serr error
+		ptmx, serr = pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows})
+		if serr != nil {
+			return fmt.Errorf("start ssh-exec PTY: %w", serr)
+		}
+		return nil
+	}
+	var err error
+	if hooks.Start != nil {
+		err = hooks.Start(start)
+	} else {
+		err = start()
+	}
 	if err != nil {
 		_ = w.WriteJSON(proto.TResponse, proto.Response{ID: reqID, OK: false, Error: UserError("exec_failed", err.Error(), "Check the command and try again.")})
-		return fmt.Errorf("start ssh-exec PTY: %w", err)
+		return err
 	}
+	pid := cmd.Process.Pid
 	ph := &ptyHandle{f: ptmx}
 	defer ph.close()
 	ep := &execProcess{proc: cmd.Process}
@@ -190,6 +224,9 @@ func runSSHExecPTY(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, args 
 		ep.killGroup()
 		cancel()
 		_ = cmd.Wait()
+		if hooks.Reaped != nil {
+			hooks.Reaped(pid)
+		}
 		return err
 	}
 
@@ -200,9 +237,12 @@ func runSSHExecPTY(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, args 
 	go pumpSSHPTYInput(r, ph, ep, cancel, inDone)
 
 	waitErr := waitExecProcess(cmd, ep)
+	if hooks.Reaped != nil {
+		hooks.Reaped(pid)
+	}
 	drainPTYOutput(outDone, ph)
 	err = w.WriteJSON(proto.TEnded, endedFromWait(waitErr))
-	drainPipeInput(rawIn, inDone)
+	finishExecInput(rawIn, inDone, hooks.AfterEnd)
 	return err
 }
 
@@ -264,21 +304,30 @@ func clampExecSize(cols, rows int) (uint16, uint16) {
 	return clampCols(cols), clampRows(rows)
 }
 
-func runSSHExecPipe(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, rawIn io.Reader, r *bufio.Reader, w *proto.Writer) error {
+func runSSHExecPipe(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, rawIn io.Reader, r *bufio.Reader, w *proto.Writer, hooks ExecHooks) error {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdin, stdout, stderr, err := openExecPipes(cmd, reqID, w)
 	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
+	if hooks.Start != nil {
+		err = hooks.Start(cmd.Start)
+	} else {
+		err = cmd.Start()
+	}
+	if err != nil {
 		_ = w.WriteJSON(proto.TResponse, proto.Response{ID: reqID, OK: false, Error: UserError("exec_failed", err.Error(), "Check the command and try again.")})
 		return fmt.Errorf("start ssh-exec command: %w", err)
 	}
+	pid := cmd.Process.Pid
 	ep := &execProcess{proc: cmd.Process}
 	if err := w.WriteJSON(proto.TResponse, proto.Response{ID: reqID, OK: true}); err != nil {
 		ep.killGroup()
 		cancel()
 		_ = cmd.Wait()
+		if hooks.Reaped != nil {
+			hooks.Reaped(pid)
+		}
 		return err
 	}
 
@@ -293,8 +342,11 @@ func runSSHExecPipe(cmd *exec.Cmd, cancel context.CancelFunc, reqID uint64, rawI
 	<-outDone
 	<-errDone
 	waitErr := waitExecProcess(cmd, ep)
+	if hooks.Reaped != nil {
+		hooks.Reaped(pid)
+	}
 	err = w.WriteJSON(proto.TEnded, endedFromWait(waitErr))
-	drainPipeInput(rawIn, inDone)
+	finishExecInput(rawIn, inDone, hooks.AfterEnd)
 	return err
 }
 
@@ -369,7 +421,12 @@ func waitExecProcess(cmd *exec.Cmd, ep *execProcess) error {
 	return nil
 }
 
-func drainPipeInput(rawIn io.Reader, inDone <-chan struct{}) {
+func finishExecInput(rawIn io.Reader, inDone <-chan struct{}, afterEnd func()) {
+	if afterEnd != nil {
+		afterEnd()
+		<-inDone
+		return
+	}
 	if pr, ok := rawIn.(*io.PipeReader); ok {
 		_ = pr.Close()
 		<-inDone

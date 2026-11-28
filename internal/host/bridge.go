@@ -98,13 +98,8 @@ func RunBridge(in io.Reader, out io.Writer) error {
 		case proto.TPing:
 			_ = w.Write(proto.TPong, proto.Pong(f.Payload, diag.Now()))
 		case proto.TRequest:
-			var req proto.Request
-			if json.Unmarshal(f.Payload, &req) == nil {
-				liveRequests.Add(1) // EndBridge waits for it
-				go func() {
-					defer liveRequests.Add(-1)
-					b.serve(req)
-				}()
+			if b.dispatchRequest(f.Payload, r, out) {
+				return nil
 			}
 		case proto.TAttach:
 			var a proto.Attach
@@ -136,6 +131,22 @@ func RunBridge(in io.Reader, out io.Writer) error {
 			// A client sends no other frame: drop it.
 		}
 	}
+}
+
+func (b *bridge) dispatchRequest(payload []byte, r *bufio.Reader, out io.Writer) bool {
+	var req proto.Request
+	if json.Unmarshal(payload, &req) != nil {
+		return false
+	}
+	if isStreamingOp(req.Op) {
+		return b.serveStream(req, r, out)
+	}
+	liveRequests.Add(1) // EndBridge waits for it
+	go func() {
+		defer liveRequests.Add(-1)
+		b.serve(req)
+	}()
+	return false
 }
 
 func (b *bridge) reply(id uint64, v any, err error) {

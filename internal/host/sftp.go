@@ -40,6 +40,11 @@ func RunSFTP(id string, in io.Reader, out io.Writer) error {
 	if err != nil {
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
+	if isWalled(m) {
+		return UserError("forbidden",
+			fmt.Sprintf("session %s runs inside a wall, so host SFTP is refused", id),
+			"Update the client so SFTP runs inside the sandbox through the supervisor.")
+	}
 	workDir := m.Cwd
 	if workDir == "" {
 		workDir, _ = os.UserHomeDir()
@@ -80,9 +85,16 @@ func RunDialPort(args []string, in io.Reader, out io.Writer) error {
 		_ = writeReply(api.DialPortReply{Error: "no session " + id})
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
 	}
-	if _, err := LoadManifest(id); err != nil {
+	m, err := LoadManifest(id)
+	if err != nil {
 		_ = writeReply(api.DialPortReply{Error: "no session " + id})
 		return UserError("not_found", "no session "+id, "List sessions to find its ID.")
+	}
+	if isWalled(m) {
+		_ = writeReply(api.DialPortReply{Error: "session " + id + " runs inside a wall; host dial-port is refused"})
+		return UserError("forbidden",
+			fmt.Sprintf("session %s runs inside a wall, so host dial-port is refused", id),
+			"Forward ports on walled sessions through a port grant on the supervisor.")
 	}
 	dialHost, err := loopbackHost(rawHost)
 	if err != nil {

@@ -22,6 +22,19 @@ type SSHExecArgs struct {
 	Rows    int    `json:"rows,omitempty"`
 }
 
+// SessionStreamArgs identifies a walled session for a streaming bridge op
+// (such as "sftp", spec 10.5).
+type SessionStreamArgs struct {
+	ID string `json:"id"`
+}
+
+// SSHExecStreamArgs starts an ssh-proxy exec or shell stream inside a walled
+// session through the supervisor (spec 10.5, 17.7).
+type SSHExecStreamArgs struct {
+	ID   string      `json:"id"`
+	Exec SSHExecArgs `json:"exec"`
+}
+
 // SSHSignalEvent delivers a POSIX signal name (such as "INT" or "TERM") to a
 // running ssh-exec process.
 type SSHSignalEvent struct {

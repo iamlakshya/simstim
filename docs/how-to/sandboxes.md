@@ -50,6 +50,8 @@ Inside a process wall:
 - **Kernel confinement:** the sandbox runs as uid 1000 with zero capabilities, `NoNewPrivs=1`, a seccomp-bpf filter blocking namespace creation, mount calls, `bpf`, `io_uring`, non-allowlisted socket families and foreign ABIs (i386 `int 0x80` and x32), and Landlock filesystem and IPC scoping applied by `wall-init` before reading from the link.
 - **Network:** the sandbox has an empty network namespace (loopback only). Direct outbound TCP and UDP fail closed. `HTTP_PROXY` and `HTTPS_PROXY` point at `http://127.0.0.1:3128`, where `wall-init` forwards flows over `internal/link` to the host's `egress` process under the session's network policy.
 
+- **Files, SSH and git:** `cp` and `ssh-proxy` open `sftp` and `exec` link streams through the supervisor so SFTP and shell commands run inside the sandbox as `agent` at `/work/<name>`, never on the host. `pull` builds a verified git bundle from the host workspace path through `git-op`.
+
 Use `stop`, `resume` and `kill` as with any other session: `stop` tears down the sandbox while keeping `/work` and `StateDirs`, `resume` starts a fresh sandbox with those folders reattached, and `kill` removes the session and its state completely.
 
 ## Pin a host's floor

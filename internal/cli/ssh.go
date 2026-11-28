@@ -186,6 +186,7 @@ func sshProxyCmd() *cobra.Command {
 				Host:      h,
 				SessionID: s.ID,
 				Transport: tr,
+				Walled:    s.Wall != nil,
 			}
 			return sshserve.ServeStdio(cmd.Context(), key, backend)
 		},

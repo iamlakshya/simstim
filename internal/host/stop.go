@@ -84,11 +84,12 @@ func stopHook(m *Manifest) string {
 	if hook == "" || filepath.Base(filepath.Dir(hook)) != "."+brand.Name {
 		return hook
 	}
-	repo, top, err := repoOf(m.Cwd)
+	hostDir := m.HostDir()
+	repo, top, err := repoOf(hostDir)
 	var why string
 	switch {
 	case err != nil:
-		repo, why = m.Cwd, "could not find its repository: "+err.Error()
+		repo, why = hostDir, "could not find its repository: "+err.Error()
 	case m.SetupHash == "":
 		why = "the session kept no setup hash to check it against"
 	default:
@@ -115,7 +116,7 @@ func runStopHook(m *Manifest) {
 	ctx, cancel := context.WithTimeout(context.Background(), stopHookTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, hook)
-	cmd.Dir = m.Cwd
+	cmd.Dir = m.HostDir()
 	cmd.Env = append(append([]string(nil), m.Env...), stopHookVars(m)...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {

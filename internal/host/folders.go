@@ -82,8 +82,13 @@ func recentFolders(out []string, tilde func(string) string) []string {
 	seen := map[string]bool{}
 	for _, s := range list {
 		d := s.Cwd
-		if m, err := LoadManifest(s.ID); err == nil && m.Git != nil {
-			d = m.Git.RepoRoot
+		if m, err := LoadManifest(s.ID); err == nil {
+			switch {
+			case m.Git != nil:
+				d = m.Git.RepoRoot
+			case m.HostDir() != "":
+				d = m.HostDir()
+			}
 		}
 		if t := tilde(d); !seen[t] {
 			seen[t] = true
