@@ -77,6 +77,7 @@ simstim resume my-server/app --memory-max 6G --detach
 <!-- test: help (needs a session) -->
 ```sh
 simstim show my-server/app
+simstim show my-server/app --screen
 simstim show app --json
 ```
 
@@ -95,7 +96,7 @@ app on my-server
   Attach          simstim attach my-server/abcd2345
 ```
 
-The state says where the client learnt it, and why an agent ended, such as `errored (exit code 3, from process)`. A detail that the state does not say has its own line, such as the reason of a start that failed. With `--json`, `show` prints the session as one object, with `host`, `address` and every field that has a value. [Use in scripts](scripting.md) has its keys. Without a session, at a terminal, `show` opens the list of sessions. It never starts a stopped host. When a provider script says that the host is stopped, `show` says so, and names `simstim host start`.
+The state says where the client learnt it, and why an agent ended, such as `errored (exit code 3, from process)`. A detail that the state does not say has its own line, such as the reason of a start that failed. With `--screen`, `show` prints the session's last screen as plain text, one line per row, with no escape sequences. With `--json`, `show` prints the session as one object, with `host`, `address` and every field that has a value (and a `screen` array when combined with `--screen`). [Use in scripts](scripting.md) has its keys. Without a session, at a terminal, `show` opens the list of sessions. It never starts a stopped host. When a provider script says that the host is stopped, `show` says so, and names `simstim host start`.
 
 ## List sessions
 

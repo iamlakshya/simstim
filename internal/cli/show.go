@@ -14,18 +14,21 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
+	"github.com/iamlakshya/simstim/internal/tui"
 )
 
 // show describes one session (docs/contributing/cli-spec.md 9.6).
 
 func showCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, screen bool
 	cmd := &cobra.Command{
 		Use:   "show [<host>/<session>|-]",
 		Short: "Describe a session",
-		Long: "Prints everything about one session, one line for each detail that it has. Without a session, and\n" +
-			"at a terminal, it lets you pick one from a list. It does not wake a stopped host.",
+		Long: "Prints everything about one session, one line for each detail that it has. With --screen,\n" +
+			"prints the session's last screen as plain text (or adds a screen field with --json). Without\n" +
+			"a session, and at a terminal, it lets you pick one from a list. It does not wake a stopped host.",
 		Example: "  " + brand.Name + " show my-vps/auth-fix\n" +
+			"  " + brand.Name + " show my-vps/auth-fix --screen\n" +
 			"  " + brand.Name + " show auth-fix --json   # the host is found when the name is unique\n" +
 			"  " + brand.Name + " show -                 # the last session you attached to",
 		Args: cobra.MaximumNArgs(1),
@@ -35,7 +38,10 @@ func showCmd() *cobra.Command {
 				return err
 			}
 			// Describing a session is no reason to start a machine.
-			err = a.open(client.WithoutWake(cmd.Context()), cmd, func(_ context.Context, f found) error {
+			err = a.open(client.WithoutWake(cmd.Context()), cmd, func(ctx context.Context, f found) error {
+				if screen {
+					return showScreen(ctx, f, asJSON)
+				}
 				if asJSON {
 					return printJSON(sessionObject(f.host.Name, *f.s))
 				}
@@ -46,7 +52,36 @@ func showCmd() *cobra.Command {
 		},
 	}
 	addJSON(cmd, &asJSON)
+	cmd.Flags().BoolVar(&screen, "screen", false, "print the session's last screen as plain text (with --json, adds screen)")
 	return cmd
+}
+
+// showScreen reads the session's last screen through the peek op and prints it
+// as plain text, or adds it to the session's JSON object (cli-spec 9.6).
+func showScreen(ctx context.Context, f found, asJSON bool) error {
+	if !f.conn.HasFeature("peek") {
+		return &client.UserError{
+			Msg:  "the helper on " + f.host.Name + " is too old to read a session's screen",
+			Hint: brand.Name + " host upgrade " + client.ShellQuote(f.host.Name),
+			Code: "helper_old",
+		}
+	}
+	pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	data, cols, rows, err := f.conn.Peek(pctx, f.s.ID, tui.PeekBytes)
+	if err != nil {
+		return err
+	}
+	lines := tui.RenderPlainScreen(data, cols, rows)
+	if asJSON {
+		obj := sessionObject(f.host.Name, *f.s)
+		obj["screen"] = lines
+		return printJSON(obj)
+	}
+	for _, line := range lines {
+		printf("%s\n", line)
+	}
+	return nil
 }
 
 // detail is one line of show: a label, and the value.

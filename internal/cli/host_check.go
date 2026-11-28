@@ -19,16 +19,23 @@ import (
 // restore, and the provider's start, stop and status.
 
 func hostTestCmd() *cobra.Command {
-	var asJSON bool
+	var asJSON, reconnect bool
 	cmd := &cobra.Command{
-		Use:     "test <host>",
-		Short:   "Check that a host answers, and how fast",
-		Example: "  " + brand.Name + " host test my-vps\n  " + brand.Name + " host test my-vps --json",
-		Args:    cobra.ExactArgs(1),
+		Use:   "test <host>",
+		Short: "Check that a host answers, and how fast",
+		Long: "Checks that a host answers and prints its connect and round-trip times.\n" +
+			"With --reconnect, closes the shared SSH connection first and tests a new one.",
+		Example: "  " + brand.Name + " host test my-vps\n" +
+			"  " + brand.Name + " host test my-vps --reconnect\n" +
+			"  " + brand.Name + " host test my-vps --json",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			h, err := client.FindHost(args[0])
 			if err != nil {
 				return err
+			}
+			if reconnect {
+				(&client.SSH{Host: h}).ExitMaster(cmd.Context())
 			}
 			start := time.Now()
 			ctx, cancel := context.WithTimeout(cmd.Context(), 30*time.Second)
@@ -51,6 +58,7 @@ func hostTestCmd() *cobra.Command {
 		},
 	}
 	addJSON(cmd, &asJSON)
+	cmd.Flags().BoolVar(&reconnect, "reconnect", false, "close the shared SSH connection first, then test a new one")
 	return cmd
 }
 

@@ -652,7 +652,7 @@ A new session without a host uses `SIMSTIM_DEFAULT_HOST`, then the saved choice 
 | `simstim send <host>/<session> <text> [flags]` | Type text into a session without attaching, then press Enter. [Reference](../reference/cli/send.md) |
 | `simstim setup [flags]` | Set up step by step: a host, its agents, and their logins. [Reference](../reference/cli/setup.md) |
 | `simstim shell <host>/<session> [flags]` | Open a shell beside a session. [Reference](../reference/cli/shell.md) |
-| `simstim show [<host>/<session>\|-] [flags]` | Describe one session: its agent, state, folder and the command that attaches to it. [Reference](../reference/cli/show.md) |
+| `simstim show [<host>/<session>\|-] [flags]` | Describe one session, or print its last screen with `--screen`. [Reference](../reference/cli/show.md) |
 | `simstim ssh-config [flags]` | Prepare the local SSH configuration for sandbox tools. [Reference](../reference/cli/ssh-config.md) |
 | `simstim stop <host>/<session> [flags]` | Stop a sandbox and keep its work and conversation. [Reference](../reference/cli/stop.md) |
 | `simstim version [flags]` | Print the version. [Reference](../reference/cli/version.md) |

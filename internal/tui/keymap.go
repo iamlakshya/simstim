@@ -10,11 +10,44 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 )
 
+// OldKeymapNames maps retired keymap command names to their current names
+// during the deprecation window (docs/contributing/cli-spec.md 3 and 15.1).
+var OldKeymapNames = map[string]string{
+	"session: preview": "session: peek",
+}
+
+// UsedOldKeymapNames returns the sorted old keymap command names present in km.
+func UsedOldKeymapNames(km map[string]any) []string {
+	var used []string
+	for old := range OldKeymapNames {
+		if _, ok := km[old]; ok {
+			used = append(used, old)
+		}
+	}
+	sort.Strings(used)
+	return used
+}
+
+func lookupKeymap(km map[string]any, name string) (any, bool) {
+	if v, ok := km[name]; ok {
+		return v, true
+	}
+	for old, cur := range OldKeymapNames {
+		if cur == name {
+			if v, ok := km[old]; ok {
+				return v, true
+			}
+		}
+	}
+	return nil, false
+}
+
 // withKeymap applies the user's [keymap] settings to the registry. A command's
-// new keys keep the scope of its first default key.
+// new keys keep the scope of its first default key. A retired command name in
+// OldKeymapNames applies when the current name is not set.
 func withKeymap(cmds []*command, km map[string]any) []*command {
 	for _, c := range cmds {
-		v, ok := km[c.name()]
+		v, ok := lookupKeymap(km, c.name())
 		if !ok {
 			continue
 		}

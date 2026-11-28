@@ -114,6 +114,10 @@ var oldForms = []oldForm{
 		Says:  `"--disk" without a unit is now "--disk <size>", such as "--disk 40G".`,
 		Keeps: "A bare number still means GiB",
 	},
+	{
+		Old: "session: preview", New: "session: peek", Kind: "keymap name", Cmd: "config keymap",
+		Version: "0.2.0", Code: "old_name",
+	},
 }
 
 // The rows that the commands warn with. The release that removes the row
@@ -147,6 +151,8 @@ var (
 	// oldCreateMemoryBare and oldCreateDiskBare are the bare-number GiB values of --memory and --disk.
 	oldCreateMemoryBare = oldRow("--memory <number>")
 	oldCreateDiskBare   = oldRow("--disk <number>")
+	// oldKeymapPreview is the row of `session: preview` in [keymap] (cli-spec 15.1).
+	oldKeymapPreview = oldRow("session: preview")
 )
 
 // oldRow is the row of the old form old.

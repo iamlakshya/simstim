@@ -10,10 +10,13 @@ Check that a host answers, and how fast.
 simstim host test <host> [flags]
 ```
 
+Checks that a host answers and prints its connect and round-trip times. With `--reconnect`, closes the shared SSH connection first and tests a new one.
+
 ## Examples
 
 ```sh
 simstim host test my-vps
+simstim host test my-vps --reconnect
 simstim host test my-vps --json
 ```
 
@@ -22,6 +25,7 @@ simstim host test my-vps --json
 | Flag | What it does |
 | --- | --- |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--reconnect` | close the shared SSH connection first, then test a new one |
 
 ## Flags from the parent command
 

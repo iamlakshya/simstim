@@ -163,6 +163,9 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 	}
 	m.epoch, m.revealAt = m.now(), m.now()
 	m.settings, m.configWarn = readBackendSettings(be)
+	if m.configWarn == "" {
+		m.configWarn = oldKeymapWarning(m.settings.Keymap)
+	}
 	commands = withKeymap(registry(), m.settings.Keymap)
 	hosts, err := be.LoadHosts(ctx)
 	m.loadErr = err

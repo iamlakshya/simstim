@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,6 +30,15 @@ func (m *Model) nextSettingsSeq() uint64 {
 	return m.settingsSeq
 }
 
+// oldKeymapWarning returns a notice when km uses a retired keymap name, or "".
+func oldKeymapWarning(km map[string]any) string {
+	used := UsedOldKeymapNames(km)
+	if len(used) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%q is now %q in [keymap]", used[0], OldKeymapNames[used[0]])
+}
+
 // applySettings applies a settings read with sequence number seq. When warn is
 // non-empty, the launcher keeps its existing good settings and shows the
 // warning once until a good read clears it (cli-spec 13.4).
@@ -46,11 +56,18 @@ func (m *Model) applySettings(s client.Settings, warn string, seq uint64) tea.Cm
 	}
 	oldMotion := m.settings.UI.Motion
 	m.settings = s
-	m.configWarn = ""
 	commands = withKeymap(registry(), m.settings.Keymap)
 	if oldMotion != "" && s.UI.Motion != oldMotion {
 		m.motion = motionOn(s.UI.Motion, os.Getenv)
 	}
+	if kw := oldKeymapWarning(s.Keymap); kw != "" {
+		if kw == m.configWarn {
+			return nil
+		}
+		m.configWarn = kw
+		return m.toastNext(toastWarning, sentence(kw), brand.Name+" config check")
+	}
+	m.configWarn = ""
 	return nil
 }
 

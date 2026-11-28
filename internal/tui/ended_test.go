@@ -246,7 +246,7 @@ func TestLostSessionOffersResumeAndRestore(t *testing.T) {
 			t.Errorf("the keys offer a peek without a holder:\n%s", out)
 		}
 		for _, cmd := range commands {
-			if cmd.name() == "session: preview" && cmd.reason(hs.m) == "" {
+			if cmd.name() == "session: peek" && cmd.reason(hs.m) == "" {
 				t.Error("the palette offers a peek without a holder")
 			}
 		}

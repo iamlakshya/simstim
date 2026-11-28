@@ -172,7 +172,7 @@
   },
   {
     "v": 1,
-    "command": "session: preview",
+    "command": "session: peek",
     "keys": [
       "space"
     ]

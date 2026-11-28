@@ -161,6 +161,12 @@ func TestGolden(t *testing.T) {
 			hs.typeText("ses")
 			return hs.m
 		}},
+		{"palette_peek", func(t *testing.T, w, h int) *Model {
+			hs := sessions(t, w, h)
+			hs.key("ctrl+o")
+			hs.typeText("peek")
+			return hs.m
+		}},
 		{"help", func(t *testing.T, w, h int) *Model {
 			hs := sessions(t, w, h)
 			hs.key("?")

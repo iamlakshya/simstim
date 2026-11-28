@@ -19,7 +19,7 @@ The launcher's commands and their default keys. Every command is also in the com
 | session: new | `n` |
 | session: new with the form | palette only |
 | session: attach | `enter` |
-| session: preview | `space` |
+| session: peek | `space` |
 | session: rename | `r`, `f2` |
 | session: delete | `d` |
 | session: resume | `u` |

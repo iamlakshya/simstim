@@ -14,8 +14,10 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-// peekBytes is how much of a session's newest output the preview reads.
-const peekBytes = 64 << 10
+// PeekBytes is how much of a session's newest output a peek reads.
+const PeekBytes = 64 << 10
+
+const peekBytes = PeekBytes
 
 // previewState is the preview of the selected session.
 type previewState struct {
@@ -218,6 +220,24 @@ func renderScreen(data []byte, cols, rows int) (shot *screenShot) {
 // stripQueries is the fallback when the emulator's reply pipe cannot be
 // drained: it drops escape sequences, keeping the text.
 func stripQueries(b []byte) []byte { return []byte(ansi.Strip(string(b))) }
+
+// RenderPlainScreen renders a session's peek bytes with the launcher's terminal
+// model and returns one plain-text line for each row, without escape sequences
+// and without spaces at the ends of lines (docs/contributing/cli-spec.md 9.6).
+func RenderPlainScreen(data []byte, cols, rows int) []string {
+	shot := renderScreen(data, cols, rows)
+	out := make([]string, len(shot.lines))
+	for i, l := range shot.lines {
+		clean := make(uv.Line, len(l))
+		for x, c := range l {
+			c = cleanCell(c)
+			c.Style = uv.Style{}
+			clean[x] = c
+		}
+		out[i] = strings.TrimRight(ansi.Strip(clean.String()), " \t")
+	}
+	return out
+}
 
 // view returns h rows of w cells: the bottom of the screen, cut to the width.
 func (s *screenShot) view(w, h int) []string {

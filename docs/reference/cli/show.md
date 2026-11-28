@@ -10,12 +10,13 @@ Describe a session.
 simstim show [<host>/<session>|-] [flags]
 ```
 
-Prints everything about one session, one line for each detail that it has. Without a session, and at a terminal, it lets you pick one from a list. It does not wake a stopped host.
+Prints everything about one session, one line for each detail that it has. With `--screen`, prints the session's last screen as plain text (or adds a screen field with `--json`). Without a session, and at a terminal, it lets you pick one from a list. It does not wake a stopped host.
 
 ## Examples
 
 ```sh
 simstim show my-vps/auth-fix
+simstim show my-vps/auth-fix --screen
 simstim show auth-fix --json   # the host is found when the name is unique
 simstim show -                 # the last session you attached to
 ```
@@ -25,6 +26,7 @@ simstim show -                 # the last session you attached to
 | Flag | What it does |
 | --- | --- |
 | `--json` | print JSON for scripts, and ask nothing (see docs/how-to/scripting.md) |
+| `--screen` | print the session's last screen as plain text (with `--json`, adds screen) |
 
 ## Flags from the parent command
 
