@@ -160,6 +160,7 @@ func TestCommandsPrintJSON(t *testing.T) {
 		{"host", "alerts", "box", "--json"},
 		{"host", "alerts", "log", "box", "--json"},
 		{"agents", "ls", "--json"},
+		{"config", "check", "--json"},
 		{"config", "keymap", "--json"},
 		{"version", "--json"},
 	} {

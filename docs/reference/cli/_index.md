@@ -96,7 +96,8 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`debug save`](debug_save.md) | Save the session's recent debug record, just after a lag |
 | [`debug start`](debug_start.md) | Turn on the debug of a running session, for 30 minutes or `--for` |
 | [`debug stop`](debug_stop.md) | Turn off the debug of a session at once |
-| [`config`](config.md) | Show the configuration |
+| [`config`](config.md) | Show and check the configuration |
+| [`config check`](config_check.md) | Check the configuration files for mistakes |
 | [`config keymap`](config_keymap.md) | Print the launcher's commands and their keys |
 | [`config path`](config_path.md) | Print where the configuration lives |
 | [`ssh-config`](ssh-config.md) | Set up SSH for editors, scp, sftp and rsync into sessions |

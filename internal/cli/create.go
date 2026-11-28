@@ -248,10 +248,8 @@ func hostIdleCmd() *cobra.Command {
 			if h.Machine == nil {
 				return &client.UserError{Msg: h.Name + " was not made by `host create`", Hint: "Use a host made by " + brand.Name + " host create.", Code: "not_created"}
 			}
-			if args[1] != "never" {
-				if d, err := time.ParseDuration(args[1]); err != nil || d < time.Minute {
-					return &client.UserError{Msg: fmt.Sprintf("%q is not an idle time", args[1]), Hint: "Use a duration of a minute or more, such as 30m or 2h, or never.", Code: "bad_value", Kind: client.KindUsage}
-				}
+			if err := client.CheckIdleStop(args[1]); err != nil {
+				return err
 			}
 			h.Machine.IdleStop = args[1]
 			if err := saveHost(cmd.Context(), h); err != nil {

@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BurntSushi/toml"
+	tomlv2 "github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -85,21 +86,37 @@ func isShellWord(w string) bool {
 	return false
 }
 
-// fileCheck reads a TOML file into v, and reports keys it does not know.
+// fileCheck reads a TOML file into v with go-toml/v2 strict decoding and
+// reports unknown keys or errors with a hint to run `config check`
+// (docs/contributing/cli-spec.md 13.4).
 func fileCheck(name, path string, v any) Check {
-	md, err := toml.DecodeFile(path, v)
-	switch {
-	case os.IsNotExist(err):
-		return Check{Name: name, OK: true, Detail: "none yet, at " + path}
-	case err != nil:
-		return Check{Name: name, Detail: err.Error(), Fix: "fix the file " + path}
+	b, exists, err := ReadConfigFile(path)
+	if err != nil {
+		return Check{Name: name, Detail: err.Error(), Fix: configCheckHint()}
 	}
-	if keys := md.Undecoded(); len(keys) > 0 {
-		var ks []string
-		for _, k := range keys {
-			ks = append(ks, k.String())
+	if !exists {
+		return Check{Name: name, OK: true, Detail: "none yet, at " + path}
+	}
+	strictErr, ins, err := DecodeConfigStrict(path, b, v)
+	if err != nil {
+		msg := err.Error()
+		var de *tomlv2.DecodeError
+		if errors.As(err, &de) {
+			line, col := de.Position()
+			msg = fmt.Sprintf("line %d, column %d: %s", line, col, strings.TrimPrefix(de.Error(), "toml: "))
 		}
-		return Check{Name: name, Detail: "unknown keys: " + strings.Join(ks, ", "), Fix: "check their spelling against the configuration reference"}
+		return Check{Name: name, Detail: msg, Fix: configCheckHint()}
+	}
+	if len(ins.Aliases) > 0 {
+		a := ins.Aliases[0]
+		return Check{Name: name, Detail: fmt.Sprintf("line %d: %q and %q both name %q", a.Pos.Line, a.First, a.Second, a.Canonical), Fix: configCheckHint()}
+	}
+	if strictErr != nil && len(strictErr.Errors) > 0 {
+		ks := make([]string, 0, len(strictErr.Errors))
+		for _, e := range strictErr.Errors {
+			ks = append(ks, strings.Join(e.Key(), "."))
+		}
+		return Check{Name: name, Detail: "unknown keys: " + strings.Join(ks, ", "), Fix: configCheckHint()}
 	}
 	return Check{Name: name, OK: true, Detail: path}
 }

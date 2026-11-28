@@ -12,10 +12,9 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 
-	"github.com/BurntSushi/toml"
+	tomlv2 "github.com/pelletier/go-toml/v2"
 
 	"github.com/iamlakshya/simstim/internal/brand"
 )
@@ -149,51 +148,73 @@ func StateDir() string {
 func hostsPath() string    { return filepath.Join(ConfigDir(), "hosts.toml") }
 func settingsPath() string { return filepath.Join(ConfigDir(), "config.toml") }
 
-// LoadHosts reads the saved hosts. A file that cannot be read is an
-// error of the file system. A file that does not decode is the user's to
-// fix: a usage error that says where.
+// LoadHosts reads the saved hosts. A file that cannot be read, is not a
+// regular file, or is larger than 1 MiB fails with KindFailed. A file that
+// does not decode or defines two case-folded spellings of one field fails
+// with KindUsage and points to `config check` (cli-spec 13.4).
 func LoadHosts() ([]Host, error) {
-	b, err := os.ReadFile(hostsPath())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+	b, exists, err := ReadConfigFile(hostsPath())
 	if err != nil {
+		var re *ConfigReadError
+		if errors.As(err, &re) {
+			return nil, readErrToUser(re)
+		}
 		return nil, fmt.Errorf("read %s: %w", hostsPath(), err)
 	}
+	if !exists {
+		return nil, nil
+	}
 	var f hostsFile
-	if _, err := toml.Decode(string(b), &f); err != nil {
-		return nil, tomlError(hostsPath(), string(b), err)
+	ins, err := DecodeConfigLoose(hostsPath(), b, &f)
+	if err != nil {
+		var re *ConfigReadError
+		if errors.As(err, &re) {
+			return nil, readErrToUser(re)
+		}
+		return nil, tomlError(hostsPath(), err)
+	}
+	if len(ins.Aliases) > 0 {
+		return nil, aliasError(hostsPath(), ins.Aliases[0])
 	}
 	return f.Hosts, nil
 }
 
-// tomlLine finds the line in the error of a value of the wrong type, which
-// the TOML package gives only in its text.
-var tomlLine = regexp.MustCompile(`^toml: line (\d+)`)
-
-// tomlError is the usage error of a TOML file that does not decode, with
-// the line and column of the mistake.
-func tomlError(path, data string, err error) error {
+// tomlError turns a go-toml/v2 decode error into a KindUsage UserError with
+// file, line, column and a Try: hint pointing to config check.
+func tomlError(path string, err error) error {
 	msg, line, col := err.Error(), 0, 0
-	var pe toml.ParseError
-	if errors.As(err, &pe) {
-		msg, line, col = pe.Message, pe.Position.Line, pe.Position.Col
-	} else if m := tomlLine.FindStringSubmatch(msg); m != nil {
-		// A type error names its line and key: point at the line's first word.
-		line, _ = strconv.Atoi(m[1])
-		if _, rest, ok := strings.Cut(msg, "): "); ok {
-			msg = rest
-		}
-		if lines := strings.Split(data, "\n"); line >= 1 && line <= len(lines) {
-			col = len(lines[line-1]) - len(strings.TrimLeft(lines[line-1], " \t")) + 1
-		}
+	var de *tomlv2.DecodeError
+	if errors.As(err, &de) {
+		line, col = de.Position()
+		msg = strings.TrimPrefix(de.Error(), "toml: ")
 	}
-	where, hint := path, "Fix "+path+"."
+	where := path
 	if line > 0 {
 		where = fmt.Sprintf("%s, line %d, column %d", path, line, col)
-		hint = fmt.Sprintf("Fix line %d of %s.", line, path)
 	}
-	return &UserError{Msg: where + ": " + strings.TrimPrefix(msg, "toml: "), Hint: hint, Code: "bad_config", Kind: KindUsage}
+	return &UserError{
+		Msg:  where + ": " + strings.TrimPrefix(msg, "toml: "),
+		Hint: configCheckHint(),
+		Code: "bad_config",
+		Kind: KindUsage,
+	}
+}
+
+func aliasError(path string, a FieldAlias) error {
+	where := path
+	if a.Pos.Line > 0 {
+		where = fmt.Sprintf("%s, line %d, column %d", path, a.Pos.Line, a.Pos.Column)
+	}
+	scope := "top level"
+	if a.Table != "" {
+		scope = "[" + a.Table + "]"
+	}
+	return &UserError{
+		Msg:  fmt.Sprintf("%s: %q and %q both name %q in %s", where, a.First, a.Second, a.Canonical, scope),
+		Hint: configCheckHint(),
+		Code: "bad_config",
+		Kind: KindUsage,
+	}
 }
 
 // SaveHosts writes the saved hosts. It is the one function that writes
@@ -213,7 +234,7 @@ func SaveHosts(ctx context.Context, hosts []Host) error {
 		return fmt.Errorf("save the hosts: %w", err)
 	}
 	fmt.Fprintf(f, "# Hosts for %s. Edit with `%s host`.\n\n", brand.DisplayName, brand.Name)
-	if err := toml.NewEncoder(f).Encode(hostsFile{Hosts: hosts}); err != nil {
+	if err := tomlv2.NewEncoder(f).Encode(hostsFile{Hosts: hosts}); err != nil {
 		f.Close()
 		return fmt.Errorf("save the hosts: %w", err)
 	}
@@ -294,11 +315,54 @@ var hostNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
 // ValidHostName reports whether n can name a host.
 func ValidHostName(n string) bool { return hostNameRE.MatchString(n) }
 
-// LoadSettings reads the settings, with defaults for anything missing.
+// LoadSettings reads the settings, with defaults for anything missing. If
+// config.toml is unreadable, broken or defines case-folded aliases of one
+// field, it returns the defaults. Callers that want the warning use
+// LoadSettingsChecked.
 func LoadSettings() Settings {
-	var s Settings
-	_, _ = toml.DecodeFile(settingsPath(), &s)
+	s, _ := LoadSettingsChecked()
+	return s
+}
+
+// LoadSettingsChecked reads config.toml once as a bounded regular file and
+// returns the effective settings plus a warning when the file could not be
+// used (docs/contributing/cli-spec.md 13.4).
+func LoadSettingsChecked() (Settings, string) {
 	d := DefaultSettings()
+	b, exists, err := ReadConfigFile(settingsPath())
+	if err != nil {
+		var re *ConfigReadError
+		if errors.As(err, &re) && re.Code == "too_large" {
+			return d, fmt.Sprintf("config.toml %s, so its settings are not used", re.Msg)
+		}
+		return d, "config.toml cannot be read, so its settings are not used"
+	}
+	if !exists {
+		return d, ""
+	}
+	var s Settings
+	ins, err := DecodeConfigLoose(settingsPath(), b, &s)
+	if err != nil {
+		var re *ConfigReadError
+		if errors.As(err, &re) && re.Code == "too_large" {
+			return d, fmt.Sprintf("config.toml %s, so its settings are not used", re.Msg)
+		}
+		var de *tomlv2.DecodeError
+		if errors.As(err, &de) {
+			if line, _ := de.Position(); line > 0 {
+				return d, fmt.Sprintf("config.toml has an error on line %d, so its settings are not used", line)
+			}
+		}
+		return d, "config.toml has an error, so its settings are not used"
+	}
+	if len(ins.Aliases) > 0 {
+		a := ins.Aliases[0]
+		scope := "at the top level"
+		if a.Table != "" {
+			scope = "in [" + a.Table + "]"
+		}
+		return d, fmt.Sprintf("config.toml names %q and %q for the same setting %s, so its settings are not used", a.First, a.Second, scope)
+	}
 	if s.UI.Motion == "" {
 		s.UI.Motion = d.UI.Motion
 	}
@@ -314,7 +378,7 @@ func LoadSettings() Settings {
 	if s.Sessions.MemoryMax == "" {
 		s.Sessions.MemoryMax = d.Sessions.MemoryMax
 	}
-	return s
+	return s, ""
 }
 
 // UserError is an error with a suggested next step: the message, and the

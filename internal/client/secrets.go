@@ -26,6 +26,10 @@ const maxSecret = 64 << 10
 
 var secretNameRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// ValidSecretName reports whether name is a valid environment variable name
+// for a secret in config.toml.
+func ValidSecretName(name string) bool { return secretNameRE.MatchString(name) }
+
 // SecretNames is the host's own secrets, then the ones asked for, without repeats.
 func SecretNames(h Host, asked []string) []string {
 	var out []string

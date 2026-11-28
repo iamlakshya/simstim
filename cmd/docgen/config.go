@@ -48,7 +48,7 @@ func configPage(repo string) ([]byte, error) {
 
 	var b strings.Builder
 	b.WriteString(header("Configuration", "2"))
-	fmt.Fprintf(&b, "%s reads two files from `~/.config/%s/` (or `$XDG_CONFIG_HOME/%s/`). `%s config path` prints where they are.\n\n", brand.DisplayName, brand.Name, brand.Name, brand.Name)
+	fmt.Fprintf(&b, "%s reads two files from `~/.config/%s/` (or `$XDG_CONFIG_HOME/%s/`). `%s config path` prints where they are, and `%s config check` checks both files for mistakes.\n\n", brand.DisplayName, brand.Name, brand.Name, brand.Name, brand.Name)
 	b.WriteString("## config.toml\n\nYour preferences. Every key is optional; a missing key takes its default.\n\n")
 	table(&b, settings, true)
 	b.WriteString("\n## hosts.toml\n\nThe hosts you added. `host add` writes it, and you can edit it by hand. Each host is a `[[host]]` table.\n\n")

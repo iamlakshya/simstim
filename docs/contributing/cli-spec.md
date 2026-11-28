@@ -1066,16 +1066,15 @@ The check opens a file once, and asks the open file what it is. It reads a regul
 | A rule that names a host that is not saved | error | `host_unknown` | H19 |
 | `sandbox.host` in the layer for all sessions, or in `[lock]` | error | `host_rule_layer` | H19 |
 
-The known keys come from the TOML tags of `client.Settings` and `client.Host`, read with `reflect`, as `cmd/docgen` reads them for the reference. A key matches its field as the TOML package matches it: exactly, or else in any case (`decode.go` in BurntSushi/toml v1.6.0). So `[UI]` with `Motion` is no finding. Two spellings that match one field are an error, even when their values agree. The report names both spellings and the line of the second key in sorted order. This rule does not fold host names or the keys of free maps. A finding names the key as the file spells it, and the rules above know it by its field. `[keymap]` and `[secrets]` are free maps: their keys are checked by the rows above.
+The known keys come from the TOML tags of `client.Settings` and `client.Host`, read with `reflect`, as `cmd/docgen` reads them for the reference. Decoding uses `github.com/pelletier/go-toml/v2` with `DisallowUnknownFields()`. A key matches its field as `go-toml/v2` matches it: exactly, or else in any case. So `[UI]` with `Motion` is no finding. Two spellings that match one field are an error, even when their values agree. The report names both spellings and the line of the second key in sorted order. This rule does not fold host names or the keys of free maps. A finding names the key as the file spells it, and the rules above know it by its field. `[keymap]` and `[secrets]` are free maps: their keys are checked by the rows above.
 
-### 13.3 Lines
+### 13.3 Lines and columns
 
-A syntax error carries its line and column in `toml.ParseError.Position` (`error.go` in BurntSushi/toml v1.6.0). `toml.MetaData` has no exported position for a key (`meta.go` in v1.6.0), so `config check` finds the line itself:
+`pelletier/go-toml/v2` carries the exact 1-based line and column on every `*toml.DecodeError`, including syntax errors, wrong-type errors, and every entry of `*toml.StrictMissingError` for unknown keys and tables. No custom TOML lexer is needed:
 
-1. A small lexer reads the file once. It knows basic and literal strings on one line or several, comments, arrays and inline tables. So quotes in a comment or in another string start nothing. It skips a byte order mark, and reads the escapes of a quoted key, as the TOML package does.
-2. It records the line of each header, of each element of an array of tables, and of each key, with every part of a dotted key.
-3. A key in an inline table gets its own line, also when the table spans lines, as TOML 1.1 allows. An inline table in an array is an element of an array of tables, with the line of its `{`.
-4. When a key has no line that the lexer recorded, the finding has no line.
+1. `config check` walks `go-toml/v2`'s `unstable.Parser` AST once to enforce the structural limits of section 13.1, record the line and column of each table header, array-of-tables entry and key (including inline tables and dotted keys), and detect case-folding aliases on known struct fields.
+2. It skips an optional leading UTF-8 byte order mark before parsing.
+3. Value-rule checks look up each key's line and column from that AST walk. When a key has no recorded position, the finding omits line and column.
 
 ### 13.4 What other commands do with a broken file
 
@@ -1086,11 +1085,11 @@ A syntax error carries its line and column in `toml.ParseError.Position` (`error
 
 ### 13.5 Output and exit codes
 
-The report goes to stdout. Each finding is one line in the GNU form `file:line: message` ([GNU](https://www.gnu.org/prep/standards/html_node/Errors.html)), with `warning:` before the message of a warning. A TOML syntax error also has its column, in the GNU form `file:line:column: message`. Paths start with `~` for the home folder. These abbreviated paths use forward slashes on every platform.
+The report goes to stdout. Each finding is one line in the GNU form `file:line:column: message` ([GNU](https://www.gnu.org/prep/standards/html_node/Errors.html)) when both line and column are known (or `file:line: message` when only the line is known), with `warning:` before the message of a warning. When there are errors, stderr ends with a `Try:` hint pointing to the fix and `config check`. Paths start with `~` for the home folder. These abbreviated paths use forward slashes on every platform.
 
 ```text
-~/.config/simstim/config.toml:4: unknown key "motoin" in [ui]. Did you mean "motion"?
-~/.config/simstim/config.toml:12: warning: "session: preview" is an old name. Use "session: peek".
+~/.config/simstim/config.toml:4:1: unknown key "motoin" in [ui]. Did you mean "motion"?
+~/.config/simstim/config.toml:12:1: warning: "session: preview" is an old name; use "session: peek"
 ~/.config/simstim/hosts.toml: no problems
 1 error and 1 warning in 2 files.
 ```
@@ -1116,14 +1115,14 @@ Layers for ~/src/app:
 ```json
 {"v": 1, "ok": false,
  "files": [{"path": "~/.config/simstim/config.toml", "exists": true}],
- "findings": [{"path": "~/.config/simstim/config.toml", "line": 4, "severity": "error", "code": "unknown_key",
+ "findings": [{"path": "~/.config/simstim/config.toml", "line": 4, "column": 1, "severity": "error", "code": "unknown_key",
                "message": "unknown key \"motoin\" in [ui]", "suggestions": ["motion"]},
               {"path": "~/.config/simstim/hosts.toml", "line": 2, "column": 7, "severity": "error", "code": "toml_syntax",
-               "message": "expected value but found '\\n' instead"}],
+               "message": "unexpected character U+000A at start of value"}],
  "layers": []}
 ```
 
-A finding has `line` when the line is known, and `column` for a TOML syntax error only. A `message` has no full stop at its end.
+A finding has `line` and `column` whenever the parser recorded them. A `message` has no full stop at its end.
 
 ### 13.6 Tests
 

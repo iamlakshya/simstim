@@ -21,12 +21,18 @@ type NewArgs = api.NewArgs
 
 // TerminalArgs fills the terminal identity of a new session from this terminal.
 func TerminalArgs(a NewArgs, cols, rows int) NewArgs {
+	return SessionArgs(a, cols, rows, LoadSettings())
+}
+
+// SessionArgs fills the terminal identity and settings-backed defaults of a
+// new session from s.
+func SessionArgs(a NewArgs, cols, rows int, s Settings) NewArgs {
 	a.Term = os.Getenv("TERM")
 	a.ColorTerm = os.Getenv("COLORTERM")
 	a.TermProgram = os.Getenv("TERM_PROGRAM")
 	a.TermProgramVersion = os.Getenv("TERM_PROGRAM_VERSION")
 	a.Cols, a.Rows = cols, rows
-	a.Inline = a.Inline || LoadSettings().Agents.Inline
+	a.Inline = a.Inline || s.Agents.Inline
 	return a
 }
 

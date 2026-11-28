@@ -64,6 +64,12 @@ var debugHint = brand.Name + " debug bundle (it writes one file to attach to a b
 // itself returned no error.
 var errSignal = errors.New("a signal ended the command")
 
+// silentError exits with code without printing an additional Error: block,
+// for commands such as `config check` that already printed their own report.
+type silentError struct{ code int }
+
+func (e silentError) Error() string { return "" }
+
 // usageError is a user error of the command line. It carries what
 // printError shows between the message and the Try: line: the candidates
 // of "Did you mean", or the short help of a missing argument.
@@ -210,6 +216,12 @@ func finish(w io.Writer, err error, cmd *cobra.Command, colour, signalled, asJSO
 			return 0
 		}
 		err = errSignal
+	}
+	if !signalled {
+		var se silentError
+		if errors.As(err, &se) {
+			return se.code
+		}
 	}
 	if asJSON {
 		return printErrorJSON(w, err, cmd, signalled)

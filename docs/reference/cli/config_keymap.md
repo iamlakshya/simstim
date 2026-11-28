@@ -34,4 +34,4 @@ simstim config keymap --json
 | `--no-color` | print no colour (NO_COLOR does the same) |
 | `--no-input` | ask nothing: a question that needs an answer fails with exit code 4, and names the flag that answers it (SIMSTIM_NO_INPUT=1 does the same) |
 
-Part of [`config`](config.md): show the configuration.
+Part of [`config`](config.md): show and check the configuration.

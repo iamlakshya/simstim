@@ -1,0 +1,36 @@
+== text stdout
+~/.config/<name>/config.toml:2:1: unknown key "motoin" in [ui]. Did you mean "motion"?
+~/.config/<name>/hosts.toml: no problems
+1 error in 2 files.
+== text stderr
+
+Try: fix line 2 of ~/.config/<name>/config.toml (try "motion") and run <name> config check
+== json stdout
+{
+  "v": 1,
+  "ok": false,
+  "files": [
+    {
+      "path": "~/.config/<name>/config.toml",
+      "exists": true
+    },
+    {
+      "path": "~/.config/<name>/hosts.toml",
+      "exists": true
+    }
+  ],
+  "findings": [
+    {
+      "path": "~/.config/<name>/config.toml",
+      "line": 2,
+      "column": 1,
+      "severity": "error",
+      "code": "unknown_key",
+      "message": "unknown key \"motoin\" in [ui]",
+      "suggestions": [
+        "motion"
+      ]
+    }
+  ],
+  "layers": []
+}

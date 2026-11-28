@@ -292,9 +292,10 @@ func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
 	if m.handingOff() || m.jacking != nil {
 		return nil
 	}
+	s, warnCmd := m.refreshSettings()
 	name = client.CleanLine(name) // only drawn, in the notices after the attach
 	o := client.AttachOptions{
-		Host: h.host, Session: id, Settings: m.settings, State: m.attach,
+		Host: h.host, Session: id, Settings: s, State: m.attach,
 		// The launcher has let go of the terminal, so SSH may prompt.
 		Interactive: true,
 	}
@@ -309,14 +310,14 @@ func (m *Model) attachTo(h *hostConn, id, name string) tea.Cmd {
 	if m.handoff {
 		save()
 		m.pendingAttach = &pendingAttach{opts: o, host: host, id: id, name: name}
-		return m.quitForHandoff()
+		return tea.Batch(warnCmd, m.quitForHandoff())
 	}
 	x := &funcExec{run: func(in, out *os.File) error {
 		o.In, o.Out = in, out
 		res, aerr = be.Attach(ctx, o)
 		return nil
 	}}
-	return tea.Batch(func() tea.Msg { save(); return nil }, m.execWithInput(x, func(err error) tea.Msg {
+	return tea.Batch(warnCmd, func() tea.Msg { save(); return nil }, m.execWithInput(x, func(err error) tea.Msg {
 		if aerr != nil {
 			err = aerr
 		}

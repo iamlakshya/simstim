@@ -20,6 +20,7 @@ require (
 	github.com/google/go-containerregistry v0.22.1
 	github.com/klauspost/compress v1.19.2
 	github.com/muesli/cancelreader v0.2.2
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/pkg/sftp v1.13.13
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10

@@ -15,8 +15,9 @@ import (
 func configCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
-		Short: "Show the configuration",
-		Example: "  " + brand.Name + " config path\n" +
+		Short: "Show and check the configuration",
+		Example: "  " + brand.Name + " config check\n" +
+			"  " + brand.Name + " config path\n" +
 			"  " + brand.Name + " config keymap",
 	}
 	var asJSON bool
@@ -48,7 +49,7 @@ func configCmd() *cobra.Command {
 		},
 	}
 	addJSON(keymap, &asJSON)
-	cmd.AddCommand(keymap, &cobra.Command{
+	cmd.AddCommand(configCheckCmd(), keymap, &cobra.Command{
 		Use:     "path",
 		Short:   "Print where the configuration lives",
 		Example: "  " + brand.Name + " config path",

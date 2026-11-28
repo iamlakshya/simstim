@@ -80,9 +80,14 @@ func (b *demoBackend) SaveHosts(ctx context.Context, h []client.Host) error {
 }
 
 func (b *demoBackend) Settings() client.Settings {
-	s := client.LoadSettings()
-	s.Keymap = nil
+	s, _ := b.LoadSettings()
 	return s
+}
+
+func (b *demoBackend) LoadSettings() (client.Settings, string) {
+	s, warn := client.LoadSettingsChecked()
+	s.Keymap = nil
+	return s, warn
 }
 
 func (b *demoBackend) HelperVersion() string { return "0.1.0" }

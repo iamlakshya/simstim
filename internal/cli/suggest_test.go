@@ -170,29 +170,45 @@ func TestErrorsOfTheCommandLine(t *testing.T) {
 	}
 }
 
-// A hosts.toml that does not decode is the user's to fix, and says where.
-// One that cannot be read is a failure.
+// A hosts.toml that does not decode is the user's to fix, and says where,
+// pointing to `config check` (cli-spec 13.4). One that cannot be read or is
+// larger than 1 MiB fails with exit code 1.
 func TestBrokenHostsFile(t *testing.T) {
 	hosttest.New(t)
 	path := filepath.Join(client.ConfigDir(), "hosts.toml")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	for body, where := range map[string]string{
-		"[[host]]\nname = \"box\"\nssh = \n":             "hosts.toml, line 3, column 7: expected value",
-		"[[host]]\n  name = 1\n":                         "hosts.toml, line 2, column 3: incompatible types",
-		"[[host]]\nname = \"box\"\nlabels = { a = 1 }\n": "hosts.toml, line 3, column 1: incompatible types",
+	for body, want := range map[string]string{
+		"[[host]]\nname = \"box\"\nssh = \n":                      "hosts.toml, line 3, column 7:",
+		"[[host]]\n  name = 1\n":                                  "hosts.toml, line 2, column 10:",
+		"[[host]]\nname = \"box\"\nlabels = { a = 1 }\n":          "hosts.toml, line 3, column 16:",
+		"[[host]]\nname = \"box\"\nName = \"box\"\nssh = \"b\"\n": "hosts.toml, line 2, column 1:",
 	} {
 		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		got, code := lineErr(t, "host", "ls")
-		if code != 2 || !strings.Contains(got, where) || !strings.Contains(got, "Try: Fix line ") {
+		if code != 2 || !strings.Contains(got, want) || !strings.Contains(got, "Try: "+brand.Name+" config check") {
 			t.Errorf("%q gives %d:\n%s", body, code, got)
 		}
 	}
+	// Oversized hosts.toml (> 1 MiB) fails with exit code 1 and points to config check.
+	big := make([]byte, client.MaxConfigBytes+16)
+	for i := range big {
+		big[i] = '#'
+	}
+	if err := os.WriteFile(path, big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, code := lineErr(t, "host", "ls"); code != 1 || !strings.Contains(got, "larger than 1 MiB") || !strings.Contains(got, "Try: "+brand.Name+" config check") {
+		t.Errorf("oversized hosts.toml gives %d:\n%s", code, got)
+	}
 	if os.Geteuid() == 0 {
 		t.Skip("root reads any file")
+	}
+	if err := os.WriteFile(path, []byte("[[host]]\nname = \"box\"\nssh = \"b\"\n"), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	if err := os.Chmod(path, 0); err != nil {
 		t.Fatal(err)

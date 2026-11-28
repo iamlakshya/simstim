@@ -75,9 +75,10 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 		err := offlineErr(h)
 		return func() tea.Msg { return startedMsg{startReq: r, err: err} }
 	}
-	r.args = client.TerminalArgs(r.args, m.width, m.height)
+	s, warnCmd := m.refreshSettings()
+	r.args = client.SessionArgs(r.args, m.width, m.height, s)
 	c, be, host := h.conn, m.be, h.host
-	return m.bgCmd(func(ctx context.Context) tea.Msg {
+	return tea.Batch(warnCmd, m.bgCmd(func(ctx context.Context) tea.Msg {
 		cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
 		var warn *client.UserError
@@ -97,7 +98,7 @@ func (m *Model) startSession(h *hostConn, r startReq) tea.Cmd {
 		}
 		s, err := c.NewSession(cctx, r.args)
 		return startedMsg{startReq: r, s: s, err: err, warn: warn}
-	})
+	}))
 }
 
 // onStarted shows how a start went, and a warning about the user's answers

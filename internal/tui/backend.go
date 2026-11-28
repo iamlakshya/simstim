@@ -110,11 +110,12 @@ func (realBackend) SaveHosts(ctx context.Context, h []client.Host) error {
 	}
 	return nil
 }
-func (realBackend) Settings() client.Settings          { return client.LoadSettings() }
-func (realBackend) HelperVersion() string              { return client.HelperVersion() }
-func (realBackend) Memory() memory                     { return loadMemory() }
-func (realBackend) Remember(mem memory)                { _ = saveMemory(mem) }
-func (realBackend) RememberLast(host, id, name string) { RememberLast(host, id, name) }
+func (realBackend) Settings() client.Settings               { return client.LoadSettings() }
+func (realBackend) LoadSettings() (client.Settings, string) { return client.LoadSettingsChecked() }
+func (realBackend) HelperVersion() string                   { return client.HelperVersion() }
+func (realBackend) Memory() memory                          { return loadMemory() }
+func (realBackend) Remember(mem memory)                     { _ = saveMemory(mem) }
+func (realBackend) RememberLast(host, id, name string)      { RememberLast(host, id, name) }
 
 func (realBackend) SetupAnswers(host string) client.SetupAnswers {
 	return client.LoadSetupAnswers(host)

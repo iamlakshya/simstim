@@ -38,7 +38,7 @@ Setup and help:
   setup       Set up step by step: a host, its agents, and their logins
   doctor      Check this machine and its terminal
   debug       Record why a session goes wrong: debug files, profiles and traces
-  config      Show the configuration
+  config      Show and check the configuration
   ssh-config  Set up SSH for editors, scp, sftp and rsync into sessions
   demo        Try the launcher with sample data (nothing connects anywhere)
   version     Print the version

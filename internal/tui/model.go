@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	uv "github.com/charmbracelet/ultraviolet"
 
+	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/onboard"
 )
@@ -42,11 +43,13 @@ type Options struct {
 
 // Model is the launcher: one list at a time, and the dialogs drawn over it.
 type Model struct {
-	ctx      context.Context
-	be       Backend
-	settings client.Settings
-	now      func() time.Time
-	motion   bool
+	ctx         context.Context
+	be          Backend
+	settings    client.Settings
+	settingsSeq uint64
+	configWarn  string
+	now         func() time.Time
+	motion      bool
 
 	width, height int
 	dark          bool
@@ -159,7 +162,7 @@ func New(ctx context.Context, be Backend, o Options) *Model {
 		m.now = time.Now
 	}
 	m.epoch, m.revealAt = m.now(), m.now()
-	m.settings = be.Settings()
+	m.settings, m.configWarn = readBackendSettings(be)
 	commands = withKeymap(registry(), m.settings.Keymap)
 	hosts, err := be.LoadHosts(ctx)
 	m.loadErr = err
@@ -224,6 +227,10 @@ func (m *Model) Init() tea.Cmd {
 		m.toasts.push(m.now(), toastError, sentence(msg), hint)
 		cmds = append(cmds, m.after(toastErrorLife, toastTickMsg{}))
 	}
+	if m.configWarn != "" {
+		m.toasts.push(m.now(), toastWarning, sentence(m.configWarn), brand.Name+" config check")
+		cmds = append(cmds, m.after(toastErrorLife, toastTickMsg{}))
+	}
 	return tea.Batch(append(cmds, m.startTimers())...)
 }
 
@@ -256,7 +263,11 @@ type (
 		res            client.AttachResult
 		err            error
 	}
-	settingsMsg struct{ s client.Settings }
+	settingsMsg struct {
+		s    client.Settings
+		warn string
+		seq  uint64
+	}
 	sshHostsMsg struct{ hosts []string }
 )
 
@@ -376,9 +387,7 @@ func (m *Model) update(msg tea.Msg) tea.Cmd {
 	case editorDoneMsg:
 		return m.onEditorDone(msg)
 	case settingsMsg:
-		m.settings = msg.s
-		commands = withKeymap(registry(), m.settings.Keymap)
-		return nil
+		return m.applySettings(msg.s, msg.warn, msg.seq)
 	case sshHostsMsg:
 		return m.onSSHHosts(msg)
 	}
@@ -423,8 +432,11 @@ func (m *Model) onAttachEnded(msg attachDoneMsg) tea.Cmd {
 
 // onEditorDone reloads the settings after the editor closes.
 func (m *Model) onEditorDone(msg editorDoneMsg) tea.Cmd {
-	be := m.be
-	reload := func() tea.Msg { return settingsMsg{be.Settings()} }
+	be, seq := m.be, m.nextSettingsSeq()
+	reload := func() tea.Msg {
+		s, warn := readBackendSettings(be)
+		return settingsMsg{s: s, warn: warn, seq: seq}
+	}
 	if msg.err != nil {
 		return tea.Batch(reload, m.toastErr(msg.err))
 	}

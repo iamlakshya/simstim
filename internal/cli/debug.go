@@ -36,7 +36,28 @@ func addDebugFlags(root *cobra.Command) {
 			// out of the terminal (cli-spec 6.1).
 			cmd.SetContext(client.WithoutInput(cmd.Context()))
 		}
+		warnBrokenConfig(cmd, args)
 		return startDebug(cmd, args)
+	}
+}
+
+// warnBrokenConfig warns once on stderr when config.toml cannot be used,
+// unless the command is config check, doctor, completion, help, or the
+// launcher (which reports the warning as a notice itself; cli-spec 13.4).
+func warnBrokenConfig(cmd *cobra.Command, args []string) {
+	name := cmd.Name()
+	if name == cobra.ShellCompRequestCmd || name == cobra.ShellCompNoDescRequestCmd ||
+		name == "help" || name == "completion" || name == "doctor" {
+		return
+	}
+	if shortPath(cmd) == "config check" {
+		return
+	}
+	if !cmd.HasParent() || (name == "flip" && len(args) == 0) {
+		return
+	}
+	if _, warn := client.LoadSettingsChecked(); warn != "" {
+		note(cmd, "bad_config", warn+". Run "+brand.Name+" config check to see where.")
 	}
 }
 
