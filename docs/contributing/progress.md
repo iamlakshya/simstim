@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 51 |
-| To do | 48 |
+| Done | 52 |
+| To do | 47 |
 | **All** | **99** |
 
 ## Current focus
@@ -88,7 +88,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | C11 | cli | Day 1 | Done | The launcher and the CLI agree |
 | C12 | cli | Day 1 | Done | Docs for agents |
 | T1 | test reliability | Day 1 | Done | The fake envd hang and the input and kill fixes |
-| P2.2 | 2 | Later | To do | Interception, and method and path rules |
+| P2.2 | 2 | Later | Done | Interception, and method and path rules |
 | P2.5 | 2 | Later | To do | Service rules |
 | P2.6 | 2 | Later | To do | Holds and approvals |
 | P2.11 | 2 | Later | To do | The unknown action and the classifier's fixed steps |
