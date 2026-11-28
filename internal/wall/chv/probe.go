@@ -42,7 +42,9 @@ func defaultProbeDeps() ProbeDeps {
 			if u, err := user.Current(); err == nil && u != nil && u.Username != "" {
 				return u.Username
 			}
-			return "$USER"
+			// An empty name makes kvmAccessFix use "$USER", which the
+			// shell expands. A literal $USER here would be single-quoted.
+			return ""
 		},
 		RunCmd: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
@@ -215,7 +217,7 @@ func hasBin(lookPath func(string) (string, error), name string) bool {
 // shell expands it; known usernames are shell-quoted to prevent injection.
 func kvmAccessFix(username string, hasSetfacl bool) string {
 	arg := `"$USER"`
-	if username != "" {
+	if username != "" && username != "$USER" {
 		arg = shellArg(username)
 	}
 	if hasSetfacl {
