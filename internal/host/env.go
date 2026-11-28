@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
@@ -59,6 +60,10 @@ func LoginEnvContext(ctx context.Context, timeout time.Duration) ([]string, erro
 	cmd.Stdout = &out
 	cmd.Stderr = nil
 	cmd.Env = os.Environ()
+	// Start the login shell in its own session without a controlling terminal so
+	// interactive (-i) shells cannot stop the caller's process group with
+	// SIGTTIN/SIGTTOU when invoked from a background job or timeout wrapper.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	_ = cmd.Run()
 	i := bytes.Index(out.Bytes(), []byte(marker))
 	if i < 0 {

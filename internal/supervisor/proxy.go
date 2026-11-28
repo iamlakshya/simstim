@@ -218,6 +218,9 @@ func (s *Supervisor) handleRequest(sessionID string, conn net.Conn, r *bufio.Rea
 		return false
 	case "arm":
 		s.handleArm(w, req)
+	case "stop":
+		reply(map[string]bool{"stopped": true}, nil)
+		go s.requestStopKind(stopKindStop, "stopped by request", false)
 	case "kill":
 		if sessionID != s.id {
 			s.killChildSession(sessionID)
@@ -226,9 +229,6 @@ func (s *Supervisor) handleRequest(sessionID string, conn net.Conn, r *bufio.Rea
 		}
 		reply(map[string]bool{"killed": true}, nil)
 		go s.requestStop("killed by request", false)
-	case "stop":
-		reply(map[string]bool{"stopped": true}, nil)
-		go s.requestStop("stopped by request", false)
 	case "spawn":
 		s.handleSpawn(w, req)
 	case "exec":
@@ -364,6 +364,8 @@ func (s *Supervisor) forwardHolderRequest(sessionID string, w *proto.Writer, req
 // stream. It enforces the frame-type allowlist in both directions and NEVER
 // reads or modifies TOutput or TSnapshot payloads (byte-exact).
 func (s *Supervisor) handleAttach(sessionID string, conn net.Conn, r *bufio.Reader, w *proto.Writer, attachFrame proto.Frame) {
+	s.attached.Add(1)
+	defer s.attached.Add(-1)
 	var a proto.Attach
 	if json.Unmarshal(attachFrame.Payload, &a) == nil {
 		s.noteAttach(sessionID, a)

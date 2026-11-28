@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -398,9 +399,98 @@ func TestWalledPlainResume(t *testing.T) {
 
 func TestNewWalledRejectsUnknownWall(t *testing.T) {
 	hosttest.New(t)
-	_, err := host.New(host.NewArgs{Name: "bad", Cwd: "~", Argv: []string{"true"}, Wall: "microvm"})
+	_, err := host.New(host.NewArgs{Name: "bad", Cwd: "~", Argv: []string{"true"}, Wall: "bogus"})
 	var pe *proto.Error
 	if !errors.As(err, &pe) || pe.Code != "wall_unavailable" || pe.Hint == "" {
-		t.Fatalf("new --wall microvm = %v, want wall_unavailable with hint", err)
+		t.Fatalf("new --wall bogus = %v, want wall_unavailable with hint", err)
+	}
+}
+
+func TestWalledStopWithTheHostPreservesState(t *testing.T) {
+	hosttest.New(t)
+	s, err := host.New(host.NewArgs{Name: "wsys", Cwd: "~", Argv: []string{"sleep", "60"}, Wall: "plain"})
+	if err != nil {
+		t.Fatalf("new walled: %v", err)
+	}
+	pid := hosttest.HolderPID(t, s.ID)
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if err := hosttest.Reap(pid, 10*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	m := manifest(t, s.ID)
+	if m.Status.State != host.StateWorking || m.Status.Source != "system" || m.Status.Claimed {
+		t.Fatalf("walled session stopped with host must preserve StateWorking and stay restorable: %+v", m.Status)
+	}
+	if m.Run.HolderPID != 0 || m.Run.AgentPID != 0 || m.Run.Unit != "" || m.Run.BootID == "" || m.Guest != nil {
+		t.Fatalf("walled session after host SIGTERM has unexpected runtime/guest fields: run=%+v guest=%+v", m.Run, m.Guest)
+	}
+	if _, err := os.Stat(paths.Socket(s.ID)); !os.IsNotExist(err) {
+		t.Errorf("session socket still present after host SIGTERM: %v", err)
+	}
+}
+
+func TestWalledStopUsesStopOpAndClearsGuest(t *testing.T) {
+	h := hosttest.New(t)
+	fakeClaude(t, h, "exec /bin/sh")
+	s, err := host.New(host.NewArgs{Agent: "claude", Name: "stop-walled", Cwd: "~", Wall: "plain"})
+	if err != nil {
+		t.Fatalf("new walled: %v", err)
+	}
+	m0 := manifest(t, s.ID)
+	var settings struct {
+		Hooks map[string][]struct {
+			Hooks []struct {
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"hooks"`
+	}
+	if len(m0.Agent.Hooks) < 2 || json.Unmarshal([]byte(m0.Agent.Hooks[1]), &settings) != nil {
+		t.Fatalf("unexpected claude hooks: %q", m0.Agent.Hooks)
+	}
+	send(t, s.ID, settings.Hooks["Stop"][0].Hooks[0].Command+" </dev/null")
+	waitStatus(t, s.ID, host.StateIdle, "hook")
+	if live(t, s.ID).Guest == nil {
+		t.Fatal("expected manifest Guest claim to be populated before host.Stop")
+	}
+
+	pid := hosttest.HolderPID(t, s.ID)
+	res, err := host.Stop(api.StopArgs{ID: s.ID})
+	if err != nil {
+		t.Fatalf("host.Stop: %v", err)
+	}
+	if res.AlreadyStopped || res.Session.Alive || res.Session.State != host.StateStopped {
+		t.Fatalf("host.Stop result = %+v, want stopped and not alive", res)
+	}
+	if err := hosttest.Reap(pid, 10*time.Second); err != nil {
+		t.Fatalf("supervisor did not exit after host.Stop: %v", err)
+	}
+
+	m := manifest(t, s.ID)
+	if m.Status.State != host.StateStopped || m.Status.Source != "user" {
+		t.Fatalf("manifest status after host.Stop = %+v, want StateStopped/user", m.Status)
+	}
+	if m.Guest != nil || m.Run.HolderPID != 0 || m.Run.AgentPID != 0 || m.Run.Unit != "" || m.Run.RespawnCount != 0 {
+		t.Fatalf("manifest after host.Stop kept runtime/guest fields: run=%+v guest=%+v", m.Run, m.Guest)
+	}
+	if _, err := os.Stat(paths.Socket(s.ID)); !os.IsNotExist(err) {
+		t.Errorf("session socket still present after host.Stop: %v", err)
+	}
+
+	aud, err := os.ReadFile(paths.AuditLog(s.ID))
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	if !strings.Contains(string(aud), `"event":"stop"`) {
+		t.Errorf("audit log missing stop event:\n%s", aud)
+	}
+	if strings.Contains(string(aud), `"event":"kill"`) {
+		t.Errorf("audit log unexpectedly recorded kill event on host.Stop:\n%s", aud)
+	}
+
+	again, err := host.Stop(api.StopArgs{ID: s.ID})
+	if err != nil || !again.AlreadyStopped {
+		t.Fatalf("second host.Stop = %+v, %v; want AlreadyStopped", again, err)
 	}
 }

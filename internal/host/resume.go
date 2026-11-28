@@ -55,6 +55,9 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if err := checkDiskMax(a.DiskMax); err != nil {
 		return nil, err
 	}
+	if _, err := ParseIdleStop(a.IdleStop); err != nil {
+		return nil, UserError("bad_idle_stop", err.Error(), "Set idle_stop to a duration of 1m or more (such as 30m or 2h), or never.")
+	}
 	if err := CheckCaller(); err != nil {
 		return nil, err
 	}
@@ -107,6 +110,13 @@ func Resume(a api.ResumeArgs) (*ResumeResult, error) {
 	if a.DiskMax > 0 {
 		m.Limits.DiskMax = a.DiskMax
 	}
+	if a.IdleStop != "" && m.Wall != nil {
+		if d, _ := ParseIdleStop(a.IdleStop); d > 0 {
+			m.Wall.IdleStop = strings.TrimSpace(a.IdleStop)
+		} else {
+			m.Wall.IdleStop = ""
+		}
+	}
 	m.Run.RespawnCount = 0
 	_, why, err := startAgain(m, again{label: resumedLabel, reason: "started again by a resume", secrets: secrets})
 	var refused *proto.Error
@@ -155,9 +165,22 @@ var stopWait = 5 * time.Second
 // unit every process that the agent left there. m is the session's
 // manifest, or nil when it cannot be read.
 func stopHolder(id string, m *Manifest) {
+	stopHolderOp(id, m, "kill")
+}
+
+// stopWalledHolder asks a walled session's supervisor for a clean stop (ACPI
+// power-button on microvm, graceful shutdown on process/gvisor) before tearing
+// down its systemd unit so no VMM, supervisor or egress process remains.
+func stopWalledHolder(id string, m *Manifest) {
+	stopHolderOp(id, m, "stop")
+}
+
+func stopHolderOp(id string, m *Manifest, op string) {
 	wasAlive := alive(id)
 	if wasAlive {
-		_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
+		if _, err := HolderRequest(id, op, nil, 2*time.Second); err != nil && op != "kill" {
+			_, _ = HolderRequest(id, "kill", nil, 2*time.Second)
+		}
 		deadline := time.Now().Add(stopWait)
 		for alive(id) && time.Now().Before(deadline) {
 			time.Sleep(100 * time.Millisecond)
@@ -181,6 +204,8 @@ func stopHolder(id string, m *Manifest) {
 	}
 	os.Remove(paths.Socket(id))
 	os.Remove(paths.HookSocket(id))
+	os.Remove(paths.VMMSocket(id))
+	os.Remove(paths.VsockSocket(id))
 }
 
 // killHolder stops a holder that did not stop when asked: SIGTERM first,

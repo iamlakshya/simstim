@@ -84,9 +84,10 @@ func (Driver) Prepare(_ context.Context, spec wall.Spec) (wall.Sandbox, error) {
 	}), nil
 }
 
-// Open is wired in P3.6 (microvm lifecycle / reattach).
-func (Driver) Open(context.Context, string) (wall.Sandbox, error) {
-	return nil, errors.New("chv open is implemented in microvm lifecycle (P3.6). Try: start a fresh microvm session")
+// Open attaches to a running Cloud Hypervisor microvm by session ID via its
+// VMM API socket (P3.6).
+func (Driver) Open(ctx context.Context, id string) (wall.Sandbox, error) {
+	return openSandbox(ctx, id)
 }
 
 // SandboxOptions configures NewSandbox.

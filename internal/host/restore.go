@@ -78,6 +78,20 @@ func restoreOne(id, boot string, all bool) (RestoreResult, bool) {
 		r.Action, r.Why = "skipped", "no restart since it stopped (use --all)"
 	case m.Restart.MaxAttempts > 0 && m.Run.RespawnCount >= m.Restart.MaxAttempts:
 		r.Action, r.Why = "skipped", fmt.Sprintf("already restored %d times", m.Run.RespawnCount)
+	case !all && isMicroVM(m) && m.Status.State != StateWorking && m.Status.State != StateStarting:
+		// Lazy restore (spec 6.8, P3.6): a microvm that was not actively working
+		// before the host reboot stays stopped until attach or resume wakes it,
+		// so idle microvms use no RAM after a reboot.
+		m.Run.HolderPID, m.Run.AgentPID, m.Run.Unit = 0, 0, ""
+		m.Guest = nil
+		m.Status = Status{
+			State:  StateStopped,
+			Since:  time.Now().UTC(),
+			Source: "system",
+			Reason: "stopped after host restart (attach to wake)",
+		}
+		_ = m.Save()
+		r.Action, r.Why = "stopped", "lazy restore: wakes on attach"
 	default:
 		reason := "restored after a host restart"
 		if m.Status.State == StateStopped {
@@ -155,7 +169,7 @@ func startAgain(m *Manifest, a again) (argv []string, why string, err error) {
 	}
 	// The holder answers on its socket before it starts the agent, as New
 	// knows too: wait for the start before saying it worked.
-	if mm := waitStarted(m.ID, 5*time.Second); mm != nil {
+	if mm := waitStarted(m.ID, waitStartTimeout(m)); mm != nil {
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
 			return argv, why, errors.New(startFailedMessage(mm, sessionLogPath(mm), 0))
 		}

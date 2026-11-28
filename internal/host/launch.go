@@ -14,6 +14,7 @@ import (
 
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/wall/chv"
 )
 
 // SystemdUser reports whether a systemd user manager is running for this user.
@@ -42,6 +43,9 @@ func launchHolder(m *Manifest) error {
 // launchSupervisor starts the supervisor for a walled session m and waits
 // until its session socket answers.
 func launchSupervisor(m *Manifest) error {
+	if isMicroVM(m) {
+		return launchSessionProcess(m, "supervise", paths.SupervisorLog(m.ID), 20, 4096, chv.DefaultBootTimeout)
+	}
 	return launchSessionProcess(m, "supervise", paths.SupervisorLog(m.ID), 30, 4096, 10*time.Second)
 }
 
@@ -76,9 +80,9 @@ func launchSessionProcess(m *Manifest, subcmd, logPath string, stopSec, tasksMax
 		if tasksMax > 0 {
 			args = append(args, "-p", fmt.Sprintf("TasksMax=%d", tasksMax))
 		}
-		if m.Limits.MemoryMax > 0 {
+		if memMax := unitMemoryLimit(m); memMax > 0 {
 			args = append(args,
-				"-p", fmt.Sprintf("MemoryMax=%d", m.Limits.MemoryMax),
+				"-p", fmt.Sprintf("MemoryMax=%d", memMax),
 				"-p", "MemorySwapMax=0")
 		}
 		if m.Limits.CPUs > 0 {
@@ -108,6 +112,19 @@ func launchSessionProcess(m *Manifest, subcmd, logPath string, stopSec, tasksMax
 		_ = cmd.Process.Release()
 	}
 	return waitSocketLog(m.ID, logPath, from, timeout)
+}
+
+// unitMemoryLimit returns the systemd unit MemoryMax for m. On a microvm,
+// m.Limits.MemoryMax is guest RAM and the unit adds Cloud Hypervisor's reserve
+// (128 MiB + ceil(guestRAM/256), isolation spec 20.10, question 80).
+func unitMemoryLimit(m *Manifest) int64 {
+	if m == nil || m.Limits.MemoryMax <= 0 {
+		return 0
+	}
+	if isMicroVM(m) {
+		return chv.UnitMemoryMax(m.Limits.MemoryMax)
+	}
+	return m.Limits.MemoryMax
 }
 
 // holderStarted waits until the holder of session id answers. It writes

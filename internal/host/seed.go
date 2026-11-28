@@ -142,7 +142,7 @@ func StartDeferred(a api.SessionStartArgs) (*SessionInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	if isSandboxedWall(m) {
+	if isSandboxedWall(m) || isMicroVM(m) {
 		agent, known := agents.Find(m.Agent.Kind)
 		if len(secretNames) > 0 {
 			boundSecrets, exposedSecrets, err := resolveProcessSecrets(agent, known, secretNames, a.SecretBinds, a.ExposedSecrets)

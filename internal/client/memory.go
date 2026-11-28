@@ -28,11 +28,12 @@ func ParseMemoryFlagNamed(flagName, v string) (int64, error) {
 
 // SandboxSizes holds resolved session size defaults from Settings and Host.
 type SandboxSizes struct {
-	CPUs    int
-	Memory  int64
-	DiskMax int64
-	CopyMax int64
-	SeedMax int64
+	CPUs     int
+	Memory   int64
+	DiskMax  int64
+	IdleStop string
+	CopyMax  int64
+	SeedMax  int64
 }
 
 // ResolveSandboxSizes merges [sandbox] settings from config.toml and hosts.toml
@@ -45,6 +46,7 @@ func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
 	}
 	memRaw := s.Sandbox.Memory
 	diskRaw := s.Sandbox.DiskMax
+	idleRaw := s.Sandbox.IdleStop
 	if h.Sandbox != nil {
 		if h.Sandbox.CPUs < 0 {
 			return out, &UserError{Msg: "sandbox.cpus in hosts.toml must be positive", Hint: "Set sandbox.cpus to a positive whole number.", Code: "bad_config", Kind: KindUsage}
@@ -57,6 +59,9 @@ func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
 		}
 		if h.Sandbox.DiskMax != "" {
 			diskRaw = h.Sandbox.DiskMax
+		}
+		if h.Sandbox.IdleStop != "" {
+			idleRaw = h.Sandbox.IdleStop
 		}
 	}
 	if out.CPUs < 0 {
@@ -79,6 +84,12 @@ func ResolveSandboxSizes(s Settings, h Host) (SandboxSizes, error) {
 			return out, &UserError{Msg: "sandbox.disk_max in config: " + err.Error(), Hint: "Set sandbox.disk_max to a size such as 10G.", Code: "bad_config", Kind: KindUsage}
 		}
 		out.DiskMax = n
+	}
+	if idleRaw != "" {
+		if err := CheckIdleStop(idleRaw); err != nil {
+			return out, &UserError{Msg: "sandbox.idle_stop in config: " + err.Error(), Hint: "Set sandbox.idle_stop to a duration of a minute or more (such as 30m or 2h), or never.", Code: "bad_config", Kind: KindUsage}
+		}
+		out.IdleStop = idleRaw
 	}
 	if s.Sandbox.CopyMax != "" {
 		n, err := api.ParseByteSize(s.Sandbox.CopyMax, 1<<10)

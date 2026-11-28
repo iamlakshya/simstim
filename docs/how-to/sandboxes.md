@@ -11,7 +11,7 @@ Each host supports one or more wall levels, from weakest to strongest:
 | `none` | No wall | Any Linux host that runs sessions today |
 | `process` | [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`), Landlock and seccomp | Linux 5.13 or later, `bwrap`, unprivileged user namespaces, Landlock ABI 1 or more, seccomp |
 | `gvisor` | Pinned upstream [gVisor](https://gvisor.dev/) `runsc` (systrap) | Linux 5.6 or later (`amd64` or `arm64`), pinned `runsc` runtime, unprivileged user namespaces |
-| `microvm` | Cloud Hypervisor on KVM | Linux 6.8 or later, `/dev/kvm` open to your user, pinned runtime |
+| `microvm` | Pinned [Cloud Hypervisor](https://www.cloudhypervisor.org/) on KVM | Linux 6.8 or later, `/dev/kvm` open to your user, `mkfs.ext4`, pinned runtime and root image |
 
 ## Check what a host supports
 
@@ -199,7 +199,24 @@ simstim resume my-vps/auth-fix --cpus 4 --memory 8G
 simstim attach my-vps/auth-fix --cpus 4 --memory 8G
 ```
 
-Limits are applied through systemd unit properties (`MemoryMax=` and `CPUQuota=`). A new size takes effect at the next start or wake; passing `--cpus` or `--memory` to `resume` or `attach` on a running session changes nothing and prints a notice on stderr. On walled sessions, `[sandbox] disk_max` adds a soft disk cap checked every minute alongside the 5% host free-space floor; exceeding either stops the session with `disk_full`.
+Limits are applied through systemd unit properties (`MemoryMax=` and `CPUQuota=`). On a microvm sandbox, `--memory` sets the guest's RAM and the systemd unit adds a host reserve (`128 MiB + guest RAM / 256`) for Cloud Hypervisor and its kernel page tables. A new size takes effect at the next start or wake; passing `--cpus` or `--memory` to `resume` or `attach` on a running session changes nothing and prints a notice on stderr. On process walls, `[sandbox] disk_max` adds a soft folder cap checked every minute; on microvm sandboxes, `[sandbox] disk_max` is a hard cap on the sparse ext4 session disk (`disk.img`), so filling `/work` gives `ENOSPC` and host disk usage (`du`) never passes `disk_max`. On every walled session, when host free space drops below 5%, the supervisor stops the sandbox with `disk_full`.
+
+## Microvm lifecycle
+
+A microvm sandbox (`--wall microvm`) uses Cloud Hypervisor with a sparse, unencrypted ext4 session disk (`disk.img`) and follows the same `stop`, `attach`, `resume` and `rm` workflow as other sessions:
+
+- **Stop uses no memory:** `simstim stop <host>/<session>` asks guest init to shut down, triggers an ACPI power-button event through `ch-remote`, and stops the session's systemd user unit. Once stopped, the unit is inactive and no VMM, supervisor or egress process runs for the session. Stop keeps no screen buffer and writes no memory snapshot.
+- **Wake on attach or resume:** `simstim attach` or `simstim resume` cold-boots a fresh microvm against the preserved `disk.img`, so `/work` and agent conversation state stay intact while `/home/agent` starts clean.
+- **Lazy restore after host reboot:** at host boot, explicitly stopped sessions stay stopped, and idle microvm sandboxes transition to `stopped` rather than cold-booting until you attach or run `host restore <host> --all`.
+- **Idle stop (`[sandbox] idle_stop`):** off by default (`"never"` or empty). Set `idle_stop` under `[sandbox]` in `config.toml` (or per host under `[host.sandbox]` in `hosts.toml`) to a duration of one minute or more, such as `"30m"` or `"2h"`, to stop idle sandboxes automatically when no client is attached and no agent is working:
+
+```toml
+[sandbox]
+idle_stop = "2h"
+disk_max = "20G"
+```
+
+- **Destroy:** `simstim rm <host>/<session>` stops the unit and deletes the session folder, including `disk.img`, leaving no unit, process or socket behind.
 
 ## Environment variables
 

@@ -28,6 +28,7 @@ type preparedNewP114 struct {
 	cpus          int
 	memMax        int64
 	diskMax       int64
+	idleStop      string
 	copyMax       int64
 	env           map[string]string
 	copyItems     []client.CopyInItem
@@ -115,10 +116,11 @@ func prepareNewP114(cmd *cobra.Command, h client.Host, settings client.Settings,
 		return nil, err
 	}
 	prep := &preparedNewP114{
-		cpus:    sizes.CPUs,
-		memMax:  sizes.Memory,
-		diskMax: sizes.DiskMax,
-		copyMax: sizes.CopyMax,
+		cpus:     sizes.CPUs,
+		memMax:   sizes.Memory,
+		diskMax:  sizes.DiskMax,
+		idleStop: sizes.IdleStop,
+		copyMax:  sizes.CopyMax,
 	}
 	if hasCPUsFlag {
 		prep.cpus = cpusFlag
@@ -197,6 +199,7 @@ func startNewWithP114(cmd *cobra.Command, conn *client.Conn, h client.Host, a cl
 	}
 	a.CPUs = prep.cpus
 	a.DiskMax = prep.diskMax
+	a.IdleStop = prep.idleStop
 	a.Env = prep.env
 	if prep.memMax != 0 {
 		a.MemoryMax = prep.memMax

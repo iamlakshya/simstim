@@ -128,89 +128,6 @@ func (s *Supervisor) readSecrets(conn net.Conn, want []string, deadline time.Tim
 	return vals, nil
 }
 
-func (s *Supervisor) requestStop(reason string, system bool) {
-	s.stopOnce.Do(func() {
-		s.stopCh <- stopRequest{reason: reason, system: system}
-	})
-}
-
-func (s *Supervisor) finishStop(reason string, system bool) {
-	close(s.doneCh)
-	s.closeAlerts()
-	s.mu.Lock()
-	s.stopping = true
-	s.mu.Unlock()
-
-	deadline := time.Now().Add(s.opt.StopGrace)
-	ctlCtx, ctlCancel := context.WithDeadline(context.Background(), deadline)
-	_, ctlErr := s.ctlCall(ctlCtx, "stop", guest.StopReq{GraceMS: int(s.opt.StopGrace / time.Millisecond)})
-	ctlCancel()
-
-	// If ctl "stop" was acknowledged, wall-init is already running its own
-	// shutdown with StopGrace plus keep-file persistence; give it that window
-	// plus a short buffer before escalating with Stop.
-	if ctlErr == nil {
-		waitCh := make(chan struct{})
-		go func() {
-			_ = s.sb.Wait()
-			close(waitCh)
-		}()
-		rem := time.Until(deadline) + 2*time.Second
-		if rem > 0 {
-			t := time.NewTimer(rem)
-			select {
-			case <-waitCh:
-				t.Stop()
-			case <-t.C:
-				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-				_ = s.sb.Stop(ctx, 2*time.Second)
-				cancel()
-				<-waitCh
-			}
-		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = s.sb.Stop(ctx, 2*time.Second)
-			cancel()
-			<-waitCh
-		}
-	} else {
-		ctx, cancel := context.WithTimeout(context.Background(), s.opt.StopGrace)
-		_ = s.sb.Stop(ctx, s.opt.StopGrace)
-		cancel()
-	}
-
-	s.closeAllPorts()
-	s.closeAllConns()
-	_ = s.link.Close()
-	s.wg.Wait()
-	_ = s.sb.Destroy()
-
-	s.mu.Lock()
-	_ = s.mem.Reap(s.id)
-	s.m.GrantedPorts = nil
-	s.ended = true
-	switch {
-	case system:
-		s.m.Status.Reason, s.m.Status.Source, s.m.Status.Claimed = reason, "system", false
-	case s.m.Status.State != host.StateExited && s.m.Status.State != host.StateErrored:
-		s.m.Status = host.Status{State: host.StateExited, Since: time.Now().UTC(), Reason: reason, Claimed: false}
-	default:
-		s.m.Status.Claimed = false
-	}
-	childCopies := s.finalizeChildrenLocked(reason, system)
-	s.mu.Unlock()
-	_ = s.save(true)
-	for _, cc := range childCopies {
-		_ = cc.Save()
-	}
-	s.audit.Record(AuditEntry{Event: "kill", Session: s.id, Detail: reason})
-	// Close the session sockets last so callers polling alive(id) (such as
-	// resume or delete) wait until sb.Destroy and the final manifest saves finish.
-	s.closeChildSockets()
-	s.closeSocket()
-	<-s.acceptDone
-}
-
 func (s *Supervisor) finishSandboxExit(ex Exit) {
 	close(s.doneCh)
 	s.closeAllPorts()
@@ -246,7 +163,7 @@ func (s *Supervisor) finishSandboxExit(ex Exit) {
 		s.alertEnded(code, ex.Signal, oom)
 		s.audit.Record(AuditEntry{Event: "link_error", Session: s.id, ExitCode: &code, Signal: ex.Signal, OOM: oom})
 	}
-	childCopies := s.finalizeChildrenLocked("the sandbox exited unexpectedly", false)
+	childCopies := s.finalizeChildrenLocked(stopRequest{kind: stopKindKill, reason: "the sandbox exited unexpectedly"}, time.Now().UTC())
 	s.mu.Unlock()
 	s.closeAlerts()
 	_ = s.save(true)

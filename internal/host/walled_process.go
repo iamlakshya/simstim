@@ -140,6 +140,7 @@ func newSandboxedWalled(a NewArgs, level, driver, ver string) (_ *SessionInfo, e
 			BoundSecrets:     boundSecrets,
 			ExposedSecrets:   exposedSecrets,
 			SubscriptionAuth: subscriptionAuth,
+			IdleStop:         ws.idleStop,
 			Keep:             keepFiles,
 			Shell:            strings.TrimSpace(a.Shell),
 		},

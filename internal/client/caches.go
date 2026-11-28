@@ -14,8 +14,10 @@ type HostSandbox struct {
 	CPUs int `toml:"cpus,omitempty"`
 	// Memory caps the memory of new sessions on this host, such as "4G".
 	Memory string `toml:"memory,omitempty"`
-	// DiskMax sets the soft disk cap for walled sessions on this host, such as "10G".
+	// DiskMax sets the session disk cap for walled sessions on this host, such as "10G".
 	DiskMax string `toml:"disk_max,omitempty"`
+	// IdleStop overrides sandbox.idle_stop from config.toml for this host.
+	IdleStop string `toml:"idle_stop,omitempty"`
 	// Env sets non-secret environment variables for new sessions on this host.
 	Env map[string]string `toml:"env,omitempty"`
 	// CopyIn lists laptop paths (or laptop:guest pairs) copied into new

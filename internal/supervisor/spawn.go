@@ -251,24 +251,16 @@ func (s *Supervisor) closeChildSockets() {
 	}
 }
 
-// finalizeChildrenLocked marks all child sessions ended and returns copies of
-// their manifests to save. Caller holds s.mu.
-func (s *Supervisor) finalizeChildrenLocked(reason string, system bool) []*host.Manifest {
-	now := time.Now().UTC()
+// finalizeChildrenLocked marks all child sessions ended according to sr and
+// returns copies of their manifests to save. Caller holds s.mu.
+func (s *Supervisor) finalizeChildrenLocked(sr stopRequest, now time.Time) []*host.Manifest {
 	var out []*host.Manifest
 	for id, sess := range s.sessions {
 		if id == s.id {
 			continue
 		}
 		sess.ended = true
-		switch {
-		case system:
-			sess.m.Status.Reason, sess.m.Status.Source, sess.m.Status.Claimed = reason, "system", false
-		case sess.m.Status.State != host.StateExited && sess.m.Status.State != host.StateErrored:
-			sess.m.Status = host.Status{State: host.StateExited, Since: now, Reason: reason, Claimed: false}
-		default:
-			sess.m.Status.Claimed = false
-		}
+		applyStopToManifest(sess.m, sr, now)
 		cp := snapshotManifest(sess.m)
 		out = append(out, &cp)
 	}

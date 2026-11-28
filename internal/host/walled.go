@@ -91,6 +91,8 @@ func newWalled(a NewArgs) (_ *SessionInfo, err error) {
 		return nil, err
 	}
 	switch a.Wall {
+	case "microvm":
+		return newMicroVMWalled(a)
 	case "process":
 		return newProcessWalled(a)
 	case "gvisor":
@@ -99,7 +101,7 @@ func newWalled(a NewArgs) (_ *SessionInfo, err error) {
 		return newPlainWalled(a)
 	default:
 		return nil, UserError("wall_unavailable", fmt.Sprintf("wall %q is not available in this build", a.Wall),
-			"Use --wall process, --wall gvisor, or --wall none for an unwalled session.")
+			"Use --wall microvm, --wall gvisor, --wall process, or --wall none for an unwalled session.")
 	}
 }
 
@@ -192,6 +194,7 @@ func newPlainWalled(a NewArgs) (_ *SessionInfo, err error) {
 			ModelBudget:     ws.modelBudget,
 			UploadBudget:    ws.uploadBudget,
 			SandboxEnv:      filterSandboxEnv(a.Env, a.SandboxEnv),
+			IdleStop:        ws.idleStop,
 		},
 		HostName:    a.HostName,
 		SandboxName: name,
@@ -271,4 +274,11 @@ func walledEnv(a NewArgs, id, guestHome, resolvedBin string, agent agents.Agent,
 		}
 	}
 	return env, term
+}
+
+func cleanWalledRuntimeFiles(id string) {
+	_ = os.RemoveAll(paths.GuestRuntimeDir(id))
+	_ = os.RemoveAll(paths.PortDir(id))
+	_ = os.Remove(paths.VMMSocket(id))
+	_ = os.Remove(paths.VsockSocket(id))
 }

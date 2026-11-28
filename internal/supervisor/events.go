@@ -80,6 +80,7 @@ func (s *Supervisor) step() {
 		}
 	}
 	s.checkDisk(now)
+	s.checkIdleStop(now)
 	for _, cp := range childSnaps {
 		if err := cp.Save(); err != nil {
 			s.log.Warn("child manifest not saved", "session", cp.ID, "err", err)

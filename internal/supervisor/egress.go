@@ -15,6 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/egress"
 	"github.com/iamlakshya/simstim/internal/link"
+	"github.com/iamlakshya/simstim/internal/wall/chv"
 )
 
 func (s *Supervisor) initEgress() error {
@@ -22,7 +23,7 @@ func (s *Supervisor) initEgress() error {
 		s.egress = s.opt.Egress
 		return nil
 	}
-	if s.opt.EgressStarter == nil && (s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor" && s.m.Wall.Driver != "chv") || s.m.Wall.ShareNet) {
+	if s.opt.EgressStarter == nil && (s.opt.EgressExe == "" || s.m.Wall == nil || (s.m.Wall.Driver != "process" && s.m.Wall.Driver != "gvisor" && s.m.Wall.Driver != chv.DriverName) || s.m.Wall.ShareNet) {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -143,8 +143,12 @@ type WallRecord struct {
 	BoundSecrets []api.SecretBind `json:"bound_secrets,omitempty"`
 	// ExposedSecrets names secrets explicitly allowed into the sandbox env.
 	ExposedSecrets []string `json:"exposed_secrets,omitempty"`
-	Runtime        string   `json:"runtime,omitempty"`
-	RuntimeFiles   []string `json:"runtime_files,omitempty"`
+	// IdleStop sets how long this walled session may sit idle (no client
+	// attached and no agent work) before its supervisor stops it. Empty or
+	// "never" disables idle stop (question 9).
+	IdleStop     string   `json:"idle_stop,omitempty"`
+	Runtime      string   `json:"runtime,omitempty"`
+	RuntimeFiles []string `json:"runtime_files,omitempty"`
 	// System is the microvm root persistence mode ("reset" or "keep").
 	System string `json:"system,omitempty"`
 	// Sudo enables passwordless sudo for user agent inside a microvm sandbox.

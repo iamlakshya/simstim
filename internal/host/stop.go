@@ -52,7 +52,7 @@ func Stop(a api.StopArgs) (*StopResult, error) {
 		}
 		return &StopResult{Session: infoFrom(m, false), AlreadyStopped: true}, nil
 	}
-	if running && !isWalled(m) {
+	if running {
 		runStopHook(m)
 	}
 	stopHolder(id, m)
@@ -66,6 +66,7 @@ func Stop(a api.StopArgs) (*StopResult, error) {
 	m.Run.AgentPID = 0
 	m.Run.Unit = ""
 	m.Run.RespawnCount = 0
+	m.Guest = nil
 	m.DebugUntil = nil
 	m.Status = Status{
 		State:  StateStopped,

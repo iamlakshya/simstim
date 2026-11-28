@@ -46,6 +46,11 @@ func validateSandboxSettings(abbrev string, s client.Settings, ins *client.TOMLI
 			addBad(ins.Pos("sandbox", "disk_max"), "sandbox.disk_max: "+err.Error())
 		}
 	}
+	if sb.IdleStop != "" {
+		if err := client.CheckIdleStop(sb.IdleStop); err != nil {
+			addBad(ins.Pos("sandbox", "idle_stop"), "sandbox.idle_stop: "+err.Error())
+		}
+	}
 	if sb.CopyMax != "" {
 		if _, err := api.ParseByteSize(sb.CopyMax, 1<<10); err != nil {
 			addBad(ins.Pos("sandbox", "copy_max"), "sandbox.copy_max: "+err.Error())
@@ -107,6 +112,11 @@ func validateHostSandbox(abbrev string, idx int, h client.Host, ins *client.TOML
 	if sb.DiskMax != "" {
 		if _, err := api.ParseByteSize(sb.DiskMax, 1<<20); err != nil {
 			addBad(ins.HostPos(idx, "sandbox", "disk_max"), fmt.Sprintf("host %q sandbox.disk_max: %s", label, err.Error()))
+		}
+	}
+	if sb.IdleStop != "" {
+		if err := client.CheckIdleStop(sb.IdleStop); err != nil {
+			addBad(ins.HostPos(idx, "sandbox", "idle_stop"), fmt.Sprintf("host %q sandbox.idle_stop: %s", label, err.Error()))
 		}
 	}
 	names := make([]string, 0, len(sb.Env))

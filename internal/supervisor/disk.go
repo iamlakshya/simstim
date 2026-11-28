@@ -9,6 +9,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/alerts"
 	"github.com/iamlakshya/simstim/internal/host"
 	"github.com/iamlakshya/simstim/internal/paths"
+	"github.com/iamlakshya/simstim/internal/wall/chv"
 )
 
 // defaultDiskFreePercent is the minimum free filesystem percentage required
@@ -34,12 +35,21 @@ func (s *Supervisor) checkDisk(now time.Time) {
 		return
 	}
 	diskMax := s.m.Limits.DiskMax
+	isMicroVM := s.m.Wall != nil && s.m.Wall.Driver == chv.DriverName
 	s.mu.Unlock()
 
 	sessDir := paths.SessionDir(s.id)
 	if diskMax > 0 {
-		used := dirSize(sessDir)
-		if used > diskMax {
+		// On a microvm, disk.img is a sparse ext4 image whose hard cap is
+		// disk_max (the guest gets ENOSPC when full); measure real allocated
+		// blocks (matching `du`) rather than apparent sparse size (spec 17.1).
+		if isMicroVM {
+			if alloc, err := chv.SessionDiskAllocatedBytes(paths.SessionDisk(s.id)); err == nil && alloc > diskMax {
+				detail := fmt.Sprintf("session disk allocated %d bytes, above disk_max %d bytes", alloc, diskMax)
+				s.triggerDiskFull(detail)
+				return
+			}
+		} else if used := dirSize(sessDir); used > diskMax {
 			detail := fmt.Sprintf("session used %d bytes, above disk_max %d bytes", used, diskMax)
 			s.triggerDiskFull(detail)
 			return
@@ -66,7 +76,7 @@ func (s *Supervisor) triggerDiskFull(detail string) {
 	s.mu.Lock()
 	s.alertEvent(alerts.DiskFull)
 	s.mu.Unlock()
-	s.requestStop("disk_full: "+detail, true)
+	s.requestStopKind(stopKindDiskFull, "disk_full: "+detail, true)
 }
 
 func dirSize(root string) int64 {

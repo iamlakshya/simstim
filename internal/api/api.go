@@ -48,9 +48,14 @@ type NewArgs struct {
 	// 0 asks for the default (unbounded on unwalled sessions; agent table or
 	// 2 CPUs on walled sessions, spec 17.1).
 	CPUs int `json:"cpus,omitempty"`
-	// DiskMax is the soft disk cap for a walled session's folder, in bytes.
-	// 0 disables the per-session disk cap (the 5% free-space floor still holds).
+	// DiskMax is the session disk cap in bytes: a hard sparse ext4 cap on
+	// microvm sandboxes, and a soft directory cap on process walls (spec 17.1).
+	// 0 uses the host default (10 GiB on walled sessions).
 	DiskMax int64 `json:"disk_max,omitempty"`
+	// IdleStop sets how long a walled session may stay idle (no client attached
+	// and no agent work) before its supervisor stops it. Empty or "never"
+	// leaves idle stop off (spec 6.6, question 9).
+	IdleStop string `json:"idle_stop,omitempty"`
 	// Env holds non-secret environment variables from config layers, --env-file
 	// and --env (spec 17.2). Identity variables always win over Env.
 	Env map[string]string `json:"env,omitempty"`
@@ -237,8 +242,11 @@ type ResumeArgs struct {
 	// CPUs is the session's CPU cap from now on. 0 keeps the existing CPU cap,
 	// and CPUsAuto asks for the default (spec 17.1).
 	CPUs int `json:"cpus,omitempty"`
-	// DiskMax updates the soft disk cap in bytes when > 0.
+	// DiskMax updates the disk cap in bytes when > 0.
 	DiskMax int64 `json:"disk_max,omitempty"`
+	// IdleStop updates the sandbox idle-stop duration when non-empty ("never"
+	// turns it off).
+	IdleStop string `json:"idle_stop,omitempty"`
 	// Secrets are the values of the session's secrets, which the client
 	// fetches again. The host writes none of them down (host/secrets.go).
 	Secrets map[string]Secret `json:"secrets,omitempty"`

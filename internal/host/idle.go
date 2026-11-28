@@ -41,6 +41,32 @@ func IdleDecide(now time.Time, st IdleState, boot string, busy bool, after time.
 	return st, now.Sub(st.BusyAt) >= after
 }
 
+// ParseIdleStop parses a sandbox idle_stop setting: empty or "never" disables
+// idle stop (returning 0, nil); otherwise it must be a duration of at least
+// one minute (such as "30m" or "2h").
+func ParseIdleStop(raw string) (time.Duration, error) {
+	v := strings.TrimSpace(raw)
+	if v == "" || v == "never" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d < time.Minute {
+		return 0, fmt.Errorf("%q is not a valid idle_stop duration (use a duration of 1m or more such as 30m or 2h, or never)", raw)
+	}
+	return d, nil
+}
+
+// SessionIdleDecide applies IdleDecide to one walled session (isolation spec
+// 6.6, P3.6). When after <= 0 (the default until P3.8, question 9), it never
+// triggers a stop.
+func SessionIdleDecide(now, busyAt time.Time, busy bool, after time.Duration) (nextBusyAt time.Time, stop bool) {
+	if after <= 0 {
+		return now, false
+	}
+	st, shouldStop := IdleDecide(now, IdleState{BootID: "session", BusyAt: busyAt}, "session", busy, after)
+	return st.BusyAt, shouldStop
+}
+
 // IdleInterval is how often the timer runs the check: a fifth of the idle
 // time, between 1 and 5 minutes.
 func IdleInterval(after time.Duration) time.Duration {

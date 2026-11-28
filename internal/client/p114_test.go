@@ -458,6 +458,24 @@ func TestResolveSandboxSizesAutoAndNegativeHostCPUs(t *testing.T) {
 	if err != nil || resolvedArgs.MemoryMax != 0 {
 		t.Fatalf("withMemoryMax(host auto) = %+v, %v; want MemoryMax=0", resolvedArgs, err)
 	}
+
+	// [sandbox] idle_stop is off by default, accepts durations >= 1m and "never",
+	// lets [host.sandbox] override config.toml, and rejects durations < 1m.
+	sIdle := DefaultSettings()
+	if got, err := ResolveSandboxSizes(sIdle, Host{Name: "box"}); err != nil || got.IdleStop != "" {
+		t.Fatalf("default idle_stop = (%q, %v), want empty", got.IdleStop, err)
+	}
+	sIdle.Sandbox.IdleStop = "2h"
+	if got, err := ResolveSandboxSizes(sIdle, Host{Name: "box"}); err != nil || got.IdleStop != "2h" {
+		t.Fatalf("global idle_stop = (%q, %v), want 2h", got.IdleStop, err)
+	}
+	if got, err := ResolveSandboxSizes(sIdle, Host{Name: "box", Sandbox: &HostSandbox{IdleStop: "never"}}); err != nil || got.IdleStop != "never" {
+		t.Fatalf("host idle_stop override = (%q, %v), want never", got.IdleStop, err)
+	}
+	sIdle.Sandbox.IdleStop = "10s"
+	if _, err := ResolveSandboxSizes(sIdle, Host{Name: "box"}); !errors.As(err, &ue) || ue.Code != "bad_config" {
+		t.Fatalf("short idle_stop err = %v, want bad_config", err)
+	}
 }
 
 func TestCopyInStoreRememberSavedForget(t *testing.T) {

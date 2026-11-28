@@ -23,7 +23,8 @@ Your preferences. Every key is optional; a missing key takes its default.
 | `sandbox.package_managers` | string | `"guarded"` | Controls the settings that guest init writes for package managers inside a sandbox: "guarded" (minimum release age, no dependency install scripts for npm, pnpm, Yarn and Bun, and Go proxy settings), "strict" (also blocks pip and uv source builds), or "off". |
 | `sandbox.cpus` | integer | — | Caps the CPU quota of each new session through systemd (100% per CPU). 0 uses the agent's default on walled sessions and leaves unwalled sessions unbounded. `new --cpus` overrides it. |
 | `sandbox.memory` | string | — | Caps the memory of each new session, such as "4G" or "auto". `new --memory` overrides it. |
-| `sandbox.disk_max` | string | — | Sets the soft disk cap for a walled session's folder, such as "10G". The supervisor stops a session past this cap with disk_full. |
+| `sandbox.disk_max` | string | — | Sets the session disk cap for a walled session, such as "10G": a hard cap on microvm sandboxes, and a soft folder cap on process walls. The supervisor also stops a session when host free space falls below 5%. |
+| `sandbox.idle_stop` | string | — | Stops a walled session after this long with no client attached and no agent work (for example "30m" or "2h"), or "never". Off by default until microvm latency targets are verified. |
 | `sandbox.env` | table | — | Sets non-secret environment variables for each new session, replacing guest init defaults for those names. A name listed in [secrets] is refused with env_is_secret. `new --env` and `--env-file` override it. |
 | `sandbox.keep_caches` | boolean | `true` | Keeps package and build caches across starts of a sandbox, inside that sandbox only. |
 | `sandbox.caches` | array of string | — | Adds relative paths under /home/agent, or drops one with "!". |
@@ -75,7 +76,8 @@ The hosts you added. `host add` writes it, and you can edit it by hand. Each hos
 | `[sandbox]` | table | Holds per-host defaults for session sizes, environment variables, laptop copies and kept caches. Host settings win over config.toml's [sandbox] table, and command-line flags win over both. |
 | `sandbox.cpus` | integer | Caps the CPU quota of new sessions on this host. |
 | `sandbox.memory` | string | Caps the memory of new sessions on this host, such as "4G". |
-| `sandbox.disk_max` | string | Sets the soft disk cap for walled sessions on this host, such as "10G". |
+| `sandbox.disk_max` | string | Sets the session disk cap for walled sessions on this host, such as "10G". |
+| `sandbox.idle_stop` | string | Overrides sandbox.idle_stop from config.toml for this host. |
 | `sandbox.env` | table | Sets non-secret environment variables for new sessions on this host. |
 | `sandbox.copy_in` | array of string | Lists laptop paths (or laptop:guest pairs) copied into new sessions on this host at start. |
 | `sandbox.keep_caches` | boolean | Overrides sandbox.keep_caches from config.toml for this host. |

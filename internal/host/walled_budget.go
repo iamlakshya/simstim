@@ -13,6 +13,7 @@ type walledSettings struct {
 	minAge       string
 	modelBudget  int64
 	uploadBudget string
+	idleStop     string
 }
 
 func checkWalledSettings(a NewArgs) (walledSettings, error) {
@@ -34,11 +35,20 @@ func checkWalledSettings(a NewArgs) (walledSettings, error) {
 	if err != nil {
 		return walledSettings{}, UserError("upload_budget_invalid", api.UploadBudgetMessage(a.UploadBudget), api.UploadBudgetHint)
 	}
+	idleDur, err := ParseIdleStop(a.IdleStop)
+	if err != nil {
+		return walledSettings{}, UserError("bad_idle_stop", err.Error(), "Set [sandbox] idle_stop to a duration of 1m or more (such as 30m or 2h), or never.")
+	}
+	canonIdle := ""
+	if idleDur > 0 {
+		canonIdle = strings.TrimSpace(a.IdleStop)
+	}
 	return walledSettings{
 		pkgLevel:     pkgLevel,
 		minAge:       minAge,
 		modelBudget:  a.ModelBudget,
 		uploadBudget: canonUpload,
+		idleStop:     canonIdle,
 	}, nil
 }
 

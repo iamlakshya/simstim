@@ -284,7 +284,7 @@ func startSession(m *Manifest, secrets map[string]api.Secret) (*SessionInfo, err
 		_ = deleteSession(id, nil, &DeleteResult{})
 		return nil, secretsFailed(err)
 	}
-	if mm := waitStarted(id, 5*time.Second); mm != nil {
+	if mm := waitStarted(id, waitStartTimeout(m)); mm != nil {
 		if mm.Status.State == StateErrored && mm.Run.AgentPID == 0 {
 			// The holder answered on its socket, as it does before the agent
 			// starts, and then could not start the agent.
@@ -492,8 +492,7 @@ func deleteSession(id string, expectedName *string, res *DeleteResult) error {
 		return fmt.Errorf("remove the files of session %s: %w", id, err)
 	}
 	if m != nil && m.SandboxOf == "" && isWalled(m) {
-		_ = os.RemoveAll(paths.GuestRuntimeDir(id))
-		_ = os.RemoveAll(paths.PortDir(id))
+		cleanWalledRuntimeFiles(id)
 	}
 	res.Deleted = true
 	return nil

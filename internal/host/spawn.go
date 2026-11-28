@@ -274,7 +274,7 @@ func stopSandbox(requestedID string, m *Manifest) (*StopResult, error) {
 		return &StopResult{Session: reqInfo, AlreadyStopped: true, Sessions: all}, nil
 	}
 
-	stopHolder(primaryID, primary)
+	stopWalledHolder(primaryID, primary)
 	if reloaded, err := LoadManifest(primaryID); err == nil {
 		primary = reloaded
 	}
@@ -284,6 +284,7 @@ func stopSandbox(requestedID string, m *Manifest) (*StopResult, error) {
 		sm.Run.AgentPID = 0
 		sm.Run.Unit = ""
 		sm.Run.RespawnCount = 0
+		sm.Guest = nil
 		sm.DebugUntil = nil
 		sm.Status = Status{
 			State:  StateStopped,

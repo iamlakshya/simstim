@@ -25,6 +25,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
+	"github.com/iamlakshya/simstim/internal/wall/chv"
 )
 
 // Options tunes supervisor intervals, mostly for fast tests. Zero fields use
@@ -38,6 +39,7 @@ type Options struct {
 	DiskCheckInterval time.Duration                              // 1m (spec 17.1)
 	DiskFreePercent   int                                        // 5% (spec 17.1)
 	DiskUsageFunc     func(string) (avail, total int64, ok bool) // optional override for tests
+	IdleStop          time.Duration                              // optional override for tests; 0 reads m.Wall.IdleStop
 	AlertsPath        string                                     // override alerts config path (optional)
 	Egress            *egress.Client
 	EgressStarter     func(ctx context.Context, id string, args egress.StartArgs, sink egress.AuditSink) (*egress.Client, func(), error)
@@ -95,8 +97,11 @@ type Supervisor struct {
 	lastHB           time.Time
 	hbSilent         bool
 	lastDiskCheck    time.Time
+	idleBusyAt       time.Time
 	budgetAlerted    bool
 	budgetAlertLimit int64
+
+	attached atomic.Int32
 
 	saveMu        sync.Mutex
 	closed        bool
@@ -118,15 +123,10 @@ type Supervisor struct {
 	acceptDone chan struct{}
 }
 
-type stopRequest struct {
-	reason string
-	system bool
-}
-
 // Run supervises session id using the wall driver recorded in its manifest
-// ("process" via bubblewrap, "gvisor" via upstream runsc, or "plain" for the
-// test driver). It returns when the sandbox has ended and the session is
-// stopped, ended or killed.
+// ("chv" via Cloud Hypervisor, "process" via bubblewrap, "gvisor" via upstream
+// runsc, or "plain" for the test driver). It returns when the sandbox has ended
+// and the session is stopped, ended or killed.
 func Run(id string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -138,6 +138,8 @@ func Run(id string) error {
 	}
 	if m.Wall != nil {
 		switch m.Wall.Driver {
+		case chv.DriverName:
+			return runMicroVM(id, exe, m)
 		case "process":
 			sb := NewProcessSandbox(id, exe, m)
 			return RunWith(id, sb, Options{EgressExe: exe})
@@ -249,10 +251,10 @@ func RunWith(id string, sb Sandbox, opt Options) error {
 
 	select {
 	case sr := <-s.stopCh:
-		s.finishStop(sr.reason, sr.system)
+		s.finishStopReq(sr)
 	case sigVal := <-sig:
 		s.log.Info("stopping on signal", "signal", sigVal.String())
-		s.finishStop("stopped with the host", true)
+		s.finishStopReq(stopRequest{kind: stopKindHostStop, reason: "stopped with the host", system: true})
 	case ex := <-sbExit:
 		s.finishSandboxExit(ex)
 	case <-s.link.Done():
@@ -288,7 +290,11 @@ func (s *Supervisor) closeSocket() {
 }
 
 func (s *Supervisor) bootSandbox(secretEnv, notes []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	bootTimeout := 15 * time.Second
+	if s.m != nil && s.m.Wall != nil && s.m.Wall.Driver == chv.DriverName {
+		bootTimeout = chv.DefaultBootTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), bootTimeout)
 	defer cancel()
 
 	// Initialise unit memory tracking and hold early guest ctl events before

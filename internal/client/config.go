@@ -116,9 +116,14 @@ type Settings struct {
 		// Memory caps the memory of each new session, such as "4G" or "auto".
 		// `new --memory` overrides it.
 		Memory string `toml:"memory"`
-		// DiskMax sets the soft disk cap for a walled session's folder, such as
-		// "10G". The supervisor stops a session past this cap with disk_full.
+		// DiskMax sets the session disk cap for a walled session, such as "10G":
+		// a hard cap on microvm sandboxes, and a soft folder cap on process walls.
+		// The supervisor also stops a session when host free space falls below 5%.
 		DiskMax string `toml:"disk_max"`
+		// IdleStop stops a walled session after this long with no client attached
+		// and no agent work (for example "30m" or "2h"), or "never". Off by
+		// default until microvm latency targets are verified.
+		IdleStop string `toml:"idle_stop"`
 		// Env sets non-secret environment variables for each new session,
 		// replacing guest init defaults for those names. A name listed in
 		// [secrets] is refused with env_is_secret. `new --env` and `--env-file`
