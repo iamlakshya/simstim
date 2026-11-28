@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/supervisor"
 	"github.com/iamlakshya/simstim/internal/version"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 const usage = `%[1]s keeps agent sessions alive on this host. The client runs it over SSH.
@@ -30,6 +32,7 @@ Usage:
   %[1]s stop <id> [--json]  stop a session and keep its state for resume or restore
   %[1]s rm <id>             stop a session and remove it
   %[1]s doctor [--json]     check this host
+  %[1]s wall probe [--json] probe which sandbox walls this host supports
   %[1]s keytest             print every key the terminal sends
   %[1]s restore [--all]     start again sessions a restart (or, with --all, a stop or crash) stopped
   %[1]s idle setup <30m|never>   power this VM off when idle (a user timer runs "idle check")
@@ -57,6 +60,7 @@ var commands = map[string]func(args []string) error{
 	"stop":      runStop,
 	"rm":        runRm,
 	"doctor":    runDoctor,
+	"wall":      runWall,
 	"hook":      runHook,
 	"restore":   runRestore,
 	"prune":     runPrune,
@@ -269,6 +273,50 @@ func runDoctor(args []string) error {
 	}
 	sort.Strings(found)
 	fmt.Printf("  agents: %s\n", strings.Join(found, ", "))
+	if len(d.Walls) > 0 {
+		fmt.Println("  sandboxes:")
+		for _, w := range d.Walls {
+			mark := "✓"
+			detail := "ready"
+			if w.Version != "" {
+				detail += " (" + w.Version + ")"
+			}
+			if !w.OK {
+				mark = "✕"
+				detail = w.Reason
+			}
+			fmt.Printf("    %s %-10s (%s) %s\n", mark, w.Driver, w.Level, detail)
+			if !w.OK && w.Fix != "" {
+				fmt.Printf("      Try: %s\n", w.Fix)
+			}
+		}
+	}
+	return nil
+}
+
+func runWall(args []string) error {
+	if len(args) == 0 || args[0] != "probe" {
+		return fmt.Errorf("usage: %s wall probe [--json]", brand.HostBinary)
+	}
+	probes := wall.ProbeAll(context.Background())
+	if hasFlag(args[1:], "--json") {
+		return printJSON(wall.ToAPIProbes(probes))
+	}
+	for _, p := range probes {
+		mark := "✓"
+		detail := "ready"
+		if p.Version != "" {
+			detail += " (" + p.Version + ")"
+		}
+		if !p.OK {
+			mark = "✕"
+			detail = p.Reason
+		}
+		fmt.Printf("  %s %-10s %-8s %s\n", mark, p.Driver, p.Level, detail)
+		if !p.OK && p.Fix != "" {
+			fmt.Printf("    Try: %s\n", p.Fix)
+		}
+	}
 	return nil
 }
 

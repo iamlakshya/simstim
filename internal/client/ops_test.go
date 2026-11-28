@@ -1,7 +1,10 @@
 package client
 
 import (
+	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -25,5 +28,14 @@ func TestNeedMakeFolder(t *testing.T) {
 	c.Features = []string{"mkdir"}
 	if err := c.needMakeFolder(NewArgs{MakeFolder: true}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCapProbeRequiresSandboxFeature(t *testing.T) {
+	c := &Conn{Host: Host{Name: "old"}}
+	_, err := c.CapProbe(context.Background(), "")
+	var ue *UserError
+	if !errors.As(err, &ue) || ue.Code != "wall_helper_old" || !strings.Contains(ue.Msg, "too old for sandboxes") || ue.Hint == "" {
+		t.Fatalf("CapProbe without sandbox feature = %v, want wall_helper_old with hint", err)
 	}
 }

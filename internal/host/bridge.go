@@ -252,7 +252,7 @@ func (b *bridge) handle(req proto.Request) {
 		v, err := alertsRequest(req.Op, req.Args)
 		b.reply(req.ID, v, err)
 	default:
-		if !b.handleMore(req) && !b.handleDebug(req) && !b.handleImages(req) {
+		if !b.handleMore(req) && !b.handleSandbox(req) && !b.handleDebug(req) && !b.handleImages(req) {
 			b.reply(req.ID, nil, UserError("unknown_op", "unknown request "+req.Op, "Update the host helper."))
 		}
 	}

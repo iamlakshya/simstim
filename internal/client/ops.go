@@ -109,6 +109,25 @@ func (c *Conn) Doctor(ctx context.Context) (HostInfo, error) {
 	return d, err
 }
 
+// CapProbe runs the host's read-only sandbox probe (isolation spec 14.3).
+// A helper without the "sandbox" feature fails with wall_helper_old.
+func (c *Conn) CapProbe(ctx context.Context, releaseURL string) (api.CapProbe, error) {
+	if !c.HasFeature("sandbox") {
+		return api.CapProbe{}, &UserError{
+			Msg:  "the helper on " + c.Host.Name + " is too old for sandboxes",
+			Hint: brand.Name + " host add " + c.Host.Name + " (updates the helper)",
+			Code: "wall_helper_old",
+		}
+	}
+	var args any
+	if releaseURL != "" {
+		args = map[string]string{"release_url": releaseURL}
+	}
+	var out api.CapProbe
+	err := c.Call(ctx, "sandbox.probe", args, &out)
+	return out, err
+}
+
 // Peek returns the newest output of a session, for a preview.
 func (c *Conn) Peek(ctx context.Context, id string, n int) (data []byte, cols, rows int, err error) {
 	var r struct {

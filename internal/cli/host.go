@@ -16,6 +16,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/onboard"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 func hostCmd() *cobra.Command {
@@ -25,7 +26,7 @@ func hostCmd() *cobra.Command {
 		Example: "  " + brand.Name + " host add my-vps\n" +
 			"  " + brand.Name + " host ls",
 	}
-	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostRmCmd(), hostRekeyCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
+	cmd.AddCommand(hostAddCmd(), hostLsCmd(), hostShowCmd(), hostSetCmd(), hostRmCmd(), hostRekeyCmd(), hostTestCmd(), hostDoctorCmd(), hostRestoreCmd(), hostAlertsCmd(),
 		hostCreateCmd(), hostDestroyCmd(), hostIdleCmd(),
 		hostProviderCmd("start", "Start the host through its provider or provider script", ""),
 		hostProviderCmd("stop", "Stop the host through its provider or provider script",
@@ -35,7 +36,7 @@ func hostCmd() *cobra.Command {
 }
 
 func hostAddCmd() *cobra.Command {
-	var sshConfig, label, providerScript, hostKey string
+	var sshConfig, label, providerScript, hostKey, floor string
 	var yes, wake bool
 	cmd := &cobra.Command{
 		Use:   "add <name> [<ssh-target>]",
@@ -49,7 +50,14 @@ func hostAddCmd() *cobra.Command {
 			"  " + brand.Name + " host add my-vps dev@203.0.113.10 --host-key SHA256:…",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig}
+			h := client.Host{Name: args[0], SSH: args[0], SSHConfig: sshConfig, WallFloor: floor}
+			if floor != "" {
+				lvl, err := wall.ParseLevel(floor)
+				if err != nil {
+					return &client.UserError{Msg: fmt.Sprintf("--floor: %v", err), Hint: "Pass none, process, gvisor or microvm.", Code: "bad_value", Kind: client.KindUsage}
+				}
+				h.WallFloor = lvl.String()
+			}
 			if providerScript != "" {
 				h.Provider = &client.Provider{Script: providerScript, WakeOnAttach: wake}
 			}
@@ -75,6 +83,7 @@ func hostAddCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "install the helper without asking, pin an unknown host key on first use, and offer no agents to install")
 	cmd.Flags().StringVar(&providerScript, "provider-script", "", "a script that starts and stops the host (see examples/providers)")
 	cmd.Flags().BoolVar(&wake, "wake", false, "start the host through its provider script when it does not answer")
+	cmd.Flags().StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
 	return cmd
 }
 
@@ -264,6 +273,9 @@ func connectHostWithPin(ctx context.Context, w io.Writer, pr *prompter, h client
 		return nil, err
 	}
 	step("✓ %s, %d CPUs, %.1f GiB, %.1f GiB of it for sessions", client.CleanLine(d.Distro), d.CPUs, float64(d.MemTotal)/(1<<30), float64(d.MemoryMax)/(1<<30))
+	if err := pinHostFloor(dctx, w, conn, &h); err != nil {
+		return nil, err
+	}
 	checks, _ := conn.AgentChecks(dctx)
 	// A cancel that came during the checks saves nothing (SaveHost).
 	if err := client.SaveHost(ctx, h); err != nil {

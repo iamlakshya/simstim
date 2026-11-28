@@ -12,7 +12,7 @@ simstim host doctor my-server
 - `doctor` checks this computer: `ssh`, the config files, and the commands of your [secrets](secrets.md).
 - `doctor terminal` asks your terminal what it supports: the keyboard protocol, colours, synchronized output.
 - `host test` says whether the host answers, and how fast.
-- `host doctor` checks the host: the helper, systemd and linger, the session sockets, the agents, and memory. It warns when the host has less memory than an agent's docs ask for ([memory](memory.md#check-that-the-host-fits-the-agent)). For a Lima VM, it also checks whether the VM can reach your computer's loopback services ([create a host](create-a-host.md#your-macs-loopback-services)). When Lima's `override.yaml` keeps that path open, its Try line names the file. When the VM's settings changed while it ran, the Try line asks you to stop and start the VM.
+- `host doctor` checks the host: the helper, systemd and linger, the session sockets, sandboxes (bubblewrap, unprivileged user namespaces, Landlock, seccomp, Ubuntu's AppArmor restriction and `/dev/kvm`), the agents, and memory. It warns when the host has less memory than an agent's docs ask for ([memory](memory.md#check-that-the-host-fits-the-agent)). For a Lima VM, it also checks whether the VM can reach your computer's loopback services ([create a host](create-a-host.md#your-macs-loopback-services)). When Lima's `override.yaml` keeps that path open, its Try line names the file. When the VM's settings changed while it ran, the Try line asks you to stop and start the VM. With `--json`, the full sandbox probe appears under `sandbox`.
 
 ## Let the doctor fix it
 
@@ -50,6 +50,8 @@ The doctor never uses sudo. When a fix needs root, for example linger on some ho
 | An agent is "not installed" | `simstim agents install <agent> --host my-server` runs its installer in a session ([install agents](install-agents.md)). An agent installed by hand must be on your `PATH` in a login shell. |
 | An agent asks you to log in | Run its own login in a session; `host doctor` prints the command. |
 | Sessions stop when you log out | Linger is off: `host doctor` says so, and `host doctor --fix` turns it on. |
+| `bubblewrap (bwrap) is not installed` in `host doctor` | Install the distribution's `bubblewrap` package (for example `sudo apt install bubblewrap` on Debian or Ubuntu), then run `host doctor` again ([sandboxes](sandboxes.md#install-bubblewrap)). |
+| `user namespaces are restricted by AppArmor` in `host doctor` | On Ubuntu 24.04, install `apparmor-profiles` and load `/usr/share/apparmor/extra-profiles/bwrap-userns-restrict` into `/etc/apparmor.d/` with `apparmor_parser -r` ([sandboxes](sandboxes.md#install-bubblewrap)). |
 | The screen looks wrong after attaching | Detach and attach again. If it stays wrong, open an issue with your terminal's name and version. |
 | A session `ended (out of memory)` | The session's memory cap stopped the agent. Resume it in the same session: `simstim resume my-server/app`, or `u` in the launcher. Claude Code and Codex pick up the same conversation. `--memory-max 4G` gives it a bigger cap ([memory](memory.md#when-the-cap-stops-an-agent)). |
 | A session needs you: "close to its memory cap (2.7 of 2.9 GiB)" | The session's memory cap can soon stop a process, often the agent. Save your work first, then see [when a session comes close to its cap](memory.md#when-a-session-comes-close-to-its-cap). |

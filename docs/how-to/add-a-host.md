@@ -74,14 +74,16 @@ simstim host add dev-vm dev-vm --ssh-config ~/src/infra/ssh/config --yes
 2. Checks that the host answers, and finds its system and CPU.
 3. Asks before it installs the helper, unless you pass `--yes`, then uploads it into `~/.local/share/simstim/bin/` and checks its SHA-256. In a script, or with `--no-input`, it cannot ask, so it fails with exit code 4 unless you pass `--yes` ([scripts](scripting.md)).
 4. Turns on systemd's linger for your user, so sessions keep running when you log out, and installs the unit that restores sessions after a reboot.
-5. Saves the host in `hosts.toml` ([configuration](../reference/config.md)).
-6. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
+5. Runs the sandbox probe and prints a **Sandboxes** block showing the kernel, systemd, cgroup v2, `/dev/kvm`, `bubblewrap`, Landlock, seccomp and user namespaces. It pins the host's wall floor (`wall_floor` in `hosts.toml`) to the strongest level that probes OK, unless you pass `--floor` with a lower level ([sandboxes](sandboxes.md)).
+6. Saves the host in `hosts.toml` ([configuration](../reference/config.md)).
+7. Lists the agents it finds. At a terminal, when a first-class or supported agent is missing, it shows the agent checklist: type the numbers of the agents to install ([install agents](install-agents.md)). `--yes` skips the checklist.
 
 ## Check a host
 
 ```sh
 simstim host test my-server
+simstim host show my-server
 simstim host doctor my-server
 ```
 
-`host doctor` lists what the host has and what is missing: systemd, linger, the agents and the helper. `host doctor --fix` offers to fix what it can ([troubleshoot](troubleshoot.md#let-the-doctor-fix-it)).
+`host show` prints the host's saved settings, sandbox floor and each wall driver's probe. `host doctor` lists what the host has and what is missing: systemd, linger, sandboxes, the agents and the helper. `host doctor --fix` offers to fix what it can ([troubleshoot](troubleshoot.md#let-the-doctor-fix-it)).

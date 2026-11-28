@@ -15,6 +15,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 	"github.com/iamlakshya/simstim/internal/paths"
 	"github.com/iamlakshya/simstim/internal/version"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // Check is one line of the host doctor.
@@ -88,6 +89,7 @@ func Doctor() HostInfo {
 		Fix:    "infocmp -x xterm-ghostty | ssh <host> tic -x -"})
 	info.Checks = append(info.Checks, Check{Name: "runtime folder", OK: true, Detail: paths.RuntimeDir()})
 	info.Checks = append(info.Checks, IdleDoctor()...)
+	info.Walls = wall.ToAPIProbes(wall.ProbeAll(context.Background()))
 	return info
 }
 

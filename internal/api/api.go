@@ -189,6 +189,11 @@ type HostInfo struct {
 	// AgentChecks come from a request of their own ("agents.check"), which
 	// is slower: the client adds them for `host doctor`.
 	AgentChecks []AgentCheck `json:"agent_checks,omitempty"`
+	// Walls holds each wall driver's probe on this host (isolation spec 10.6).
+	Walls []WallProbe `json:"walls,omitempty"`
+	// Sandbox holds the full sandbox probe, added by `host doctor --json`
+	// (isolation spec 14.3).
+	Sandbox *CapProbe `json:"sandbox,omitempty"`
 }
 
 // SetupArgs asks the host to prepare itself.

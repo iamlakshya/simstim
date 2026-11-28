@@ -24,6 +24,7 @@ simstim host add my-vps dev@203.0.113.10 --host-key SHA256:…
 
 | Flag | What it does |
 | --- | --- |
+| `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |
 | `--host-key <string>` | pin the host key with this SHA256 fingerprint (SHA256:…) |
 | `--label <string>` | labels, for example provider=gcp,region=eu |
 | `--provider-script <string>` | a script that starts and stops the host (see examples/providers) |

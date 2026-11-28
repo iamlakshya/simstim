@@ -424,7 +424,7 @@ Each driver's probe runs inside the sandbox probe (`sandbox.probe`, 14.3): at `h
 | Driver | Probe checks |
 | --- | --- |
 | `none` (P6.3) | Always passes on a host that runs sessions today. It builds no wall (21.6). |
-| `process` | Linux 5.13 or later. A child makes a user and a mount namespace, writes its uid map and mounts a tmpfs. It does this directly, or through the namespace launcher of the root step (14.4.2). This test decides, not a sysctl: on Ubuntu 23.10 or later, `unshare(CLONE_NEWUSER)` succeeds, but the namespace has no capability ([build facts](../research/build-facts.md#4-linux-walls)). `kernel.apparmor_restrict_unprivileged_userns` is a fact only. The Landlock ABI from `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` is 1 or more. seccomp filters load. |
+| `process` | Linux 5.13 or later. `bwrap` (bubblewrap, [decision 0053](decisions/0053-rebuild-with-open-source-parts.md)) is on `PATH`, and a smoke run of `bwrap` creating user, mount, PID, network, IPC, UTS and cgroup namespaces, mapping uid and gid 1000, and mounting `/proc` and a `tmpfs` exits 0. This test decides, not a sysctl: on Ubuntu 24.04 and later, `unshare(CLONE_NEWUSER)` succeeds, but the namespace has no capability unless Ubuntu's `bwrap-userns-restrict` `AppArmor` profile is loaded ([build facts](../research/build-facts.md#4-linux-walls)). `kernel.apparmor_restrict_unprivileged_userns` is recorded as a fact. The Landlock ABI from `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` is 1 or more. seccomp filters are available (`SECCOMP_GET_ACTION_AVAIL`). |
 | `chv` | `/dev/kvm` opens read and write, and `KVM_GET_API_VERSION` answers 12. The host kernel is 6.8 or later ([Cloud Hypervisor README](https://github.com/cloud-hypervisor/cloud-hypervisor/blob/main/README.md)). The pinned `cloud-hypervisor` binary is in the artefact store with its digest. The user is in the group that owns `/dev/kvm`, or has an ACL entry on it (14.4.2). `systemd-detect-virt` is recorded as a fact. |
 | `gvisor` (P6) | Linux 5.6 or later. The pinned `runsc` is present. The namespaces of 21.4 start, directly or through the namespace launcher. A smoke run of `runsc` with the flags of 21.4 succeeds. |
 | `firecracker` (P6) | `/dev/kvm` as above, and a host kernel of 5.10, 6.1 or 6.18, the ones that Firecracker tests ([kernel policy](https://github.com/firecracker-microvm/firecracker/blob/main/docs/kernel-policy.md)). The pinned Firecracker is 1.17.0 or later ([AWS](https://aws.amazon.com/security/security-bulletins/2026-169-aws/)). The driver uses the MMIO transport only, and no jailer (21.5). |
@@ -2147,7 +2147,7 @@ New event kinds in `internal/alerts`, added to `Kinds` and to `DefaultEvents`:
 | Linux without KVM: Hetzner Cloud ([FAQ](https://docs.hetzner.com/cloud/servers/faq/)), most VPS, EC2 types without Nitro Enclaves, GCE Arm, E2 and AMD types other than N4D, Azure Arm sizes | process, gvisor from P6 | process, then gvisor from P6.1 ([question 2](#15-open-questions)) | No nested virtualisation. No root step can give these hosts microvm. | Move the host to a type with it |
 | EC2 with Nitro Enclaves, launched with `--enclave-options Enabled=true`: most M, C and R families from the 5th generation on, Intel, AMD and Graviton, except their smallest and most metal sizes ([EC2](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nitro-sandboxes.html)) | without root: process (gvisor from P6). After the root step: microvm (`nitro`, from P6.4) | the probe's best at that time | Firecracker 1.18 drives Nitro Sandboxes through `/dev/nitro_enclaves`, with no `/dev/kvm`. The parent needs Amazon Linux 2023 `kernel6.18`. Memory is donated whole, with no balloon ([question 53](#15-open-questions)). | nested microvm where the type has it, else process |
 | Cloud VM with nested virtualisation: EC2 M7i, C7i, R7i, M8i, C8i, R8i, X8i, I7i and variants, all Intel ([AWS](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/amazon-ec2-nested-virtualization.html)). GCE Intel types except E2 and memory-optimised, and AMD N4D ([GCE](https://docs.cloud.google.com/compute/docs/instances/nested-virtualization/overview)). Azure x86 sizes such as Dsv6. | microvm | microvm | Slower: Google warns of 10 % or more for CPU-bound work. P3.8 measures it. | process |
-| Ubuntu 23.10 or later, any of the above | as above | as above | Unprivileged user namespaces need an `AppArmor` profile ([Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces)). The root step's `userns-apparmor` installs it for the namespace launcher, which starts the guest init with no capabilities (14.4.2). Without it, process and gvisor walls are refused, and jails run without namespaces (5.6). Ubuntu 24.04 sets `apparmor_restrict_unprivileged_userns=1`. 25.04 and later also set `apparmor_restrict_unprivileged_unconfined=1` ([build facts](../research/build-facts.md#4-linux-walls)). | microvm, which needs no user namespace for the guest |
+| Ubuntu 23.10 or later, any of the above | as above | as above | Unprivileged user namespaces need an `AppArmor` profile ([Ubuntu](https://ubuntu.com/blog/ubuntu-23-10-restricted-unprivileged-user-namespaces)). Ubuntu 25.04 and later ship and load `bwrap-userns-restrict` by default, so installing `bubblewrap` is enough for process walls. On Ubuntu 24.04, install `apparmor-profiles` and load `/usr/share/apparmor/extra-profiles/bwrap-userns-restrict` into `/etc/apparmor.d/` ([decision 0053](decisions/0053-rebuild-with-open-source-parts.md)). Without it, process and gvisor walls fail the probe, and jails run without namespaces (5.6). Ubuntu 24.04 sets `apparmor_restrict_unprivileged_userns=1`. 25.04 and later also set `apparmor_restrict_unprivileged_unconfined=1` ([build facts](../research/build-facts.md#4-linux-walls)). | microvm, which needs no user namespace for the guest |
 | A host where the user has no sudo | as the rows above say for "without root" | the probe's best | The machine's owner runs the printed root step (14.2.2). | |
 | Mac, Apple M3 or later, macOS 15 or later | microvm, inside a Lima VM | microvm | `host create lima` turns on `nestedVirtualization` where Lima's own check passes (19.4). Lima supports it with `vmType: vz` on M3 or later and macOS 15 or later ([Lima template](https://raw.githubusercontent.com/lima-vm/lima/master/templates/default.yaml)). | process |
 | Mac, Apple M1 or M2 | process, inside a Lima VM | process | No nested virtualisation. gvisor from P6. | none |
@@ -2481,8 +2481,8 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 | Inside a VM | `systemd-detect-virt`, when present | `virt` |
 | Nitro | `/dev/nitro_enclaves` exists, its mode, owner and ACL, and whether it opens. `/sys/class/misc/nitro_enclaves/`: the CPU pool, the memory pool and `pcie_slots`. The instance's vCPU count. | `nitro.present`, `nitro.usable`, `nitro.acl_user`, `nitro.pools` |
 | Landlock | `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` | `landlock_abi` |
-| seccomp | A `Seccomp:` line in `/proc/self/status` | `seccomp` |
-| User namespaces | `/proc/sys/user/max_user_namespaces` > 0, and the test of the `process` probe (5.1). In that test, a child makes a user and a mount namespace and mounts a tmpfs, directly or through the namespace launcher. `kernel.apparmor_restrict_unprivileged_userns` is read as a fact. When root owns `/usr/local/libexec/simstim/userns`, the helper compares its SHA-256 with that of the launcher in its own folder. | `userns`, `apparmor_userns`, `userns_copy_current` |
+| seccomp | A `Seccomp:` line in `/proc/self/status` and `seccomp(SECCOMP_GET_ACTION_AVAIL, 0, &SECCOMP_RET_ERRNO)` | `seccomp` |
+| bubblewrap and user namespaces | `exec.LookPath("bwrap")`, `bwrap --version`, `/proc/sys/user/max_user_namespaces` > 0, and the smoke run of the `process` probe (5.1). When `bwrap` is absent, a direct `unshare -Urm` tmpfs mount tests unprivileged user namespaces so the doctor can report both facts. `kernel.apparmor_restrict_unprivileged_userns` is read as a fact, and `bwrap_apparmor` records `"allowed"`, `"blocked"` or `"missing"`. | `bwrap`, `bwrap_path`, `bwrap_version`, `bwrap_apparmor`, `userns`, `apparmor_userns` |
 | `io_uring` | `/proc/sys/kernel/io_uring_disabled` | `io_uring_disabled` |
 | vsock modules | The block list of the `vsock-modules` step exists | `vsock_blocked` |
 | Subordinate IDs | A range for the user in `/etc/subuid` and `/etc/subgid`, and `newuidmap` and `newgidmap` on `PATH` (package `uidmap`) | `subuid`, `has_newuidmap` |
@@ -2502,10 +2502,10 @@ Enter hands the terminal to `ssh -t … sudo` with Bubble Tea's `ExecProcess`, a
 | --- | --- |
 | `microvm` | `kvm.usable` or `nitro.usable`, and the runtime has a VMM for this kernel and architecture |
 | `gvisor` | Not `microvm`, `userns`, and the runtime has `runsc` (P6) |
-| `process` | Neither, with `userns`, `landlock_abi` 1 or more and `seccomp` |
+| `process` | Neither, with `bwrap`, `userns`, `landlock_abi` 1 or more and `seccomp` |
 | `none` | Not even that. Sandboxes are off on this host. |
 
-The level after the root step is `microvm` when `kvm.present` or `nitro.present`, and the runtime has a VMM for this kernel and architecture. Otherwise it is the stronger of `gvisor` and `process` whose driver only `apparmor_userns` stops (21.4), and the level now in every other case.
+The level after the root step is `microvm` when `kvm.present` or `nitro.present`, and the runtime has a VMM for this kernel and architecture. Otherwise it is the stronger of `gvisor` and `process` whose driver only a missing `bwrap` package or `apparmor_userns` stops (5.1, 21.4), and the level now in every other case.
 
 **The root needs.** The client, not the helper, turns the probe into root steps:
 
@@ -3217,6 +3217,10 @@ type CapProbe struct {
     CPUVirt                  string      `json:"cpu_virt"`
     Virt                     string      `json:"virt"`
     Nitro                    *Nitro      `json:"nitro,omitempty"` // present, usable, acl_user and pools (14.3)
+    Bwrap                    bool        `json:"bwrap"`
+    BwrapPath                string      `json:"bwrap_path,omitempty"`
+    BwrapVersion             string      `json:"bwrap_version,omitempty"`
+    BwrapAppArmor            string      `json:"bwrap_apparmor,omitempty"`
     LandlockABI              int         `json:"landlock_abi"`
     Seccomp                  bool        `json:"seccomp"`
     UserNS                   bool        `json:"userns"`

@@ -308,3 +308,28 @@ func TestBridgeMissingFolder(t *testing.T) {
 		t.Fatalf("new in a file = %v", err)
 	}
 }
+
+func TestBridgeSandboxProbe(t *testing.T) {
+	h := hosttest.New(t)
+	c := dial(t, h)
+	if !c.HasFeature("sandbox") {
+		t.Fatalf("features %q, want sandbox", c.Features)
+	}
+	ctx := context.Background()
+	p, err := c.CapProbe(ctx, "")
+	if err != nil {
+		t.Fatalf("CapProbe: %v", err)
+	}
+	if p.OS == "" || p.Arch == "" || len(p.Walls) == 0 {
+		t.Errorf("CapProbe = %+v", p)
+	}
+	if _, err := os.Stat(paths.WallProbes()); err != nil {
+		t.Errorf("walls.json missing: %v", err)
+	}
+	if entries, err := os.ReadDir(paths.ArtefactsIncomingDir()); err == nil && len(entries) != 0 {
+		t.Errorf("artefacts/incoming leftover files: %+v", entries)
+	}
+	if err := c.Call(ctx, "sandbox.probe", "not-an-object", nil); err == nil {
+		t.Error("bad sandbox.probe request succeeded")
+	}
+}

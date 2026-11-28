@@ -41,6 +41,9 @@ type Host struct {
 	// Secrets lists secrets from config.toml that every new session on this
 	// host gets, for example ["ANTHROPIC_API_KEY"]. `new --secret` adds more.
 	Secrets []string `toml:"secrets,omitempty"`
+	// WallFloor is the weakest sandbox level that new sessions on this host
+	// may get: "none", "process", "gvisor" or "microvm".
+	WallFloor string `toml:"wall_floor,omitempty" json:"-"`
 }
 
 // Settings are the user's preferences, from config.toml. The comments on its

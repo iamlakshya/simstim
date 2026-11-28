@@ -47,6 +47,10 @@ var concepts = []Concept{
 	{"secret", "A value from a command on this computer, such as a token"},
 	{"alert", "A message from a host when a session needs you or fails"},
 	{"provider script", "A script of yours that starts, stops and checks a host"},
+	{"sandbox", "An isolated environment on a host that contains an agent session"},
+	{"wall", "The isolation boundary around a sandbox, such as bubblewrap"},
+	{"level", "A wall's strength: none, process, gvisor or microvm"},
+	{"floor", "The weakest wall level that a host allows for new sessions"},
 }
 
 // Concepts returns the words of help concepts, for the reference docs.

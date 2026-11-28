@@ -19,6 +19,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/provider/docker"
 	"github.com/iamlakshya/simstim/internal/provider/e2b"
 	"github.com/iamlakshya/simstim/internal/provider/lima"
+	"github.com/iamlakshya/simstim/internal/wall"
 )
 
 // providers are the built-in providers of `host create`.
@@ -48,6 +49,7 @@ func powersOffWhenIdle(p string) bool { return onboard.PowersOffWhenIdle(p) }
 
 func hostCreateCmd() *cobra.Command {
 	var req provider.Request
+	var floor string
 	cmd := &cobra.Command{
 		Use:   "create <provider> [<name>]",
 		Short: "Make a host with lima, docker or e2b, and connect it",
@@ -62,12 +64,19 @@ func hostCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if floor != "" {
+				lvl, err := wall.ParseLevel(floor)
+				if err != nil {
+					return &client.UserError{Msg: fmt.Sprintf("--floor: %v", err), Hint: "Pass none, process, gvisor or microvm.", Code: "bad_value", Kind: client.KindUsage}
+				}
+				floor = lvl.String()
+			}
 			req.Name = p.Name()
 			if len(args) == 2 {
 				req.Name = args[1]
 			}
 			req.Out = os.Stderr
-			return createHost(cmd.Context(), p, req)
+			return createHostWithFloor(cmd.Context(), p, req, floor)
 		},
 	}
 	f := cmd.Flags()
@@ -78,10 +87,15 @@ func hostCreateCmd() *cobra.Command {
 	f.StringVar(&req.Template, "template", e2b.DefaultTemplate, "e2b: the template, which sets CPUs and memory")
 	f.StringVar(&req.TokenCommand, "token-command", "", "e2b: a command that prints the API key, if E2B_API_KEY is not set and the E2B CLI is not logged in")
 	f.StringVar(&req.IdleStop, "idle-stop", "", "stop after this long with no client and no working session, or never (lima: 30m, e2b: 15m)")
+	f.StringVar(&floor, "floor", "", "weakest sandbox level to pin: none, process, gvisor or microvm")
 	return cmd
 }
 
 func createHost(ctx context.Context, p provider.Provider, req provider.Request) error {
+	return createHostWithFloor(ctx, p, req, "")
+}
+
+func createHostWithFloor(ctx context.Context, p provider.Provider, req provider.Request, floor string) error {
 	if err := onboard.CheckCreate(p, req); err != nil {
 		return err
 	}
@@ -91,6 +105,7 @@ func createHost(ctx context.Context, p provider.Provider, req provider.Request) 
 	if err != nil {
 		return err
 	}
+	h.WallFloor = floor
 	fmt.Fprintf(os.Stderr, "  ✓ created %s %s in %s\n\n", h.Machine.Provider, h.Machine.ID, time.Since(start).Round(time.Second))
 	// Making the host counts as the yes to its helper, so nothing is asked.
 	if err := addHost(ctx, &prompter{ctx: ctx, out: os.Stderr}, h, true); err != nil {

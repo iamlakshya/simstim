@@ -57,6 +57,8 @@ simstim attach my-vps/auth-fix      # go back to a session
 | [`host rekey`](host_rekey.md) | Replace a host's pinned SSH host key |
 | [`host restore`](host_restore.md) | Start again the sessions that a host restart stopped |
 | [`host rm`](host_rm.md) | Forget a host (its sessions keep running) |
+| [`host set`](host_set.md) | Change named settings of a host |
+| [`host show`](host_show.md) | Show a host's settings, sandbox levels and status |
 | [`host start`](host_start.md) | Start the host through its provider or provider script |
 | [`host status`](host_status.md) | Ask the provider or provider script whether the host is running |
 | [`host stop`](host_stop.md) | Stop the host through its provider or provider script |

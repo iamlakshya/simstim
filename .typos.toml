@@ -34,3 +34,8 @@ artifacts = "artifacts"
 synchronized = "synchronized"  # the terminal's synchronized output mode
 dialog = "dialog"
 dialogs = "dialogs"
+AppArmor = "AppArmor"
+
+[default.extend-identifiers]
+AppArmor = "AppArmor"
+BwrapAppArmor = "BwrapAppArmor"

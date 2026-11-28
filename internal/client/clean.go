@@ -224,6 +224,42 @@ func cleanMap(m map[string]string, value func(string) string) map[string]string 
 	return out
 }
 
+// CleanWallProbes cleans wall driver probe results from a host, to draw.
+func CleanWallProbes(list []api.WallProbe) []api.WallProbe {
+	if list == nil {
+		return nil
+	}
+	out := make([]api.WallProbe, len(list))
+	for i, w := range list {
+		out[i] = api.WallProbe{
+			Driver:  CleanLine(w.Driver),
+			Level:   CleanLine(w.Level),
+			OK:      w.OK,
+			Reason:  CleanLine(w.Reason),
+			Fix:     CleanLine(w.Fix),
+			Version: CleanLine(w.Version),
+			Facts:   cleanMap(w.Facts, CleanLine),
+		}
+	}
+	return out
+}
+
+// CleanCapProbe cleans every string in a host's sandbox probe, to draw.
+func CleanCapProbe(p api.CapProbe) api.CapProbe {
+	p.OS, p.Arch, p.Kernel, p.Distro = CleanLine(p.OS), CleanLine(p.Arch), CleanLine(p.Kernel), CleanLine(p.Distro)
+	p.User = CleanLine(p.User)
+	p.Delegated = cleanLines(p.Delegated, CleanLine)
+	p.KVM.Mode, p.KVM.Group = CleanLine(p.KVM.Mode), CleanLine(p.KVM.Group)
+	p.CPUVirt, p.Virt = CleanLine(p.CPUVirt), CleanLine(p.Virt)
+	p.BwrapPath = CleanPath(p.BwrapPath)
+	p.BwrapVersion, p.BwrapAppArmor = CleanLine(p.BwrapVersion), CleanLine(p.BwrapAppArmor)
+	p.DiskFS = CleanLine(p.DiskFS)
+	p.RootSteps = cleanLines(p.RootSteps, CleanLine)
+	p.Runtimes = cleanLines(p.Runtimes, CleanLine)
+	p.Walls = CleanWallProbes(p.Walls)
+	return p
+}
+
 // CleanHostInfo cleans every string of a host's doctor report, to draw.
 func CleanHostInfo(i HostInfo) HostInfo {
 	i.Hostname, i.OS, i.Arch = CleanLine(i.Hostname), CleanLine(i.OS), CleanLine(i.Arch)
@@ -232,6 +268,11 @@ func CleanHostInfo(i HostInfo) HostInfo {
 	i.AgentVersions = cleanMap(i.AgentVersions, CleanLine)
 	i.Checks = CleanChecks(i.Checks)
 	i.AgentChecks = CleanAgentChecks(i.AgentChecks)
+	i.Walls = CleanWallProbes(i.Walls)
+	if i.Sandbox != nil {
+		clean := CleanCapProbe(*i.Sandbox)
+		i.Sandbox = &clean
+	}
 	return i
 }
 

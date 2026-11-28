@@ -26,6 +26,7 @@ simstim host create e2b cloud --template simstim
 | --- | --- |
 | `--cpus <int>` | lima: CPUs (default: `2`) |
 | `--disk <int>` | lima: disk in GiB (sparse: it grows as it fills) (default: `40`) |
+| `--floor <string>` | weakest sandbox level to pin: none, process, gvisor or microvm |
 | `--idle-stop <string>` | stop after this long with no client and no working session, or never (lima: 30m, e2b: 15m) |
 | `--image <string>` | docker: the image, which needs sh, bash and coreutils (default: `debian:stable-slim`) |
 | `--memory <int>` | lima: memory in GiB (default: `4`) |

@@ -112,6 +112,17 @@ func BinDir() string { return filepath.Join(DataDir(), "bin") }
 // ImagesDir holds converted session images and agents disks on a host.
 func ImagesDir() string { return filepath.Join(DataDir(), "images") }
 
+// ArtefactsDir holds host runtime files and temporary probe scratch files.
+func ArtefactsDir() string { return filepath.Join(DataDir(), "artefacts") }
+
+// ArtefactsIncomingDir holds incoming artefacts and the sandbox probe's
+// temporary reflink test files (isolation spec 14.3).
+func ArtefactsIncomingDir() string { return filepath.Join(ArtefactsDir(), "incoming") }
+
+// WallProbes is the cached wall driver probe results file on a host
+// (isolation spec 5.1).
+func WallProbes() string { return filepath.Join(StateDir(), "walls.json") }
+
 // EnsurePrivateDir makes dir (and parents) with mode 0700.
 func EnsurePrivateDir(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {

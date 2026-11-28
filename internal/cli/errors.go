@@ -242,7 +242,11 @@ var synonyms = map[string]map[string]string{
 		"hosts":   "host ls",
 	},
 	"host": {
-		"list": "ls",
+		"list":     "ls",
+		"info":     "show",
+		"details":  "show",
+		"config":   "set",
+		"settings": "set",
 	},
 }
 

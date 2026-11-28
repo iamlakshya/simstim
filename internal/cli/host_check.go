@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"time"
@@ -98,18 +99,19 @@ func hostDoctorCmd() *cobra.Command {
 			if d.AgentChecks, err = conn.AgentChecks(ctx); err != nil {
 				return err
 			}
+			if perr := probeDoctorSandbox(ctx, conn, h, &d); perr != nil {
+				if errors.Is(perr, context.Canceled) || stopped(ctx) {
+					return perr
+				}
+				d.Checks = append(d.Checks, sandboxProbeFailCheck(h.Name, perr))
+			}
 			if asJSON && fix {
 				return hostFixesJSON(ctx, conn, h, d)
 			}
 			if asJSON {
 				return printJSON(d)
 			}
-			d = client.CleanHostInfo(d) // only the human view is cleaned
-			printf("%s: %s (%s/%s), %d CPUs, %.1f GiB, %.1f GiB free disk, helper %s\n", h.Name, d.Distro, d.OS, d.Arch, d.CPUs,
-				float64(d.MemTotal)/(1<<30), float64(d.DiskFree)/(1<<30), d.Version)
-			printChecks(os.Stdout, os.Stderr, d.Checks)
-			printf("Agents:\n")
-			printAgentChecks(os.Stdout, h.Name, d.AgentChecks)
+			printHostDoctorReport(h, d)
 			printScrollback(ctx, conn)
 			if !fix {
 				return nil
@@ -121,6 +123,46 @@ func hostDoctorCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&fix, "fix", false, "offer to fix the problems found, one by one")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "with --fix, apply every fix without asking")
 	return cmd
+}
+
+func probeDoctorSandbox(ctx context.Context, conn *client.Conn, _ client.Host, d *client.HostInfo) error {
+	if !conn.HasFeature("sandbox") {
+		return nil
+	}
+	p, err := conn.CapProbe(ctx, "")
+	if err != nil {
+		return err
+	}
+	d.Sandbox = &p
+	d.Walls = p.Walls
+	return nil
+}
+
+func sandboxProbeFailCheck(hostName string, err error) api.Check {
+	r := describe(err, nil)
+	try := r.try
+	if try == "" || try == debugHint {
+		try = brand.Name + " host doctor " + client.ShellQuote(hostName)
+	}
+	return api.Check{
+		Name:   "sandbox probe",
+		OK:     false,
+		Detail: r.msg,
+		Fix:    try,
+	}
+}
+
+func printHostDoctorReport(h client.Host, d client.HostInfo) {
+	d = client.CleanHostInfo(d) // only the human view is cleaned
+	printf("%s: %s (%s/%s), %d CPUs, %.1f GiB, %.1f GiB free disk, helper %s\n", h.Name, d.Distro, d.OS, d.Arch, d.CPUs,
+		float64(d.MemTotal)/(1<<30), float64(d.DiskFree)/(1<<30), d.Version)
+	printChecks(os.Stdout, os.Stderr, d.Checks)
+	if d.Sandbox != nil {
+		printf("\n")
+		printSandboxesBlock(os.Stdout, os.Stderr, h.Name, *d.Sandbox, h.WallFloor)
+	}
+	printf("Agents:\n")
+	printAgentChecks(os.Stdout, h.Name, d.AgentChecks)
 }
 
 // hostFixesJSON applies every fix of h, as host doctor --fix -y --json
