@@ -15,8 +15,8 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 
 | State | Tasks |
 | --- | --- |
-| Done | 45 |
-| To do | 54 |
+| Done | 47 |
+| To do | 52 |
 | **All** | **99** |
 
 ## Current focus
@@ -54,7 +54,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P1.8 | 1 | Day 1 | To do | The client and the launcher |
 | P1.12 | 1 | Day 1 | To do | Layers, profiles and locks |
 | P1.13 | 1 | Day 1 | To do | Shells and commands in a sandbox |
-| P1.14 | 1 | Day 1 | To do | Sizes, variables, files and seeds from the laptop |
+| P1.14 | 1 | Day 1 | Done | Sizes, variables, files and seeds from the laptop |
 | P1.15 | 1 | Day 1 | Done | Kept caches |
 | P1.9 | 1 | Day 1 | Done | Paste and ports through the supervisor |
 | P1.10 | 1 | Day 1 | To do | Pull through a bundle, with a review |
@@ -98,7 +98,7 @@ When: **Day 1** tasks make the first working product (the daily-use path). **Lat
 | P2.7 | 2 | Later | To do | Budgets and stricter targets |
 | P2.9 | 2 | Later | To do | A repository's own file |
 | P3.1 | 3 | Later | Done | The boot pair |
-| H9 | 3 | Later | To do | Runtime delivery and the host cache |
+| H9 | 3 | Later | Done | Runtime delivery and the host cache |
 | P3.2 | 3 | Later | Done | Images |
 | P3.3 | 3 | Later | Done | The Cloud Hypervisor driver |
 | P3.4 | 3 | Later | To do | The guest init on a microvm |
