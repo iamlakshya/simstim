@@ -181,15 +181,10 @@ func (s *Store) Pull(ctx context.Context, req PullRequest) (api.ImageRecord, err
 		}
 	}
 
-	// Fast path: check if an image with this digest and arch is already stored.
-	if rec, ok, err := s.findStored(digest, arch); err != nil {
+	// Fast path: reuse an already-stored image under its per-digest lock.
+	if rec, ok, err := s.tryReuseStored(ref, digest, arch, expectedRoot); err != nil {
 		return api.ImageRecord{}, err
 	} else if ok {
-		if expectedRoot != "" && !strings.EqualFold(rec.RootHash, expectedRoot) {
-			return api.ImageRecord{}, rootMismatch(ref, rec.RootHash, expectedRoot)
-		}
-		rec.UsedAt = s.now()
-		_ = s.writeRecord(strings.TrimPrefix(rec.PlatformDigest, "sha256:"), rec)
 		return rec, nil
 	}
 
@@ -198,6 +193,38 @@ func (s *Store) Pull(ctx context.Context, req PullRequest) (api.ImageRecord, err
 		return api.ImageRecord{}, err
 	}
 	return s.InstallImage(ref, digest, platDigest, arch, expectedRoot, img, req.Limits)
+}
+
+func (s *Store) tryReuseStored(ref, digest, arch, expectedRoot string) (api.ImageRecord, bool, error) {
+	rec, ok, err := s.findStored(digest, arch)
+	if err != nil || !ok {
+		return api.ImageRecord{}, false, err
+	}
+	platHex := strings.TrimPrefix(rec.PlatformDigest, "sha256:")
+	unlock, err := lockFile(s.lockPath(platHex), true)
+	if err != nil {
+		return api.ImageRecord{}, false, err
+	}
+	defer unlock()
+
+	cur, err := s.readRecord(platHex)
+	if err != nil {
+		return api.ImageRecord{}, false, nil
+	}
+	if _, serr := os.Stat(s.ImagePath(platHex)); serr != nil {
+		return api.ImageRecord{}, false, nil
+	}
+	if cur.Arch != arch || (cur.Digest != digest && cur.PlatformDigest != digest) {
+		return api.ImageRecord{}, false, nil
+	}
+	if expectedRoot != "" && !strings.EqualFold(cur.RootHash, expectedRoot) {
+		return api.ImageRecord{}, false, rootMismatchStored(ref, cur.RootHash, expectedRoot)
+	}
+	cur.UsedAt = s.now()
+	if err := s.writeRecord(platHex, cur); err != nil {
+		return api.ImageRecord{}, false, err
+	}
+	return cur, true, nil
 }
 
 // InstallImage converts an already-loaded v1.Image into the content-addressed
@@ -227,7 +254,7 @@ func (s *Store) InstallImage(ref, digest, platformDigest, arch, expectedRootHash
 	if rec, err := s.readRecord(platHex); err == nil {
 		if _, serr := os.Stat(s.ImagePath(platHex)); serr == nil {
 			if expectedRootHash != "" && !strings.EqualFold(rec.RootHash, expectedRootHash) {
-				return api.ImageRecord{}, rootMismatch(ref, rec.RootHash, expectedRootHash)
+				return api.ImageRecord{}, rootMismatchStored(ref, rec.RootHash, expectedRootHash)
 			}
 			rec.UsedAt = s.now()
 			_ = s.writeRecord(platHex, rec)

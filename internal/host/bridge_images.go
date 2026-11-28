@@ -102,7 +102,7 @@ func RemoveImage(digest string) (api.ImageRecord, error) {
 // BuildAgentsDisk builds the read-only EROFS agents disk from the agents
 // currently installed on this host.
 func BuildAgentsDisk(ctx context.Context) (api.AgentsDiskRecord, error) {
-	sources := installedAgentSources()
+	sources := installedAgentSources(ctx)
 	rec, err := ImageStore().BuildAgentsDisk(ctx, sources, image.AgentsDiskOptions{})
 	return rec, imageProtoError(err)
 }
@@ -177,8 +177,8 @@ func sameDigest(a, b string) bool {
 	return na != "" && na == nb
 }
 
-func installedAgentSources() []image.AgentSource {
-	login, err := LoginEnv(15 * time.Second)
+func installedAgentSources(ctx context.Context) []image.AgentSource {
+	login, err := LoginEnvContext(ctx, 15*time.Second)
 	if err != nil {
 		login = os.Environ()
 	}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -79,15 +80,12 @@ func makeGzipLayer(t *testing.T, items []tarItem, mt types.MediaType) v1.Layer {
 	return l
 }
 
-func makeUncompressedLayer(t *testing.T, items []tarItem, mt types.MediaType) v1.Layer {
+func makeUncompressedLayer(t *testing.T, items []tarItem) v1.Layer {
 	t.Helper()
 	raw := makeTarBytes(t, items)
-	if mt == "" {
-		mt = types.OCIUncompressedLayer
-	}
 	l, err := tarball.LayerFromOpener(func() (io.ReadCloser, error) {
 		return io.NopCloser(bytes.NewReader(raw)), nil
-	}, tarball.WithMediaType(mt))
+	}, tarball.WithMediaType(types.OCIUncompressedLayer))
 	if err != nil {
 		t.Fatalf("make uncompressed layer: %v", err)
 	}
@@ -133,7 +131,7 @@ func readTarMap(t *testing.T, raw []byte) map[string]tarItem {
 	out := map[string]tarItem{}
 	for {
 		h, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -262,7 +260,7 @@ func TestFlattenRejectsBadMediaType(t *testing.T) {
 
 func TestFlattenRejectsDotDotNULAndLongPaths(t *testing.T) {
 	t.Run("escape path", func(t *testing.T) {
-		l := makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "../etc/passwd"}, body: "x"}}, types.OCIUncompressedLayer)
+		l := makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "../etc/passwd"}, body: "x"}})
 		var out bytes.Buffer
 		_, err := Flatten(makeImage(t, l), "test:1", Limits{}, &out)
 		ie, ok := AsError(err)
@@ -318,10 +316,10 @@ func TestFlattenMutateExtractHardLinkDifferences(t *testing.T) {
 		base := makeUncompressedLayer(t, []tarItem{
 			{hdr: tar.Header{Name: "a.txt"}, body: "secret-content"},
 			{hdr: tar.Header{Name: "b.txt", Typeflag: tar.TypeLink, Linkname: "a.txt"}},
-		}, types.OCIUncompressedLayer)
+		})
 		upper := makeUncompressedLayer(t, []tarItem{
 			{hdr: tar.Header{Name: ".wh.a.txt"}},
-		}, types.OCIUncompressedLayer)
+		})
 		var out bytes.Buffer
 		_, err := Flatten(makeImage(t, base, upper), "test:hardlink-del", Limits{}, &out)
 		ie, ok := AsError(err)
@@ -333,10 +331,10 @@ func TestFlattenMutateExtractHardLinkDifferences(t *testing.T) {
 	t.Run("cross-layer hard link emitted before target fails closed", func(t *testing.T) {
 		base := makeUncompressedLayer(t, []tarItem{
 			{hdr: tar.Header{Name: "a.txt"}, body: "hello"},
-		}, types.OCIUncompressedLayer)
+		})
 		upper := makeUncompressedLayer(t, []tarItem{
 			{hdr: tar.Header{Name: "b.txt", Typeflag: tar.TypeLink, Linkname: "a.txt"}},
-		}, types.OCIUncompressedLayer)
+		})
 		var out bytes.Buffer
 		_, err := Flatten(makeImage(t, base, upper), "test:hardlink-cross", Limits{}, &out)
 		ie, ok := AsError(err)
@@ -348,8 +346,8 @@ func TestFlattenMutateExtractHardLinkDifferences(t *testing.T) {
 
 func TestFlattenCaps(t *testing.T) {
 	t.Run("too many layers", func(t *testing.T) {
-		l1 := makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "a"}, body: "1"}}, types.OCIUncompressedLayer)
-		l2 := makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "b"}, body: "2"}}, types.OCIUncompressedLayer)
+		l1 := makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "a"}, body: "1"}})
+		l2 := makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "b"}, body: "2"}})
 		var out bytes.Buffer
 		_, err := Flatten(makeImage(t, l1, l2), "test:layers", Limits{MaxLayers: 1}, &out)
 		ie, ok := AsError(err)
@@ -363,7 +361,7 @@ func TestFlattenCaps(t *testing.T) {
 			{hdr: tar.Header{Name: "a"}, body: "1"},
 			{hdr: tar.Header{Name: "b"}, body: "2"},
 			{hdr: tar.Header{Name: "c"}, body: "3"},
-		}, types.OCIUncompressedLayer)
+		})
 		var out bytes.Buffer
 		_, err := Flatten(makeImage(t, l), "test:entries", Limits{MaxEntries: 2}, &out)
 		ie, ok := AsError(err)

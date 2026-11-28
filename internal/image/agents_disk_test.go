@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -133,6 +134,34 @@ func TestBuildAgentsDiskWithMkfsErofs(t *testing.T) {
 	}
 	if len(removed) != 1 || removed[0] != recA.Digest {
 		t.Fatalf("PruneAgentsDisks removed = %v, want [%s]", removed, recA.Digest)
+	}
+
+	// Concurrent BuildAgentsDisk + PruneAgentsDisks never deletes the active latest disk.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 5 {
+			if _, err := store.BuildAgentsDisk(context.Background(), sources, AgentsDiskOptions{MkfsErofs: mkfsBin}); err != nil {
+				t.Errorf("concurrent BuildAgentsDisk: %v", err)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 5 {
+			if _, err := store.PruneAgentsDisks(nil); err != nil {
+				t.Errorf("concurrent PruneAgentsDisks: %v", err)
+			}
+		}
+	}()
+	wg.Wait()
+	latest, err := store.LatestAgentsDisk()
+	if err != nil {
+		t.Fatalf("LatestAgentsDisk after concurrent prune: %v", err)
+	}
+	if _, err := os.Stat(latest.Path); err != nil {
+		t.Fatalf("latest agents disk %s missing after concurrent prune: %v", latest.Path, err)
 	}
 }
 

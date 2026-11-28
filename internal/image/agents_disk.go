@@ -161,6 +161,17 @@ func (s *Store) LatestAgentsDisk() (api.AgentsDiskRecord, error) {
 // nor listed in keepHexes (spec 20.4).
 func (s *Store) PruneAgentsDisks(keepHexes map[string]bool) ([]string, error) {
 	agentsDir := s.AgentsDir()
+	if _, err := os.Stat(agentsDir); errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("stat agents disks: %w", err)
+	}
+	unlock, err := lockFile(filepath.Join(agentsDir, "build.lock"), true)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	entries, err := os.ReadDir(agentsDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil

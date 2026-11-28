@@ -156,47 +156,8 @@ func FilterTar(r io.Reader, w io.Writer, ref string, lim Limits) (FlattenStats, 
 		if err != nil {
 			return stats, classifyExtractError(ref, err)
 		}
-
-		cleanName, err := cleanEntryPath(hdr.Name, lim.MaxPathBytes, ref)
-		if err != nil {
+		if err := copyFilteredEntry(tr, tw, hdr, lim, ref, &stats, seenTargets); err != nil {
 			return stats, err
-		}
-		if cleanName == "." && hdr.Typeflag != tar.TypeDir {
-			return stats, badLayer(ref, fmt.Sprintf("root entry %q is not a directory", hdr.Name), nil)
-		}
-
-		if hdr.Typeflag == tar.TypeChar || hdr.Typeflag == tar.TypeBlock {
-			stats.DroppedDevices++
-			continue
-		}
-
-		outHdr, err := normaliseHeader(hdr, cleanName, lim.MaxPathBytes, ref, seenTargets)
-		if err != nil {
-			return stats, err
-		}
-
-		stats.Entries++
-		if stats.Entries > lim.MaxEntries {
-			return stats, tooLarge(ref, fmt.Sprintf("flattened tree exceeds %d entries", lim.MaxEntries))
-		}
-		if outHdr.Size < 0 {
-			return stats, badLayer(ref, fmt.Sprintf("entry %q has negative size %d", cleanName, outHdr.Size), nil)
-		}
-		if outHdr.Size > lim.MaxUncompressedBytes-stats.UncompressedBytes {
-			return stats, tooLarge(ref, fmt.Sprintf("unpacks to more than %d bytes", lim.MaxUncompressedBytes))
-		}
-		stats.UncompressedBytes += outHdr.Size
-
-		if err := tw.WriteHeader(outHdr); err != nil {
-			return stats, fmt.Errorf("write tar header %q: %w", cleanName, err)
-		}
-		if outHdr.Size > 0 {
-			if _, err := io.CopyN(tw, tr, outHdr.Size); err != nil {
-				return stats, classifyExtractError(ref, err)
-			}
-		}
-		if outHdr.Typeflag != tar.TypeDir {
-			seenTargets[cleanName] = true
 		}
 	}
 
@@ -215,9 +176,58 @@ func FilterTar(r io.Reader, w io.Writer, ref string, lim Limits) (FlattenStats, 
 	return stats, nil
 }
 
+func copyFilteredEntry(tr *tar.Reader, tw *tar.Writer, hdr *tar.Header, lim Limits, ref string, stats *FlattenStats, seenTargets map[string]bool) error {
+	cleanName, err := cleanEntryPath(hdr.Name, lim.MaxPathBytes, ref)
+	if err != nil {
+		return err
+	}
+	if cleanName == "." && hdr.Typeflag != tar.TypeDir {
+		return badLayer(ref, fmt.Sprintf("root entry %q is not a directory", hdr.Name), nil)
+	}
+	if hdr.Typeflag == tar.TypeChar || hdr.Typeflag == tar.TypeBlock {
+		stats.DroppedDevices++
+		return nil
+	}
+
+	outHdr, err := normaliseHeader(hdr, cleanName, lim.MaxPathBytes, ref, seenTargets)
+	if err != nil {
+		return err
+	}
+	if err := accountEntry(stats, lim, ref, cleanName, outHdr.Size); err != nil {
+		return err
+	}
+	if err := tw.WriteHeader(outHdr); err != nil {
+		return fmt.Errorf("write tar header %q: %w", cleanName, err)
+	}
+	if outHdr.Size > 0 {
+		if _, err := io.CopyN(tw, tr, outHdr.Size); err != nil {
+			return classifyExtractError(ref, err)
+		}
+	}
+	if outHdr.Typeflag != tar.TypeDir {
+		seenTargets[cleanName] = true
+	}
+	return nil
+}
+
+func accountEntry(stats *FlattenStats, lim Limits, ref, cleanName string, size int64) error {
+	stats.Entries++
+	if stats.Entries > lim.MaxEntries {
+		return tooLarge(ref, fmt.Sprintf("flattened tree exceeds %d entries", lim.MaxEntries))
+	}
+	if size < 0 {
+		return badLayer(ref, fmt.Sprintf("entry %q has negative size %d", cleanName, size), nil)
+	}
+	if size > lim.MaxUncompressedBytes-stats.UncompressedBytes {
+		return tooLarge(ref, fmt.Sprintf("unpacks to more than %d bytes", lim.MaxUncompressedBytes))
+	}
+	stats.UncompressedBytes += size
+	return nil
+}
+
 func normaliseHeader(hdr *tar.Header, cleanName string, maxPath int, ref string, seenTargets map[string]bool) (*tar.Header, error) {
 	tf := hdr.Typeflag
-	if tf == tar.TypeRegA {
+	if tf == 0 {
 		tf = tar.TypeReg
 	}
 	switch tf {

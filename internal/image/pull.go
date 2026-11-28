@@ -76,22 +76,33 @@ func Resolve(ctx context.Context, refStr string, opts PullOptions) (*Resolved, e
 	res := &Resolved{
 		Ref:       ref.String(),
 		Digest:    desc.Digest.String(),
-		Platforms: make(map[string]string),
-	}
-	if desc.MediaType.IsIndex() {
-		if idx, err := desc.ImageIndex(); err == nil {
-			if im, err := idx.IndexManifest(); err == nil {
-				for _, m := range im.Manifests {
-					if m.Platform != nil && m.Platform.OS == "linux" && m.Platform.Architecture != "" {
-						if _, exists := res.Platforms[m.Platform.Architecture]; !exists {
-							res.Platforms[m.Platform.Architecture] = m.Digest.String()
-						}
-					}
-				}
-			}
-		}
+		Platforms: collectIndexPlatforms(desc),
 	}
 	return res, nil
+}
+
+func collectIndexPlatforms(desc *remote.Descriptor) map[string]string {
+	platforms := make(map[string]string)
+	if !desc.MediaType.IsIndex() {
+		return platforms
+	}
+	idx, err := desc.ImageIndex()
+	if err != nil {
+		return platforms
+	}
+	im, err := idx.IndexManifest()
+	if err != nil {
+		return platforms
+	}
+	for _, m := range im.Manifests {
+		if m.Platform == nil || m.Platform.OS != "linux" || m.Platform.Architecture == "" {
+			continue
+		}
+		if _, exists := platforms[m.Platform.Architecture]; !exists {
+			platforms[m.Platform.Architecture] = m.Digest.String()
+		}
+	}
+	return platforms
 }
 
 // Fetch pulls an OCI image strictly by pinned sha256 digest and selects the
@@ -164,27 +175,9 @@ func FetchFromLayout(layoutDir, digest, arch string) (v1.Image, string, error) {
 		return nil, "", digestMismatch(layoutDir, err.Error(), err)
 	}
 	if idx, err := p.ImageIndex(); err == nil {
-		if idxDigest, derr := idx.Digest(); derr == nil && idxDigest == h {
-			return selectPlatformFromIndex(idx, layoutDir, arch, MaxManifestBytes)
-		}
-		if im, err := idx.IndexManifest(); err == nil {
-			for _, m := range im.Manifests {
-				if m.Digest != h {
-					continue
-				}
-				if m.MediaType.IsIndex() {
-					sub, err := idx.ImageIndex(h)
-					if err != nil {
-						return nil, "", badLayer(layoutDir, "could not read nested index", err)
-					}
-					return selectPlatformFromIndex(sub, layoutDir, arch, MaxManifestBytes)
-				}
-				img, err := idx.Image(h)
-				if err != nil {
-					return nil, "", badLayer(layoutDir, "could not read image from layout", err)
-				}
-				return img, digest, nil
-			}
+		img, platDigest, found, ierr := fetchFromLayoutIndex(idx, h, layoutDir, digest, arch)
+		if ierr != nil || found {
+			return img, platDigest, ierr
 		}
 	}
 	img, err := p.Image(h)
@@ -196,7 +189,43 @@ func FetchFromLayout(layoutDir, digest, arch string) (v1.Image, string, error) {
 			Err:     err,
 		}
 	}
+	if err := checkPlatformArch(img, layoutDir, arch); err != nil {
+		return nil, "", err
+	}
 	return img, digest, nil
+}
+
+func fetchFromLayoutIndex(idx v1.ImageIndex, h v1.Hash, layoutDir, digest, arch string) (v1.Image, string, bool, error) {
+	if idxDigest, err := idx.Digest(); err == nil && idxDigest == h {
+		img, plat, err := selectPlatformFromIndex(idx, layoutDir, arch, MaxManifestBytes)
+		return img, plat, true, err
+	}
+	im, err := idx.IndexManifest()
+	if err != nil {
+		return nil, "", true, badLayer(layoutDir, "could not decode layout index", err)
+	}
+	for _, m := range im.Manifests {
+		if m.Digest != h {
+			continue
+		}
+		if m.MediaType.IsIndex() {
+			sub, err := idx.ImageIndex(h)
+			if err != nil {
+				return nil, "", true, badLayer(layoutDir, "could not read nested index", err)
+			}
+			img, plat, err := selectPlatformFromIndex(sub, layoutDir, arch, MaxManifestBytes)
+			return img, plat, true, err
+		}
+		img, err := idx.Image(h)
+		if err != nil {
+			return nil, "", true, badLayer(layoutDir, "could not read image from layout", err)
+		}
+		if err := checkPlatformArch(img, layoutDir, arch); err != nil {
+			return nil, "", true, err
+		}
+		return img, digest, true, nil
+	}
+	return nil, "", false, nil
 }
 
 func selectPlatformFromIndex(idx v1.ImageIndex, ref, arch string, maxManifest int64) (v1.Image, string, error) {
@@ -241,7 +270,10 @@ func selectPlatformFromIndex(idx v1.ImageIndex, ref, arch string, maxManifest in
 
 func checkPlatformArch(img v1.Image, ref, wantArch string) error {
 	cfg, err := img.ConfigFile()
-	if err != nil || cfg == nil {
+	if err != nil {
+		return classifyRemoteError(ref, err)
+	}
+	if cfg == nil {
 		return nil
 	}
 	if cfg.OS != "" && cfg.OS != "linux" {
@@ -311,7 +343,7 @@ func classifyRemoteError(ref string, err error) error {
 func ParseSHA256(digest string) (string, error) {
 	hexPart, ok := strings.CutPrefix(digest, "sha256:")
 	if !ok {
-		return "", fmt.Errorf("digest %q must start with sha256:", digest)
+		return "", fmt.Errorf("digest %q must have a sha256 prefix", digest)
 	}
 	if len(hexPart) != 64 {
 		return "", fmt.Errorf("digest %q must have 64 hex characters", digest)

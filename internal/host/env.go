@@ -36,11 +36,16 @@ func LoginShell() string {
 // LoginEnv runs the user's login shell once and returns its environment, the way
 // VS Code Remote does. This finds agents installed with nvm, mise, bun or npm.
 func LoginEnv(timeout time.Duration) ([]string, error) {
+	return LoginEnvContext(context.Background(), timeout)
+}
+
+// LoginEnvContext is LoginEnv bounded by ctx as well as timeout.
+func LoginEnvContext(ctx context.Context, timeout time.Duration) ([]string, error) {
 	shell := LoginShell()
 	var nonce [8]byte
 	_, _ = rand.Read(nonce[:])
 	marker := "__" + strings.ToUpper(brand.Name) + "_ENV_" + hex.EncodeToString(nonce[:]) + "__"
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	args := []string{"-l", "-i", "-c", "printf '%s' " + marker + "; env -0"}
 	if strings.HasSuffix(shell, "/sh") || strings.HasSuffix(shell, "/dash") {

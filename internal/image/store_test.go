@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -25,7 +26,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/api"
 )
 
-func buildTestMultiArchIndex(t *testing.T, extra string) (v1.ImageIndex, v1.Hash, v1.Hash) {
+func buildTestMultiArchIndex(t *testing.T, extra string) (v1.ImageIndex, v1.Hash) {
 	t.Helper()
 	makeArch := func(arch string) v1.Image {
 		l := makeGzipLayer(t, []tarItem{
@@ -55,10 +56,6 @@ func buildTestMultiArchIndex(t *testing.T, extra string) (v1.ImageIndex, v1.Hash
 	if err != nil {
 		t.Fatal(err)
 	}
-	armDigest, err := arm.Digest()
-	if err != nil {
-		t.Fatal(err)
-	}
 	idx := mutate.AppendManifests(
 		mutate.IndexMediaType(empty.Index, types.OCIImageIndex),
 		mutate.IndexAddendum{
@@ -74,7 +71,7 @@ func buildTestMultiArchIndex(t *testing.T, extra string) (v1.ImageIndex, v1.Hash
 			},
 		},
 	)
-	return idx, amdDigest, armDigest
+	return idx, amdDigest
 }
 
 func TestStorePullDeterminismRootCheckAndConcurrency(t *testing.T) {
@@ -82,7 +79,7 @@ func TestStorePullDeterminismRootCheckAndConcurrency(t *testing.T) {
 	defer srv.Close()
 	host := strings.TrimPrefix(srv.URL, "http://")
 
-	idx, amdDigest, _ := buildTestMultiArchIndex(t, "v1")
+	idx, amdDigest := buildTestMultiArchIndex(t, "v1")
 	idxDigest, err := idx.Digest()
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +168,7 @@ func TestStorePullDeterminismRootCheckAndConcurrency(t *testing.T) {
 		t.Fatal("dm-verity Merkle tree bytes differ between two conversions")
 	}
 
-	// Wrong expected root hash fails with image_root_mismatch and leaves no file.
+	// Wrong expected root hash on fresh conversion fails with image_root_mismatch and leaves no file.
 	s3 := NewStore(filepath.Join(t.TempDir(), "images3"))
 	_, err = s3.Pull(ctx, PullRequest{
 		Ref:              refStr,
@@ -181,11 +178,28 @@ func TestStorePullDeterminismRootCheckAndConcurrency(t *testing.T) {
 		PullOptions:      popts,
 	})
 	ie, ok := AsError(err)
-	if !ok || ie.Code != CodeRootMismatch {
-		t.Fatalf("wrong root hash err = %v, want %s", err, CodeRootMismatch)
+	if !ok || ie.Code != CodeRootMismatch || !strings.Contains(ie.Message, "deleted its copy") {
+		t.Fatalf("wrong root hash err = %v, want %s saying deleted its copy", err, CodeRootMismatch)
 	}
 	if _, statErr := os.Stat(s3.ImagePath(amdDigest.Hex)); !os.IsNotExist(statErr) {
 		t.Fatalf("failed conversion left file behind: %v", statErr)
+	}
+
+	// Wrong expected root hash on an already-stored copy returns image_root_mismatch
+	// without falsely claiming the host deleted the existing copy.
+	_, err = s2.Pull(ctx, PullRequest{
+		Ref:              refStr,
+		Digest:           resolved.Digest,
+		Arch:             "amd64",
+		ExpectedRootHash: strings.Repeat("0", 64),
+		PullOptions:      popts,
+	})
+	ie, ok = AsError(err)
+	if !ok || ie.Code != CodeRootMismatch || strings.Contains(ie.Message, "deleted its copy") {
+		t.Fatalf("cached root mismatch err = %v, want %s without deleted-copy claim", err, CodeRootMismatch)
+	}
+	if _, statErr := os.Stat(s2.ImagePath(amdDigest.Hex)); statErr != nil {
+		t.Fatalf("cached image unexpectedly disappeared: %v", statErr)
 	}
 
 	// Prefix lookup and in-use protection on Remove.
@@ -215,7 +229,7 @@ func TestStorePruneRules(t *testing.T) {
 	installFake := func(tag string, convertedAt, usedAt, fileMod time.Time) api.ImageRecord {
 		img := makeImage(t, makeUncompressedLayer(t, []tarItem{
 			{hdr: tar.Header{Name: "f"}, body: tag},
-		}, types.OCIUncompressedLayer))
+		}))
 		d, _ := img.Digest()
 		rec, err := s.InstallImage("example.com/"+tag+":1", d.String(), d.String(), "amd64", "", img, Limits{})
 		if err != nil {
@@ -259,7 +273,7 @@ func TestStorePruneRules(t *testing.T) {
 }
 
 func TestFetchFromLayoutAndManifestCap(t *testing.T) {
-	idx, amdDigest, _ := buildTestMultiArchIndex(t, "layout")
+	idx, amdDigest := buildTestMultiArchIndex(t, "layout")
 	idxDigest, _ := idx.Digest()
 	dir := filepath.Join(t.TempDir(), "oci")
 	if _, err := layout.Write(dir, idx); err != nil {
@@ -271,6 +285,45 @@ func TestFetchFromLayoutAndManifestCap(t *testing.T) {
 	}
 	if platDigest != amdDigest.String() || img == nil {
 		t.Fatalf("got plat=%s, want %s", platDigest, amdDigest)
+	}
+
+	// Single-manifest layout enforces requested platform architecture.
+	armImg := makeImage(t, makeUncompressedLayer(t, []tarItem{{hdr: tar.Header{Name: "f"}, body: "arm"}}))
+	cfg, err := armImg.ConfigFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg = cfg.DeepCopy()
+	cfg.OS = "linux"
+	cfg.Architecture = "arm64"
+	armImg, err = mutate.ConfigFile(armImg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	armDig, err := armImg.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	singleDir := filepath.Join(t.TempDir(), "oci-arm64")
+	lp, err := layout.Write(singleDir, empty.Index)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := lp.AppendImage(armImg); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := FetchFromLayout(singleDir, armDig.String(), "amd64"); err == nil {
+		t.Fatal("FetchFromLayout accepted arm64 single-manifest layout for amd64")
+	} else if ie, ok := AsError(err); !ok || ie.Code != CodeNotFound {
+		t.Fatalf("wrong arch layout err = %v, want %s", err, CodeNotFound)
+	}
+	if gotImg, gotDig, err := FetchFromLayout(singleDir, armDig.String(), "arm64"); err != nil || gotImg == nil || gotDig != armDig.String() {
+		t.Fatalf("FetchFromLayout arm64 = (%v, %s, %v)", gotImg != nil, gotDig, err)
+	}
+
+	// checkPlatformArch fails closed when ConfigFile returns an error.
+	if err := checkPlatformArch(brokenConfigImage{Image: armImg}, "test:broken", "arm64"); err == nil {
+		t.Fatal("checkPlatformArch ignored ConfigFile error")
 	}
 
 	// Oversized manifest rejected by transport cap.
@@ -321,8 +374,8 @@ func TestLockFilePinUpdateAndConcurrency(t *testing.T) {
 		Arch: "amd64", Digest: d1, RootHash: strings.Repeat("2", 64), DataBlocks: 10, RootFrom: "nuc",
 	})
 	ie, ok = AsError(err)
-	if !ok || ie.Code != CodeRootMismatch {
-		t.Fatalf("mismatch RecordPlatform err = %v, want %s", err, CodeRootMismatch)
+	if !ok || ie.Code != CodeRootMismatch || strings.Contains(ie.Message, "deleted its copy") {
+		t.Fatalf("mismatch RecordPlatform err = %v, want %s without deleted-copy claim", err, CodeRootMismatch)
 	}
 
 	// --update moves the pin and clears old platform hashes.
@@ -352,4 +405,59 @@ func TestLockFilePinUpdateAndConcurrency(t *testing.T) {
 	if len(lf.Images) != 4 {
 		t.Fatalf("lock entries = %d, want 4", len(lf.Images))
 	}
+}
+
+type brokenConfigImage struct{ v1.Image }
+
+func (brokenConfigImage) ConfigFile() (*v1.ConfigFile, error) {
+	return nil, errors.New("corrupt config blob")
+}
+
+func TestStorePullFastPathAndRemoveRace(t *testing.T) {
+	srv := httptest.NewServer(registry.New())
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+
+	idx, amdDigest := buildTestMultiArchIndex(t, "race")
+	idxDigest, err := idx.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	refStr := host + "/acme/race:1"
+	ref, err := name.ParseReference(refStr, name.Insecure)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.WriteIndex(ref, idx); err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewStore(filepath.Join(t.TempDir(), "images"))
+	req := PullRequest{
+		Ref:         refStr,
+		Digest:      idxDigest.String(),
+		Arch:        "amd64",
+		PullOptions: PullOptions{Insecure: true},
+	}
+	if _, err := s.Pull(context.Background(), req); err != nil {
+		t.Fatalf("seed Pull: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 8 {
+			if _, err := s.Pull(context.Background(), req); err != nil {
+				t.Errorf("concurrent Pull: %v", err)
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for range 8 {
+			_, _ = s.Remove(amdDigest.Hex, nil)
+		}
+	}()
+	wg.Wait()
 }

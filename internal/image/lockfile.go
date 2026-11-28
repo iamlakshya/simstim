@@ -169,7 +169,7 @@ func RecordPlatform(path, ref, digest string, plat LockPlatform) error {
 				continue
 			}
 			if cur.RootHash != "" && plat.RootHash != "" && !strings.EqualFold(cur.RootHash, plat.RootHash) {
-				return rootMismatch(ref, plat.RootHash, cur.RootHash)
+				return rootMismatchLock(ref, plat.RootHash, cur.RootHash)
 			}
 			if cur.RootHash == "" {
 				cur.RootHash = plat.RootHash

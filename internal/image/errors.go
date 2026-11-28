@@ -79,6 +79,22 @@ func rootMismatch(ref, got, want string) *Error {
 	}
 }
 
+func rootMismatchStored(ref, got, want string) *Error {
+	return &Error{
+		Code:    CodeRootMismatch,
+		Message: fmt.Sprintf("%s stored on the host has root hash %s, expected %s", refLabel(ref), shortHex(got), shortHex(want)),
+		Hint:    "Remove the image with `" + brand.Name + " image rm` if unused, run `" + brand.Name + " host doctor <host>`, and report both root hashes as a bug.",
+	}
+}
+
+func rootMismatchLock(ref, got, want string) *Error {
+	return &Error{
+		Code:    CodeRootMismatch,
+		Message: fmt.Sprintf("%s gave root hash %s, which differs from %s in images.lock", refLabel(ref), shortHex(got), shortHex(want)),
+		Hint:    "Remove the host copy with `" + brand.Name + " image rm`, run `" + brand.Name + " host doctor <host>`, and report both root hashes as a bug.",
+	}
+}
+
 func imageInUse(digest, session string) *Error {
 	return &Error{
 		Code:    CodeInUse,

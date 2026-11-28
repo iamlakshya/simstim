@@ -112,7 +112,7 @@ func collectAgentsPlan(sources []AgentSource, maxBytes int64, maxEntries int) (*
 func (p *agentsPlan) addSource(src AgentSource) error {
 	if src.BinaryPath == "" {
 		return agentsDiskError(
-			fmt.Sprintf("%s is in the agent table, but its binary is missing", src.Kind),
+			src.Kind+" is in the agent table, but its binary is missing",
 			fmt.Sprintf("%s agents install %s <host>", brand.Name, src.Kind),
 			nil,
 		)

@@ -92,7 +92,6 @@ func ConvertImage(img v1.Image, ref, outPath string, opts ConvertOptions) (res C
 	if err := tmp.Sync(); err != nil {
 		return res, fmt.Errorf("sync image file: %w", err)
 	}
-	//nolint:gosec // G302: read-only rootfs image, spec 20.2 sets mode 0444
 	if err := tmp.Chmod(0o444); err != nil {
 		return res, fmt.Errorf("set image mode: %w", err)
 	}

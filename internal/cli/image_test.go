@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http/httptest"
 	"os"
@@ -112,9 +113,15 @@ func TestImageCommandsPullListAndRemove(t *testing.T) {
 	// Tag moves: pull without --update fails with image_moved (KindRefused).
 	d2 := pushTestImage(t, srv.URL, "acme/dev:1", "second")
 	_, _, err = runApart(t, "image", "pull", refStr, "box")
+	if err == nil {
+		t.Fatal("expected image_moved error when tag moved without --update, got nil")
+	}
 	var ue *client.UserError
-	if !strings.Contains(err.Error(), "images.lock pins") {
-		t.Fatalf("expected image_moved error, got %v", err)
+	if !errors.As(err, &ue) || ue.Code != image.CodeMoved || ue.Kind != client.KindRefused {
+		t.Fatalf("expected UserError{Code:%s, Kind:%v}, got %T: %v", image.CodeMoved, client.KindRefused, err, err)
+	}
+	if !strings.Contains(ue.Msg, "images.lock pins") {
+		t.Fatalf("expected image_moved message to mention images.lock pins, got %q", ue.Msg)
 	}
 	if err := json.Unmarshal([]byte(okJSON(t, "image", "pull", refStr, "box", "--update", "--json")), &pulled); err != nil {
 		t.Fatalf("update pull: %v", err)
@@ -122,7 +129,6 @@ func TestImageCommandsPullListAndRemove(t *testing.T) {
 	if pulled.PlatformDigest != d2 {
 		t.Fatalf("updated pull digest = %s, want %s", pulled.PlatformDigest, d2)
 	}
-	_ = ue
 
 	// Mark d2 in use by a session manifest -> image rm refuses with image_in_use.
 	sid := host.NewID()
