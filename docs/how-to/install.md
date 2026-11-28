@@ -42,7 +42,7 @@ The client is `bin/simstim`. To run `just` and the other installed tools by name
 
 ## Check a release by hand
 
-[Releasing](../contributing/releasing.md#checking-a-release) shows the three ways: the SSH signature, the cosign bundle and the GitHub attestation.
+[Releasing](../contributing/releasing.md#checking-a-release) shows the two ways: the SSH signature and the GitHub attestation.
 
 ## Update
 

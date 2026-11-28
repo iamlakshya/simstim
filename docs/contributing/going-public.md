@@ -6,8 +6,8 @@ The repository went public on 15 October 2026. This page records the preparation
 
 - Private material lives only in git-ignored folders: `private/` and `docs/research/private/`. `just check-private` fails on personal paths, private addresses, tailnet names and emails, and on the owner's own words in `private/deny.txt`.
 - The history was audited with gitleaks (no secrets), and rewritten once, with the owner's yes, to remove private details from old commits. CI scans the whole history on every push.
-- Actions are pinned by full commit SHA except the SLSA generator reusable workflow, which must be called by a version tag ([why](releasing.md#why-one-action-is-pinned-by-tag)). Tokens are least-privilege, and zizmor lints the workflows.
-- Releases are signed (SSH key, cosign) with SBOMs and SLSA provenance, and the builds are reproducible.
+- Every action in the workflows is pinned by full commit SHA ([decision 0055](decisions/0055-lean-release-signing.md)). Tokens are least-privilege, and zizmor lints the workflows.
+- Releases are signed with the release SSH key, carry SBOMs and GitHub build-provenance attestations, and the builds are reproducible.
 - Community files are at the root and in `.github/`.
 
 ## Checks to run again
@@ -16,7 +16,7 @@ Run `just public-check` before a public-readiness review. Then read the README a
 
 The email check matches a complete domain. Public systemd unit names and template tokens are not email addresses. A private email or path on the same line still fails the check.
 
-The name, private-detail, history, secret, licence, workflow and docs checks inspect the local checkout. The Scorecard step instead queries the hosted repository using a GitHub token (`GITHUB_TOKEN`, `GITHUB_AUTH_TOKEN` or `gh auth login`); it does not score unpushed local edits. It requires selected checks to meet their thresholds, including 9 of 10 for Pinned-Dependencies because of the SLSA exception, not a perfect overall score.
+The name, private-detail, history, secret, licence, workflow and docs checks inspect the local checkout. The Scorecard step instead queries the hosted repository using a GitHub token (`GITHUB_TOKEN`, `GITHUB_AUTH_TOKEN` or `gh auth login`); it does not score unpushed local edits. It requires selected checks to meet their thresholds, not a perfect overall score.
 
 An empty, incomplete or malformed Scorecard report fails. Every required check must appear once and meet its threshold; a failed Scorecard command also fails the run even if it prints a complete report. `python3 scripts/test-scorecard-check.py` tests these cases offline, and runs in both `just test` and CI's required `test` job. The regression suite needs no GitHub token or hosted Scorecard access.
 
@@ -43,4 +43,5 @@ Completed steps and pending owner-only tasks are listed separately by state belo
 | Make a hardware tag key, and add its line to `.github/tag-signers` through a pull request ([set up your tag key](releasing.md#set-up-your-tag-key)). Until then, the release job refuses every tag. | The owner |
 | Add a tag ruleset on `refs/tags/v*` that lets only the owner create, move or delete those tags ([the settings the gate needs](releasing.md#the-settings-the-gate-needs)) | The owner |
 | Make the `release` environment with a deployment rule for tags `v*`, rotate the release key into it in two steps, and delete the repository's `RELEASE_SSH_KEY` ([set up the release environment](releasing.md#set-up-the-release-environment)) | The owner |
+| Turn on GitHub immutable releases in the repository's settings so published release tags and assets cannot be edited ([decision 0055](decisions/0055-lean-release-signing.md)) | The owner |
 | Announce it | The owner |

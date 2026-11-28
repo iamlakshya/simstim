@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"sort"
+	"strings"
 )
 
 //go:embed *
@@ -82,3 +83,45 @@ func Version() string {
 
 // Platforms lists the host platforms there are helpers for.
 func Platforms() []string { return allNames("host-*") }
+
+// HelperDigest names one host helper binary and its expected SHA-256 digest
+// (lowercase hex).
+type HelperDigest struct {
+	OS     string
+	Arch   string
+	SHA256 string
+}
+
+// DigestFor returns the expected SHA-256 digest (lowercase hex) of the host
+// helper for goos/goarch, from this build's embedded helpers or the cache.
+func DigestFor(goos, goarch string) (string, bool) {
+	b, ok := For(goos, goarch)
+	if !ok {
+		return "", false
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:]), true
+}
+
+// Digests returns the expected SHA-256 digests of every host helper this build
+// embeds or has loaded from the cache, sorted by platform.
+func Digests() []HelperDigest {
+	names := allNames("host-*")
+	out := make([]HelperDigest, 0, len(names))
+	for _, n := range names {
+		rest, ok := strings.CutPrefix(n, "host-")
+		if !ok {
+			continue
+		}
+		goos, goarch, ok := strings.Cut(rest, "-")
+		if !ok || goos == "" || goarch == "" {
+			continue
+		}
+		sum, ok := DigestFor(goos, goarch)
+		if !ok {
+			continue
+		}
+		out = append(out, HelperDigest{OS: goos, Arch: goarch, SHA256: sum})
+	}
+	return out
+}

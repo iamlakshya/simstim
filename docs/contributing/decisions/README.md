@@ -20,7 +20,7 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0014](0014-code-layout.md) | Code layout: thin mains, an importable command tree, black-box tests under test/ | Accepted |
 | [0015](0015-docs-toolchain.md) | Docs toolchain: Hugo with Hextra, a Diátaxis docs folder and generated reference (its toolchain replaced by 0022) | Accepted |
 | [0016](0016-public-repo-layout.md) | Public repo layout: full community files at the root, GitHub config in .github/, private material out | Accepted |
-| [0017](0017-release-signatures.md) | Release signatures that any machine with OpenSSH can check (extended by 0041, proposed) | Accepted |
+| [0017](0017-release-signatures.md) | Release signatures that any machine with OpenSSH can check (extended by 0041, proposed; replaced by 0055, proposed) | Accepted |
 | [0018](0018-feature-set.md) | The feature set: what we build now, next and later (its Now list extended by 0025) | Accepted |
 | [0019](0019-alerts-and-hooks.md) | Alerts and event hooks run on the host (its once-a-minute rule for a session's end replaced by 0026, which also adds the event `memory`) | Accepted |
 | [0020](0020-guided-setup.md) | A guided setup: one command and one sheet, over one engine | Accepted |
@@ -50,5 +50,6 @@ Each record explains one choice: the context, the options and the outcome. Recor
 | [0052](0052-exact-http2-legacy-build.md) | Qualify the original public HTTP/2 hooks with exact official Go 1.27.4 and the documented legacy build tag | Rejected by 0053 |
 | [0053](0053-rebuild-with-open-source-parts.md) | Rebuild on the published base with maintained open-source parts, and build from scratch only when no tool meets the need | Accepted |
 | [0054](0054-simple-pinned-host-keys.md) | Pin each SSH host's public keys in `known_hosts-<host>` with OpenSSH and `x/crypto/ssh`, with no log-verdict parser or epoch index (replaces 0035) | Proposed |
+| [0055](0055-lean-release-signing.md) | Keep SSH checksum signatures, SBOMs and GitHub attestations; drop cosign keyless signing and the unmaintained SLSA generator (replaces 0017) | Proposed |
 
 Write a new record from [the template](template.md).

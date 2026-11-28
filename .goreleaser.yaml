@@ -67,17 +67,6 @@ sboms:
 changelog:
   disable: true
 
-# Keyless signature of the checksums: anyone can check every archive with
-#   cosign verify-blob --bundle checksums.txt.sigstore.json \
-#     --certificate-identity-regexp 'https://github.com/<owner>/<repo>/.github/workflows/release.yml@refs/tags/v.*' \
-#     --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
-signs:
-  - cmd: cosign
-    artifacts: checksum
-    signature: "${artifact}.sigstore.json"
-    args: ["sign-blob", "--bundle=${signature}", "--yes", "${artifact}"]
-    output: true
-
 release:
   draft: true
   prerelease: auto

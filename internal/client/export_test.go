@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"time"
+
+	"github.com/iamlakshya/simstim/internal/client/helpers"
 )
 
 // SetLeasePeriod lets tests renew leases faster. It returns a function that
@@ -59,4 +61,20 @@ func SetRequestStage(f func(stage string)) func() {
 	old := requestStage
 	requestStage = f
 	return func() { requestStage = old }
+}
+
+// SetHelperDigests replaces the helper digest lookup for the rest of a test.
+// It returns a function that puts the old lookup back.
+func SetHelperDigests(fn func() []helpers.HelperDigest) func() {
+	old := helperDigests
+	helperDigests = fn
+	return func() { helperDigests = old }
+}
+
+// SetEnsureHelpers replaces Probe's EnsureHelpers hook for the rest of a test.
+// It returns a function that puts the old hook back.
+func SetEnsureHelpers(fn func(context.Context) error) func() {
+	old := ensureHelpers
+	ensureHelpers = fn
+	return func() { ensureHelpers = old }
 }

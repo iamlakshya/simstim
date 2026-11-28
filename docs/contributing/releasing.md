@@ -18,12 +18,11 @@ Every release is built by `.github/workflows/release.yml` from a tag that a main
 | --- | --- |
 | `<name>_<version>_<os>_<arch>.tar.gz` | The client, for macOS and Linux on amd64 and arm64 |
 | `<name>-host_<version>_linux_<arch>.tar.gz` | The host helper |
+| `helpers_<version>.tar.gz` | The host helpers and shadow terminals, for clients built with `go install` |
 | `checksums.txt` | SHA-256 of every archive |
-| `checksums.txt.sig` | An SSH signature of the checksums, by the key in [.github/release-signers](../../.github/release-signers); `install.sh` checks it |
-| `checksums.txt.sigstore.json` | A keyless cosign signature of the checksums (Sigstore bundle) |
+| `checksums.txt.sig` | An SSH signature of the checksums, by the key in [.github/release-signers](../../.github/release-signers); `install.sh` and `go install` clients check it ([decision 0055](decisions/0055-lean-release-signing.md)) |
 | `*.sbom.json` | An SBOM for each archive |
-| `multiple.intoto.jsonl` | SLSA level 3 provenance for every archive |
-| GitHub attestations | Build provenance, checked with `gh attestation verify` |
+| GitHub attestations | Build provenance over `checksums.txt`, checked with `gh attestation verify` or `gh release verify-asset` |
 | The Homebrew cask | Pushed to the tap when the `HOMEBREW_TAP_TOKEN` secret is set |
 | `release-manifest.json` | The client's trusted file digests, also embedded beside the helpers |
 | Raw VMM files and their source archives | The exact runtime files named by the release manifest |
@@ -172,7 +171,7 @@ The gate needs three repository settings, which the owner sets once. The gate do
 
 With all three, only the owner's account can push a release tag, and only reviewed commits reach `main`. The check that the tagged commit is on `main` catches a tag on an unreviewed branch by mistake. It does not stop a person who can change the workflow in the tagged commit.
 
-A tag on a commit from before the gate still runs. It makes a draft release with the job's own token, and cosign signs its checksums with the workflow's identity. Then the step that signs with the release key fails, so the draft has no `checksums.txt.sig`. `install.sh` and the client's download of helpers refuse it. The cosign check below accepts it. Delete any draft release that you did not start.
+A tag on a commit from before the gate still runs. It makes a draft release with the job's own token, and that older workflow's step that signs with the release key fails, so the draft has no `checksums.txt.sig` and no attestation. `install.sh` and the client's download of helpers refuse it. Delete any draft release that you did not start.
 
 ### Set up the release environment
 
@@ -227,11 +226,11 @@ Each failure prints a line that starts with `release:`, and a `Try:` line. A hin
 
 ## Checking a release
 
-Anyone can check a release with the SSH signature above, the cosign bundle, or the GitHub attestation. Use files from the same selected release throughout.
+Anyone can check a release with the SSH signature or the GitHub attestation ([decision 0055](decisions/0055-lean-release-signing.md)). Use files from the same selected release throughout.
 
-### Cosign bundle
+### SSH signature
 
-Install [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) and the GitHub CLI (`gh`). In a fresh directory, select a tag and archive from this repository's release assets. This example selects the Linux amd64 client for v0.1.0:
+In a fresh directory, select a tag and archive from this repository's release assets. This example selects the Linux amd64 client for v0.1.0:
 
 ```sh
 tag='v0.1.0'
@@ -239,19 +238,14 @@ archive='simstim_0.1.0_linux_amd64.tar.gz'
 gh release download "$tag" --repo iamlakshya/simstim \
   --pattern "$archive" \
   --pattern checksums.txt \
-  --pattern checksums.txt.sigstore.json
+  --pattern checksums.txt.sig
 
-cosign verify-blob checksums.txt \
-  --bundle checksums.txt.sigstore.json \
-  --certificate-identity "https://github.com/iamlakshya/simstim/.github/workflows/release.yml@refs/tags/$tag" \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+ssh-keygen -Y verify -f .github/release-signers -I release -n file -s checksums.txt.sig < checksums.txt
 ```
 
-Change `tag` to the exact release tag, including `v`, and `archive` to that release's exact asset name for your OS and architecture. Keep `iamlakshya/simstim` and `.github/workflows/release.yml` unchanged in both the download and expected identity. Do not copy the expected identity from an untrusted bundle or replace it with a wildcard: that could accept another repository's signature.
+Change `tag` to the exact release tag, including `v`, and `archive` to that release's exact asset name for your OS and architecture.
 
-The exact identity binds the signer to this repository, this workflow and the selected tag. The [Sigstore CI quickstart](https://docs.sigstore.dev/quickstart/quickstart-ci/#verifying-a-blob) documents the GitHub Actions workflow identity and issuer; [cosign verification](https://docs.sigstore.dev/cosign/verifying/verify/) documents verifying a blob with a bundle and expected identity. Here the workflow runs on a tag, so its identity ends in `@refs/tags/` followed by that tag, not a branch reference.
-
-Only after cosign succeeds, check the selected archive against the signed checksums. On Linux:
+Only after `ssh-keygen` succeeds, check the selected archive against the signed checksums. On Linux:
 
 ```sh
 awk -v file="$archive" '$2 == file' checksums.txt | sha256sum -c -
@@ -272,6 +266,8 @@ Use an up-to-date [GitHub CLI](https://cli.github.com/manual/gh_attestation_veri
 ```sh
 gh attestation verify "$archive" --repo iamlakshya/simstim
 ```
+
+Once GitHub immutable releases are enabled on the repository, `gh release verify-asset "$tag" "$archive" --repo iamlakshya/simstim` also checks the immutable release attestation.
 
 ## Advisories for pins outside package ecosystems
 
@@ -322,9 +318,9 @@ A verdict silences the advisory for that commit only. When the pin moves, the wa
 
 A release ships within 7 days of an advisory's publication. It carries the advisory's entry in the release manifest's list of known-bad versions, and a fixed pin where one exists ([spec 20.9](isolation-spec.md#209-known-bad-versions-p46)). The rule covers an advisory of severity high or critical (CVSS 7.0 or more), and any advisory whose range holds a pin of the current release. The 7 days are the project's own choice ([question 42](isolation-spec.md#15-open-questions)). The nearest outside norm is the linux-distros list, whose members release a fix within 10 days of a public issue.
 
-## Why one action is pinned by tag
+## Action pins and immutable releases
 
-Every action in the workflows is pinned to a full commit SHA, except the SLSA generator (`slsa-framework/slsa-github-generator`), which the release job calls by tag. The generator checks how it was called, and a provenance file made from a SHA reference does not verify. OpenSSF Scorecard counts this one reference against Pinned-Dependencies (9 of 10), which `just public-check` accepts.
+Every action in the workflows is pinned to a full commit SHA ([decision 0055](decisions/0055-lean-release-signing.md) dropped the unmaintained SLSA generator that had required a tag reference). Turning on GitHub immutable releases in the repository's settings locks published release tags and assets so they cannot be edited after publication.
 
 For every client release, refresh and review the vendored Sigstore trust root
 and its provenance in the release commit before making the signed tag. Follow

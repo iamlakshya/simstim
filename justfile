@@ -159,7 +159,7 @@ screenshots: build
 
 # A local release build, with no publishing.
 snapshot:
-    APP_NAME={{name}} goreleaser release --snapshot --clean
+    APP_NAME={{name}} MODULE={{module}} goreleaser release --snapshot --clean
 
 # Rename the product (see docs/contributing/renaming.md).
 rename new:

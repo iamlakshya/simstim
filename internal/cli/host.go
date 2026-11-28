@@ -219,6 +219,9 @@ func connectHostWithPin(ctx context.Context, w io.Writer, pr *prompter, h client
 	}
 	step("✓ connected in %s: %s/%s", time.Since(start).Round(time.Millisecond), p.OS, p.Arch)
 	if !p.Installed {
+		if p.DigestMismatch {
+			step("✕ %s %s on %s does not match this client's digest; reinstalling", brand.HostBinary, client.HelperVersion(), h.Name)
+		}
 		bin, ok := helpers.For(p.OS, p.Arch)
 		if !ok {
 			return nil, &client.UserError{Msg: fmt.Sprintf("no helper for %s/%s in this build", p.OS, p.Arch), Hint: "Use a Linux host on amd64 or arm64.", Code: "no_helper"}

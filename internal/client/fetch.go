@@ -16,7 +16,7 @@ import (
 // checks its signature and checksum, and caches it. A client that embeds its
 // helpers does nothing here.
 func EnsureHelpers(ctx context.Context) error {
-	if helpers.Embedded() {
+	if helpers.LoadCached(version.Version, CacheDir()) {
 		return nil
 	}
 	base := ReleaseURL()

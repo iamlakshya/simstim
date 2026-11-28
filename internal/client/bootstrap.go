@@ -29,17 +29,124 @@ func HelperVersion() string {
 // Platform is a host's operating system and architecture.
 type Platform struct {
 	OS, Arch string
-	// Installed is true when the matching helper is already on the host.
+	// Installed is true when the matching helper is already on the host and,
+	// when this client has helper digests, its SHA-256 matches.
 	Installed bool
+	// DigestMismatch is true when a helper binary is at the expected path on
+	// the host, but its SHA-256 does not match this client's digest.
+	DigestMismatch bool
+}
+
+const (
+	helperPresentMarker        = "__HELPER_PRESENT__"
+	helperDigestMismatchMarker = "__HELPER_DIGEST_MISMATCH__"
+	helperDigestNoToolMarker   = "__HELPER_DIGEST_NO_TOOL__"
+)
+
+// helperDigests returns the expected SHA-256 digests of the host helpers for
+// this build (embedded, or loaded from the release cache). Tests replace it.
+var helperDigests = helpers.Digests
+
+// ensureHelpers ensures host helpers are available before probing a host. Tests replace it.
+var ensureHelpers = EnsureHelpers
+
+// unameCasePattern returns the POSIX case pattern matching `uname -s`:`uname -m`
+// for a Go OS and architecture.
+func unameCasePattern(goos, goarch string) string {
+	var osNames []string
+	switch goos {
+	case "linux":
+		osNames = []string{"Linux"}
+	case "darwin":
+		osNames = []string{"Darwin"}
+	default:
+		osNames = []string{goos}
+	}
+	var archNames []string
+	switch goarch {
+	case "amd64":
+		archNames = []string{"x86_64", "amd64"}
+	case "arm64":
+		archNames = []string{"aarch64", "arm64"}
+	default:
+		archNames = []string{goarch}
+	}
+	patterns := make([]string, 0, len(osNames)*len(archNames))
+	for _, o := range osNames {
+		for _, a := range archNames {
+			patterns = append(patterns, o+":"+a)
+		}
+	}
+	return strings.Join(patterns, "|")
+}
+
+// helperDigestWantShell builds a POSIX shell fragment that sets $want to the
+// expected SHA-256 hex digest for the host's `uname -s`:`uname -m`, or leaves
+// it empty if digests has no entry for this platform.
+func helperDigestWantShell(digests []helpers.HelperDigest) string {
+	var b strings.Builder
+	b.WriteString(`want=""; case "$(uname -s):$(uname -m)" in `)
+	for _, d := range digests {
+		fmt.Fprintf(&b, `%s) want=%s ;; `, unameCasePattern(d.OS, d.Arch), d.SHA256)
+	}
+	b.WriteString("esac")
+	return b.String()
+}
+
+// probeCommand builds the remote POSIX shell command that reads the host's
+// platform and checks whether the matching helper is installed. When digests
+// is non-empty, an installed helper counts as present only when its SHA-256
+// matches the digest for the host's platform.
+func probeCommand(ver string, digests []helpers.HelperDigest) string {
+	helper := RemoteHelper(ver)
+	if len(digests) == 0 {
+		return fmt.Sprintf(`uname -sm; test -x %s && echo %s; true`, helper, helperPresentMarker)
+	}
+	return strings.Join([]string{
+		"uname -sm",
+		"h=" + helper,
+		`if [ -f "$h" ] && [ -x "$h" ]; then ` +
+			helperDigestWantShell(digests) + `; ` +
+			`if [ -z "$want" ]; then echo ` + helperDigestMismatchMarker + `; ` +
+			`elif command -v sha256sum >/dev/null 2>&1; then ` +
+			`if echo "$want  $h" | sha256sum -c - >/dev/null 2>&1; then echo ` + helperPresentMarker + `; else echo ` + helperDigestMismatchMarker + `; fi; ` +
+			`elif command -v shasum >/dev/null 2>&1; then ` +
+			`if echo "$want  $h" | shasum -a 256 -c - >/dev/null 2>&1; then echo ` + helperPresentMarker + `; else echo ` + helperDigestMismatchMarker + `; fi; ` +
+			`else echo ` + helperDigestNoToolMarker + `; fi; fi`,
+		"true",
+	}, "; ")
+}
+
+// bridgeCommand builds the remote POSIX shell command that starts the host
+// helper's bridge. When digests is non-empty, it checks the helper's SHA-256
+// on the host with sha256sum -c (or shasum -a 256 -c) and starts the bridge
+// only when the digest matches (spec 14.9.2).
+func bridgeCommand(ver string, idleExit int, digests []helpers.HelperDigest) string {
+	args := "bridge"
+	if idleExit > 0 {
+		args = fmt.Sprintf("bridge --idle-exit %d", idleExit)
+	}
+	helper := RemoteHelper(ver)
+	if len(digests) == 0 {
+		return helper + " " + args
+	}
+	return strings.Join([]string{
+		"h=" + helper,
+		`if [ ! -e "$h" ]; then echo "No such file or directory: $h" >&2; exit 127; fi`,
+		`if [ ! -f "$h" ]; then echo "` + helperDigestMismatchMarker + `" >&2; exit 66; fi`,
+		helperDigestWantShell(digests),
+		`if [ -z "$want" ]; then echo "` + helperDigestMismatchMarker + `" >&2; exit 66; fi`,
+		`if command -v sha256sum >/dev/null 2>&1; then echo "$want  $h" | sha256sum -c - >/dev/null 2>&1 || { echo "` + helperDigestMismatchMarker + `" >&2; exit 66; }; elif command -v shasum >/dev/null 2>&1; then echo "$want  $h" | shasum -a 256 -c - >/dev/null 2>&1 || { echo "` + helperDigestMismatchMarker + `" >&2; exit 66; }; else echo "` + helperDigestNoToolMarker + `" >&2; exit 66; fi`,
+		`exec "$h" ` + args,
+	}, "; ")
 }
 
 // Probe finds the host's platform and whether the helper is installed.
 func Probe(ctx context.Context, s Transport) (Platform, error) {
-	if err := EnsureHelpers(ctx); err != nil {
+	if err := ensureHelpers(ctx); err != nil {
 		return Platform{}, err
 	}
-	const marker = "__HELPER_PRESENT__"
-	cmd := fmt.Sprintf(`uname -sm; test -x %s && echo %s; true`, RemoteHelper(HelperVersion()), marker)
+	cmd := probeCommand(HelperVersion(), helperDigests())
 	out, err := s.Run(ctx, cmd, nil)
 	if err != nil {
 		return Platform{}, err
@@ -47,9 +154,20 @@ func Probe(ctx context.Context, s Transport) (Platform, error) {
 	var p Platform
 	for _, line := range strings.Split(string(out), "\n") {
 		line = strings.TrimSpace(line)
-		if line == marker {
+		switch line {
+		case helperPresentMarker:
 			p.Installed = true
 			continue
+		case helperDigestMismatchMarker:
+			p.DigestMismatch = true
+			continue
+		case helperDigestNoToolMarker:
+			return Platform{}, &UserError{
+				Msg:  fmt.Sprintf("cannot check the %s helper's SHA-256 on the host: neither sha256sum nor shasum is installed", brand.Name),
+				Hint: "Install coreutils (sha256sum) on the host, then try again.",
+				Code: "digest_mismatch",
+				Kind: KindFailed,
+			}
 		}
 		f := strings.Fields(line)
 		if len(f) == 2 && p.OS == "" {

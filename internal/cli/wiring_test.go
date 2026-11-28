@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +20,7 @@ import (
 	"github.com/iamlakshya/simstim/internal/brand"
 	"github.com/iamlakshya/simstim/internal/client"
 	"github.com/iamlakshya/simstim/internal/client/clienttest"
+	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/host/hosttest"
 	"github.com/iamlakshya/simstim/internal/testhome"
 )
@@ -431,7 +433,18 @@ func TestMainWarnsInJSON(t *testing.T) {
 // be on without the flag.
 func TestHostAddChecklistNoInputCommand(t *testing.T) {
 	th := newTestHost(t)
-	th.h.Install(client.HelperVersion(), "")
+	dst := th.h.Install(client.HelperVersion(), "")
+	if bin, ok := helpers.For(runtime.GOOS, runtime.GOARCH); runtime.GOOS == "linux" && ok {
+		// With embedded helpers, Probe and Dial check the installed helper's
+		// SHA-256 against the embedded bytes. Unlink the hard-linked test binary
+		// first so we never write through it.
+		if err := os.Remove(dst); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, bin, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	t.Setenv(noInputEnv, "")
 	term, done := inTerminal(t, "host", "add", "added", "box", "--no-input")
 	term.WaitFor("Agents:")

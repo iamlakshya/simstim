@@ -18,7 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "test-install: building a snapshot release"
-goreleaser release --snapshot --clean --skip=publish,sign,sbom >"$work/build.log" 2>&1 ||
+goreleaser release --snapshot --clean --skip=publish,sbom >"$work/build.log" 2>&1 ||
     { cat "$work/build.log" >&2; exit 1; }
 version=$(sed -n 's/.*"version":"\([^"]*\)".*/\1/p' dist/metadata.json)
 

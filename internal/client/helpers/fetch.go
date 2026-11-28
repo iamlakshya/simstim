@@ -40,6 +40,39 @@ func Embedded() bool {
 	return len(names) > 0
 }
 
+// LoadCached loads previously verified helpers from cacheDir into memory
+// without touching the network. It reports whether any host helpers are now
+// available (embedded, already loaded, or loaded from cacheDir).
+func LoadCached(version, cacheDir string) bool {
+	if Embedded() {
+		return true
+	}
+	fetchMu.Lock()
+	defer fetchMu.Unlock()
+	if hasHostHelper(fetched) {
+		return true
+	}
+	if version == "" || cacheDir == "" {
+		return false
+	}
+	dir := filepath.Join(cacheDir, "helpers", version)
+	files, err := readDir(dir)
+	if err != nil || !hasHostHelper(files) {
+		return false
+	}
+	fetched = files
+	return true
+}
+
+func hasHostHelper(files map[string][]byte) bool {
+	for n, b := range files {
+		if strings.HasPrefix(n, "host-") && len(b) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Fetch makes sure the helpers are available. A build that embeds them needs
 // nothing. Otherwise it loads them from the cache, or downloads the release
 // bundle for version from base (a GitHub releases URL, such as

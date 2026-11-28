@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/iamlakshya/simstim/internal/brand"
+	"github.com/iamlakshya/simstim/internal/client/helpers"
 	"github.com/iamlakshya/simstim/internal/proto"
 	"github.com/iamlakshya/simstim/internal/version"
 )
@@ -65,6 +66,9 @@ var ErrNotInstalled = errors.New("the helper is not installed")
 // A host that a provider made is asked for its state first, and started or
 // resumed when it is stopped, unless ctx comes from WithoutWake.
 func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
+	if !helpers.Embedded() {
+		helpers.LoadCached(version.Version, CacheDir())
+	}
 	r, err := routeTo(ctx, h, interactive)
 	if err != nil {
 		return nil, err
@@ -97,13 +101,14 @@ func Dial(ctx context.Context, h Host, interactive bool) (*Conn, error) {
 }
 
 func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
-	remote := RemoteHelper(HelperVersion()) + " bridge"
+	idleExit := 0
 	ka, _ := rt.t.(KeepAliver)
 	if ka != nil {
 		// This transport does not end the bridge when the client goes, so the
 		// bridge ends itself when the pings stop.
-		remote += fmt.Sprintf(" --idle-exit %d", int(BridgeIdleExit.Seconds()))
+		idleExit = int(BridgeIdleExit.Seconds())
 	}
+	remote := bridgeCommand(HelperVersion(), idleExit, helperDigests())
 	// The bridge lives as long as the connection, not as long as this dial:
 	// it keeps ctx's values but not its deadline.
 	proc, err := rt.t.Start(context.WithoutCancel(ctx), remote)
@@ -116,7 +121,6 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 		tr: newConnTrace(ctx)}
 	r := bufio.NewReaderSize(proc.Stdout(), 256<<10)
 	if err := c.w.WriteJSON(proto.THello, proto.Hello{Magic: proto.Magic, Protocol: version.Protocol, Version: version.Version, Role: "client"}); err != nil {
-		c.kill()
 		return nil, c.startError(err)
 	}
 	type res struct {
@@ -131,7 +135,6 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 		return nil, ctx.Err()
 	case x := <-first:
 		if x.err != nil {
-			c.kill()
 			return nil, c.startError(x.err)
 		}
 		if x.f.Type != proto.THello {
@@ -166,8 +169,37 @@ func dial(ctx context.Context, h Host, rt route) (*Conn, error) {
 }
 
 func (c *Conn) startError(err error) error {
-	waitErr := c.proc.Wait()
+	// Close stdin and give a process that already failed (such as the digest
+	// check) a moment to flush stderr before killing it.
+	_ = c.stdin.Close()
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- c.proc.Wait() }()
+	timer := time.NewTimer(250 * time.Millisecond)
+	defer timer.Stop()
+	var waitErr error
+	select {
+	case waitErr = <-waitCh:
+	case <-timer.C:
+		c.kill()
+		waitErr = <-waitCh
+	}
 	raw := strings.TrimSpace(c.proc.Stderr())
+	if strings.Contains(raw, helperDigestMismatchMarker) {
+		return &UserError{
+			Msg:  fmt.Sprintf("the %s helper on %s does not match this client's digest", brand.Name, c.Host.Name),
+			Hint: brand.Name + " host add " + c.Host.Name + " (reinstalls the helper)",
+			Code: "digest_mismatch",
+			Kind: KindFailed,
+		}
+	}
+	if strings.Contains(raw, helperDigestNoToolMarker) {
+		return &UserError{
+			Msg:  fmt.Sprintf("cannot check the %s helper's SHA-256 on %s: neither sha256sum nor shasum is installed", brand.Name, c.Host.Name),
+			Hint: "Install coreutils (sha256sum) on " + c.Host.Name + ", then try again.",
+			Code: "digest_mismatch",
+			Kind: KindFailed,
+		}
+	}
 	if strings.Contains(raw, "No such file") || strings.Contains(raw, "not found") {
 		return ErrNotInstalled
 	}
